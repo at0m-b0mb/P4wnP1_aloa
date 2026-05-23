@@ -111,6 +111,7 @@ installkali:
 	cp build/webapp.js /usr/local/P4wnP1/www
 	cp build/webapp.js.map /usr/local/P4wnP1/www
 	chmod 0755 /usr/local/P4wnP1/scripts/firstboot-secure-defaults.sh
+	-chmod 0755 /usr/local/P4wnP1/scripts/p4wnp1-healthcheck.sh
 
 	# careful testing
 	#sudo update-rc.d dhcpcd disable
@@ -140,6 +141,7 @@ install:
 	cp build/webapp.js /usr/local/P4wnP1/www
 	cp build/webapp.js.map /usr/local/P4wnP1/www
 	chmod 0755 /usr/local/P4wnP1/scripts/firstboot-secure-defaults.sh
+	-chmod 0755 /usr/local/P4wnP1/scripts/p4wnp1-healthcheck.sh
 
 	# careful testing
 	#sudo update-rc.d dhcpcd disable

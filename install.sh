@@ -193,6 +193,7 @@ install -m 0644 "${REPO_ROOT}/build/webapp.js"     /usr/local/P4wnP1/www/
 [[ -f "${REPO_ROOT}/build/webapp.js.map" ]] && \
     install -m 0644 "${REPO_ROOT}/build/webapp.js.map" /usr/local/P4wnP1/www/
 chmod 0755 /usr/local/P4wnP1/scripts/firstboot-secure-defaults.sh
+chmod 0755 /usr/local/P4wnP1/scripts/p4wnp1-healthcheck.sh 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # 4. Write the branding/initial config that the firstboot helper reads
