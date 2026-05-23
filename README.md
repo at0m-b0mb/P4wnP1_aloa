@@ -78,19 +78,32 @@ A first concrete task — typing "Hello world" into a USB-attached host — is w
 
 ## Security checklist
 
-This project was not built with security as a goal. The web client speaks HTTP (no TLS), and **there is no authentication on the gRPC API** — anyone who can reach the AP, the USB ethernet bridge, or the Bluetooth NAP can fully control the device. Treat a running P4wnP1 as effectively unauthenticated until you have done all of the following:
+As of the 2026 hardening pass, the gRPC API **does** have authentication. Every gRPC and HTTP request requires a bearer token; without one, the server returns gRPC `Unauthenticated` / HTTP 401. The web client speaks HTTP (no TLS yet) so credentials travel in cleartext on the local network — restrict your AP reachability accordingly.
+
+Apply this checklist before deploying:
 
 - [x] **Automated on first boot** by `p4wnp1-firstboot.service`:
     - Root SSH password rotated to a random 20-char secret.
     - SSH host keys regenerated per device.
-    - Credentials written to `/root/INITIAL_CREDENTIALS.txt` (mode 0600) and to `journalctl -t p4wnp1-firstboot`.
+    - Web client admin account bootstrapped with a random 20-char password, bcrypt-hashed into `/etc/p4wnp1/auth.json` (mode 0600).
+    - All credentials written to `/root/INITIAL_CREDENTIALS.txt` (mode 0600) and surfaced in `journalctl -t p4wnp1-firstboot`.
 - [ ] Change the WiFi AP PSK (web client → *WiFi* → *Settings* → save as new template).
 - [ ] Change the Bluetooth PIN, or disable Bluetooth entirely if unused.
-- [ ] If exposing the web client outside a trusted network, restrict access with `iptables` / `nftables`.
-- [ ] Disable any USB function (mass storage, ECM, RNDIS) you don't actually need — each one is an attack surface.
-- [ ] After you've copied the SSH password to a password manager, shred the file: `shred -u /root/INITIAL_CREDENTIALS.txt`.
+- [ ] Change the admin password from its first-boot random via web UI → Settings → Change Password (or `POST /api/auth/changepw`).
+- [ ] If exposing the web client outside a trusted network, restrict access with `iptables` / `nftables` and consider an HTTPS reverse proxy in front (TLS is a roadmap item).
+- [ ] Disable any USB function (mass storage, ECM, RNDIS) you don't actually need.
+- [ ] After you've copied initial credentials to a password manager, shred the file: `shred -u /root/INITIAL_CREDENTIALS.txt`.
 
-Adding proper auth (login screen + gRPC interceptors) is on the roadmap but not yet implemented. PRs welcome.
+### Authentication architecture (short version)
+
+- **Password storage:** bcrypt (cost 12) in `/etc/p4wnp1/auth.json`, mode 0600.
+- **Tokens:** opaque 32-byte random, base64url-encoded. In-memory session map only — service restart logs everyone out.
+- **TTL:** 24 hours, sliding window (each successful auth refreshes expiry).
+- **gRPC:** `Authorization: bearer <token>` in metadata. Unary + stream interceptors reject anything without one.
+- **HTTP:** `Authorization: Bearer <token>` header. Routes under `/api/auth/` (login, logout, whoami, changepw, health) are public; everything else needs a token.
+- **CLI:** see [INSTALL.md → CLI authentication](INSTALL.md#cli-authentication) for the workaround until a `P4wnP1_cli login` subcommand lands.
+
+Full architecture diagram in [service/auth/auth.go](service/auth/auth.go).
 
 ---
 

@@ -2,6 +2,25 @@
 
 ## unreleased
 
+- **Auth (M1+M2): gRPC API is no longer wide-open.** New `service/auth/`
+  package introduces a real authentication layer:
+    - bcrypt (cost 12) password storage in `/etc/p4wnp1/auth.json` (mode 0600);
+    - opaque 32-byte random tokens with a 24-hour sliding-window TTL;
+    - unary + stream gRPC interceptors that reject every RPC without a
+      valid `Authorization: bearer <token>` metadata;
+    - HTTP endpoints under `/api/auth/` for login / logout / whoami /
+      changepw / health (these are the only public surface).
+  Closes [KNOWN_ISSUES.md](KNOWN_ISSUES.md) item #6.
+- **First-boot bootstrap of admin account.** The first-boot helper now
+  generates a random 20-char admin password, bcrypt-hashes it via the new
+  `p4wnp1-hashpw` binary, writes it to `/etc/p4wnp1/auth.json`, and surfaces
+  the plaintext in `/root/INITIAL_CREDENTIALS.txt`. After bootstrap, the
+  helper restarts `P4wnP1.service` so the running service picks up the new
+  auth file (the service starts early in boot, before firstboot runs).
+- **New binary `p4wnp1-hashpw`** at [cmd/p4wnp1-hashpw](cmd/p4wnp1-hashpw/main.go)
+  for offline bcrypt + auth file management. Used by the firstboot helper
+  and available for emergency password reset over SSH.
+- **`golang.org/x/crypto`** added to go.mod (bcrypt).
 - **Deprecation pass:** `io/ioutil` was deprecated in Go 1.16. Replaced
   `ioutil.ReadFile`, `ioutil.WriteFile`, `ioutil.TempDir`, `ioutil.TempFile`,
   and `ioutil.ReadAll` with their `os` / `io` equivalents across 13 files

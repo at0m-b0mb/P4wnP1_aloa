@@ -89,7 +89,13 @@ Defaults: SSID `HackProKP`, PSK randomly generated and saved in the credentials 
 
 ### A.4 First boot
 
-On the next boot, `p4wnp1-firstboot.service` rotates the SSH root password to a random 20-char secret and regenerates SSH host keys. Connect to your new AP and read the credentials:
+On the next boot, `p4wnp1-firstboot.service` does three things:
+
+1. Rotates the **SSH root password** to a random 20-char secret and regenerates SSH host keys.
+2. **Bootstraps the web UI admin account** — generates a random 20-char password, runs it through `p4wnp1-hashpw` to produce a bcrypt hash, and writes it to `/etc/p4wnp1/auth.json` (mode 0600). Without this file the P4wnP1 service rejects every gRPC/HTTP request with HTTP 401, so this step is mandatory.
+3. Writes both plaintext passwords to `/root/INITIAL_CREDENTIALS.txt` (mode 0600) alongside the SSH host fingerprints and the WiFi SSID/PSK chosen at install time.
+
+Connect to your new AP and read the credentials:
 
 ```sh
 # Connect to WiFi SSID "HackProKP" (or whatever you chose) with the PSK
@@ -97,7 +103,18 @@ ssh root@172.24.0.1     # use the random root password just generated
 cat /root/INITIAL_CREDENTIALS.txt
 ```
 
-Inside `INITIAL_CREDENTIALS.txt` you'll find: the rotated SSH password, the SSH host fingerprints, and the WiFi SSID/PSK chosen at install time.
+`INITIAL_CREDENTIALS.txt` contains, in order:
+
+- SSH root password + SSH host fingerprints
+- Web client admin username (`admin`) + password
+- WiFi SSID + PSK
+- Bluetooth PIN (still on shared default — change in the web UI)
+
+Once you've stored everything in a password manager, shred the file:
+
+```sh
+shred -u /root/INITIAL_CREDENTIALS.txt
+```
 
 Continue to [First boot](#first-boot) for what to do next.
 
@@ -294,8 +311,23 @@ After flashing and powering the Pi on, give it ~30 seconds. You should see:
 
 ### Access
 
-- **Web client:** `http://<P4wnP1-IP>:8000` in any modern browser.
-- **CLI over SSH:** `ssh root@<P4wnP1-IP>` — default password `toor`. Then run `P4wnP1_cli`.
+- **Web client:** `http://<P4wnP1-IP>:8000` in any modern browser. Log in with `admin` + the password from `INITIAL_CREDENTIALS.txt`. All gRPC and HTTP calls require a valid bearer token — there is no anonymous access.
+- **CLI over SSH:** `ssh root@<P4wnP1-IP>` — password from `INITIAL_CREDENTIALS.txt`. The CLI also needs a token to talk to the gRPC API; see *CLI authentication* below.
+
+### CLI authentication
+
+Once auth is enabled (Path A), `P4wnP1_cli` calls need an `Authorization: Bearer <token>` header. The CLI doesn't yet have a built-in `login` subcommand — that's slated for the next milestone. As a workaround, get a token via the HTTP endpoint and pass it via the gRPC metadata flag (if your CLI version supports it), or run the CLI on the Pi itself which can still hit the local listener with a manually-obtained token:
+
+```sh
+# Get a token (run from the Pi or from any client that can reach :8000)
+TOKEN=$(curl -s -X POST http://172.24.0.1:8000/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"<your-password>"}' | jq -r .token)
+echo "$TOKEN"
+
+# Check it works
+curl -s http://172.24.0.1:8000/api/auth/whoami -H "Authorization: Bearer $TOKEN"
+```
 
 ### Change default credentials immediately
 

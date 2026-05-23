@@ -40,11 +40,18 @@ Severity legend:
 - **Was:** Direct `os.Stat(req.Path)` with no allowlist — full filesystem enumeration.
 - **Fix applied:** Path now restricted to `common.PATH_ROOT` (`/usr/local/P4wnP1/...`) or `/tmp` via `safePathInAllowlist`. Same residual risk as #1.
 
-### 🟠 5. No TLS on web client; cookies in cleartext (once auth lands)
+### 🟠 5. No TLS on web client; tokens in cleartext
 
-- **Where:** [service/rpc_server.go:1037](service/rpc_server.go#L1037)
-- **What:** The web client is served over plain HTTP on port 8000. Once auth tokens exist, they ride in cleartext over a WPA2-PSK-protected (or fully open Bluetooth) network.
-- **Fix:** Generate a self-signed cert on first boot and serve gRPC-web over HTTPS. Trade-off: cert pinning + manual fingerprint verification on first connect, since CA-signed certs aren't realistic on a device with no DNS name.
+- **Where:** [service/rpc_server.go](service/rpc_server.go) HTTP listener at `:8000`.
+- **What:** The web client is served over plain HTTP. With auth now in place, bearer tokens ride in cleartext over the (WPA2-PSK-protected, or fully open Bluetooth) network.
+- **Mitigation today:** WPA2 PSK is the only confidentiality barrier; only trust this on a network you control.
+- **Fix:** Generate a self-signed cert on first boot and serve gRPC-web over HTTPS. Trade-off: cert pinning + manual fingerprint verification on first connect, since CA-signed certs aren't realistic on a device with no DNS name. Tracked for a later milestone.
+
+### ✅ 6. gRPC API was completely unauthenticated — **fixed**
+
+- **Was:** anyone reaching the AP, USB ethernet bridge, or Bluetooth NAP could control the device via gRPC without credentials.
+- **Fix applied (Milestone 1):** new `service/auth/` package with bcrypt password store, opaque tokens, in-memory session map, unary + stream gRPC interceptors. Every RPC requires `Authorization: bearer <token>` metadata; everything else returns `codes.Unauthenticated`. HTTP routes under `/api/auth/` are the only public surface. First-boot helper bootstraps an `admin` account with a random 20-char password.
+- **Residual work:** CLI client doesn't yet have a `login` subcommand (Milestone 3); Vue 3 SPA with login screen still to come (Milestones 4-8). Until then, CLI users obtain a token by curling `/api/auth/login`.
 
 ---
 
