@@ -1,0 +1,23 @@
+# macOS junk
+.DS_Store
+
+# Build artefacts -- service/CLI are committed (for ease of install) but
+# locally-rebuilt binaries shouldn't dirty the tree. Comment these out if
+# you want every rebuild to show up in git status.
+# build/P4wnP1_service
+# build/P4wnP1_cli
+# build/webapp.js
+# build/webapp.js.map
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Local credentials & test artefacts
+/etc/p4wnp1/
+INITIAL_CREDENTIALS.txt
+
+# Go cache
+vendor/

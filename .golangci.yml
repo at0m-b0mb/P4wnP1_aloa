@@ -1,0 +1,45 @@
+# golangci-lint config for P4wnP1 A.L.O.A.
+#
+# Conservative starting set -- the codebase is ~7 years old, predates Go modules,
+# and was last linted against Go 1.13 conventions. Turning everything on at once
+# would surface thousands of findings. Start narrow, expand as fixes land.
+
+run:
+  timeout: 5m
+  # The web_client/ package is GopherJS-tagged and won't compile under normal
+  # `go build`, which confuses some linters. Skip it for now.
+  skip-dirs:
+    - web_client
+    - common_web
+
+linters:
+  disable-all: true
+  enable:
+    - gofmt
+    - govet
+    - ineffassign
+    - misspell
+    - unconvert
+    - unused
+
+linters-settings:
+  gofmt:
+    simplify: true
+  govet:
+    enable:
+      - shadow
+
+issues:
+  exclude-use-default: false
+  # Generated protobuf files are noisy and out of our control.
+  exclude-rules:
+    - path: \.pb\.go$
+      linters:
+        - gofmt
+        - govet
+        - unused
+    - path: proto/
+      linters:
+        - gofmt
+        - govet
+        - unused
