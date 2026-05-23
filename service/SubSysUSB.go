@@ -382,35 +382,35 @@ func (gm *UsbGadgetManager) ParseGadgetState(gadgetName string) (result *pb.Gadg
 
 	//ToDo: check if enabled (UDC in functionfs is set to content of /sys/class/udc)
 
-	if res, err := ioutil.ReadFile(gadgetDir + "/idVendor"); err != nil {
+	if res, err := os.ReadFile(gadgetDir + "/idVendor"); err != nil {
 		err1 := errors.New(fmt.Sprintf("gadget %s error reading Vid", gadgetName))
 		return nil, err1
 	} else {
 		result.Vid = strings.TrimSuffix(string(res), "\n")
 	}
 
-	if res, err := ioutil.ReadFile(gadgetDir + "/idProduct"); err != nil {
+	if res, err := os.ReadFile(gadgetDir + "/idProduct"); err != nil {
 		err1 := errors.New(fmt.Sprintf("gadget %s error reading Pid", gadgetName))
 		return nil, err1
 	} else {
 		result.Pid = strings.TrimSuffix(string(res), "\n")
 	}
 
-	if res, err := ioutil.ReadFile(gadgetDir + "/strings/0x409/serialnumber"); err != nil {
+	if res, err := os.ReadFile(gadgetDir + "/strings/0x409/serialnumber"); err != nil {
 		err1 := errors.New(fmt.Sprintf("gadget %s error reading Serial", gadgetName))
 		return nil, err1
 	} else {
 		result.Serial = strings.TrimSuffix(string(res), "\n")
 	}
 
-	if res, err := ioutil.ReadFile(gadgetDir + "/strings/0x409/manufacturer"); err != nil {
+	if res, err := os.ReadFile(gadgetDir + "/strings/0x409/manufacturer"); err != nil {
 		err1 := errors.New(fmt.Sprintf("gadget %s error reading Manufacturer", gadgetName))
 		return nil, err1
 	} else {
 		result.Manufacturer = strings.TrimSuffix(string(res), "\n")
 	}
 
-	if res, err := ioutil.ReadFile(gadgetDir + "/strings/0x409/product"); err != nil {
+	if res, err := os.ReadFile(gadgetDir + "/strings/0x409/product"); err != nil {
 		err1 := errors.New(fmt.Sprintf("gadget %s error reading Product", gadgetName))
 		return nil, err1
 	} else {
@@ -425,14 +425,14 @@ func (gm *UsbGadgetManager) ParseGadgetState(gadgetName string) (result *pb.Gadg
 
 		result.RndisSettings = &pb.GadgetSettingsEthernet{}
 
-		if res, err := ioutil.ReadFile(gadgetDir + "/functions/rndis.usb0/host_addr"); err != nil {
+		if res, err := os.ReadFile(gadgetDir + "/functions/rndis.usb0/host_addr"); err != nil {
 			err1 := errors.New(fmt.Sprintf("gadget %s error reading RNDIS host_addr", gadgetName))
 			return nil, err1
 		} else {
 			result.RndisSettings.HostAddr = strings.TrimSuffix(string(res), "\000\n")
 		}
 
-		if res, err := ioutil.ReadFile(gadgetDir + "/functions/rndis.usb0/dev_addr"); err != nil {
+		if res, err := os.ReadFile(gadgetDir + "/functions/rndis.usb0/dev_addr"); err != nil {
 			err1 := errors.New(fmt.Sprintf("gadget %s error reading RNDIS dev_addr", gadgetName))
 			return nil, err1
 		} else {
@@ -452,14 +452,14 @@ func (gm *UsbGadgetManager) ParseGadgetState(gadgetName string) (result *pb.Gadg
 
 		result.CdcEcmSettings = &pb.GadgetSettingsEthernet{}
 
-		if res, err := ioutil.ReadFile(gadgetDir + "/functions/ecm.usb1/host_addr"); err != nil {
+		if res, err := os.ReadFile(gadgetDir + "/functions/ecm.usb1/host_addr"); err != nil {
 			err1 := errors.New(fmt.Sprintf("gadget %s error reading CDC ECM host_addr", gadgetName))
 			return nil, err1
 		} else {
 			result.CdcEcmSettings.HostAddr = strings.TrimSuffix(string(res), "\000\n")
 		}
 
-		if res, err := ioutil.ReadFile(gadgetDir + "/functions/ecm.usb1/dev_addr"); err != nil {
+		if res, err := os.ReadFile(gadgetDir + "/functions/ecm.usb1/dev_addr"); err != nil {
 			err1 := errors.New(fmt.Sprintf("gadget %s error reading CDC ECM dev_addr", gadgetName))
 			return nil, err1
 		} else {
@@ -500,7 +500,7 @@ func (gm *UsbGadgetManager) ParseGadgetState(gadgetName string) (result *pb.Gadg
 		result.UmsSettings = &pb.GadgetSettingsUMS{}
 
 		//Check if running as CD-Rom
-		if res, err := ioutil.ReadFile(gadgetDir + "/functions/mass_storage.ms1/lun.0/cdrom"); err != nil {
+		if res, err := os.ReadFile(gadgetDir + "/functions/mass_storage.ms1/lun.0/cdrom"); err != nil {
 			err1 := errors.New(fmt.Sprintf("gadget %s error reading USB Mass Storage cdrom emulation state", gadgetName))
 			return nil, err1
 		} else {
@@ -510,7 +510,7 @@ func (gm *UsbGadgetManager) ParseGadgetState(gadgetName string) (result *pb.Gadg
 		}
 
 		//Check name of backing file
-		if res, err := ioutil.ReadFile(gadgetDir + "/functions/mass_storage.ms1/lun.0/file"); err != nil {
+		if res, err := os.ReadFile(gadgetDir + "/functions/mass_storage.ms1/lun.0/file"); err != nil {
 			err1 := errors.New(fmt.Sprintf("gadget %s error reading USB Mass Storage image file setting", gadgetName))
 			return nil, err1
 		} else {
@@ -526,7 +526,7 @@ func (gm *UsbGadgetManager) ParseGadgetState(gadgetName string) (result *pb.Gadg
 	//check if UDC is set (Gadget enabled)
 	udcName, _ := getUDCName()
 
-	if res, err := ioutil.ReadFile(gadgetDir + "/UDC"); err != nil {
+	if res, err := os.ReadFile(gadgetDir + "/UDC"); err != nil {
 		err1 := errors.New(fmt.Sprintf("gadget %s error reading UDC", gadgetName))
 		return nil, err1
 	} else {
@@ -545,7 +545,7 @@ func (gm *UsbGadgetManager) ParseGadgetState(gadgetName string) (result *pb.Gadg
 // to the GadgetSettingsState
 func MountUMSFile(filename string) error {
 	funcdir := USB_GADGET_DIR + "/functions/mass_storage.ms1"
-	err := ioutil.WriteFile(funcdir+"/lun.0/file", []byte(filename), os.ModePerm)
+	err := os.WriteFile(funcdir+"/lun.0/file", []byte(filename), os.ModePerm)
 	if err != nil {
 		return errors.New(fmt.Sprintf("settings backing file for USB Mass Storage failed: %v", err))
 	}
@@ -594,37 +594,37 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 	log.Printf("Creating composite gadget '%s'\nSettings:\n%+v", USB_GADGET_NAME, settings)
 
 	//set vendor ID, product ID
-	ioutil.WriteFile(USB_GADGET_DIR+"/idVendor", []byte(settings.Vid), os.ModePerm)
-	ioutil.WriteFile(USB_GADGET_DIR+"/idProduct", []byte(settings.Pid), os.ModePerm)
+	os.WriteFile(USB_GADGET_DIR+"/idVendor", []byte(settings.Vid), os.ModePerm)
+	os.WriteFile(USB_GADGET_DIR+"/idProduct", []byte(settings.Pid), os.ModePerm)
 
 	//set USB mode to 2.0 and device version to 1.0
-	ioutil.WriteFile(USB_GADGET_DIR+"/bcdUSB", []byte(USB_bcdUSB), os.ModePerm)
-	ioutil.WriteFile(USB_GADGET_DIR+"/bcdDevice", []byte(USB_bcdDevice), os.ModePerm)
+	os.WriteFile(USB_GADGET_DIR+"/bcdUSB", []byte(USB_bcdUSB), os.ModePerm)
+	os.WriteFile(USB_GADGET_DIR+"/bcdDevice", []byte(USB_bcdDevice), os.ModePerm)
 
 	//composite class / subclass / proto (needs single configuration)
-	ioutil.WriteFile(USB_GADGET_DIR+"/bDeviceClass", []byte(USB_bDeviceClass), os.ModePerm)
-	ioutil.WriteFile(USB_GADGET_DIR+"/bDeviceSubClass", []byte(USB_bDeviceSubClass), os.ModePerm)
-	ioutil.WriteFile(USB_GADGET_DIR+"/bDeviceProtocol", []byte(USB_bDeviceProtocol), os.ModePerm)
+	os.WriteFile(USB_GADGET_DIR+"/bDeviceClass", []byte(USB_bDeviceClass), os.ModePerm)
+	os.WriteFile(USB_GADGET_DIR+"/bDeviceSubClass", []byte(USB_bDeviceSubClass), os.ModePerm)
+	os.WriteFile(USB_GADGET_DIR+"/bDeviceProtocol", []byte(USB_bDeviceProtocol), os.ModePerm)
 
 	// set device descriptions
 	os.Mkdir(USB_GADGET_DIR+"/strings/0x409", os.ModePerm) // English language strings
-	ioutil.WriteFile(USB_GADGET_DIR+"/strings/0x409/serialnumber", []byte(settings.Serial), os.ModePerm)
-	ioutil.WriteFile(USB_GADGET_DIR+"/strings/0x409/manufacturer", []byte(settings.Manufacturer), os.ModePerm)
-	ioutil.WriteFile(USB_GADGET_DIR+"/strings/0x409/product", []byte(settings.Product), os.ModePerm)
+	os.WriteFile(USB_GADGET_DIR+"/strings/0x409/serialnumber", []byte(settings.Serial), os.ModePerm)
+	os.WriteFile(USB_GADGET_DIR+"/strings/0x409/manufacturer", []byte(settings.Manufacturer), os.ModePerm)
+	os.WriteFile(USB_GADGET_DIR+"/strings/0x409/product", []byte(settings.Product), os.ModePerm)
 
 	// create configuration instance (only one, as multiple configs aren't valid for Windows composite devices)
 	os.MkdirAll(USB_GADGET_DIR+"/configs/c.1/strings/0x409", os.ModePerm) // English language strings
-	ioutil.WriteFile(USB_GADGET_DIR+"/configs/c.1/strings/0x409/configuration", []byte("Config 1: Composite"), os.ModePerm)
-	ioutil.WriteFile(USB_GADGET_DIR+"/configs/c.1/MaxPower", []byte(USB_CONFIGURATION_MaxPower), os.ModePerm)
-	ioutil.WriteFile(USB_GADGET_DIR+"/configs/c.1/bmAttributes", []byte(USB_CONFIGURATION_bmAttributes), os.ModePerm)
+	os.WriteFile(USB_GADGET_DIR+"/configs/c.1/strings/0x409/configuration", []byte("Config 1: Composite"), os.ModePerm)
+	os.WriteFile(USB_GADGET_DIR+"/configs/c.1/MaxPower", []byte(USB_CONFIGURATION_MaxPower), os.ModePerm)
+	os.WriteFile(USB_GADGET_DIR+"/configs/c.1/bmAttributes", []byte(USB_CONFIGURATION_bmAttributes), os.ModePerm)
 
 	// RNDIS has to be the first interface on Composite device for Windows (first function initialized)
 	if settings.Use_RNDIS {
 		log.Printf("... creating USB RNDIS function")
 		usesUSBEthernet = true
 		os.Mkdir(USB_GADGET_DIR+"/functions/rndis.usb0", os.ModePerm) //create RNDIS function
-		ioutil.WriteFile(USB_GADGET_DIR+"/functions/rndis.usb0/host_addr", []byte(settings.RndisSettings.HostAddr), os.ModePerm)
-		ioutil.WriteFile(USB_GADGET_DIR+"/functions/rndis.usb0/dev_addr", []byte(settings.RndisSettings.DevAddr), os.ModePerm)
+		os.WriteFile(USB_GADGET_DIR+"/functions/rndis.usb0/host_addr", []byte(settings.RndisSettings.HostAddr), os.ModePerm)
+		os.WriteFile(USB_GADGET_DIR+"/functions/rndis.usb0/dev_addr", []byte(settings.RndisSettings.DevAddr), os.ModePerm)
 
 		/*
 			add OS specific device descriptors to force Windows to load RNDIS drivers
@@ -644,11 +644,11 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 		*/
 
 		//set OS descriptors for Windows
-		ioutil.WriteFile(USB_GADGET_DIR+"/os_desc/use", []byte(USB_FUNCTION_RNDIS_os_desc_use), os.ModePerm)
-		ioutil.WriteFile(USB_GADGET_DIR+"/os_desc/b_vendor_code", []byte(USB_FUNCTION_RNDIS_os_desc_b_vendor_code), os.ModePerm)
-		ioutil.WriteFile(USB_GADGET_DIR+"/os_desc/qw_sign", []byte(USB_FUNCTION_RNDIS_os_desc_qw_sign), os.ModePerm)
-		ioutil.WriteFile(USB_GADGET_DIR+"/functions/rndis.usb0/os_desc/interface.rndis/compatible_id", []byte(USB_FUNCTION_RNDIS_os_desc_interface_compatible_id), os.ModePerm)
-		ioutil.WriteFile(USB_GADGET_DIR+"/functions/rndis.usb0/os_desc/interface.rndis/sub_compatible_id", []byte(USB_FUNCTION_RNDIS_os_desc_interface_sub_compatible_id), os.ModePerm)
+		os.WriteFile(USB_GADGET_DIR+"/os_desc/use", []byte(USB_FUNCTION_RNDIS_os_desc_use), os.ModePerm)
+		os.WriteFile(USB_GADGET_DIR+"/os_desc/b_vendor_code", []byte(USB_FUNCTION_RNDIS_os_desc_b_vendor_code), os.ModePerm)
+		os.WriteFile(USB_GADGET_DIR+"/os_desc/qw_sign", []byte(USB_FUNCTION_RNDIS_os_desc_qw_sign), os.ModePerm)
+		os.WriteFile(USB_GADGET_DIR+"/functions/rndis.usb0/os_desc/interface.rndis/compatible_id", []byte(USB_FUNCTION_RNDIS_os_desc_interface_compatible_id), os.ModePerm)
+		os.WriteFile(USB_GADGET_DIR+"/functions/rndis.usb0/os_desc/interface.rndis/sub_compatible_id", []byte(USB_FUNCTION_RNDIS_os_desc_interface_sub_compatible_id), os.ModePerm)
 
 		//activate function by symlinking to config 1
 		err := os.Symlink(USB_GADGET_DIR+"/functions/rndis.usb0", USB_GADGET_DIR+"/configs/c.1/rndis.usb0")
@@ -667,8 +667,8 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 		log.Printf("... creating USB CDC ECM function")
 		usesUSBEthernet = true
 		os.Mkdir(USB_GADGET_DIR+"/functions/ecm.usb1", os.ModePerm) //create CDC ECM function
-		ioutil.WriteFile(USB_GADGET_DIR+"/functions/ecm.usb1/host_addr", []byte(settings.CdcEcmSettings.HostAddr), os.ModePerm)
-		ioutil.WriteFile(USB_GADGET_DIR+"/functions/ecm.usb1/dev_addr", []byte(settings.CdcEcmSettings.DevAddr), os.ModePerm)
+		os.WriteFile(USB_GADGET_DIR+"/functions/ecm.usb1/host_addr", []byte(settings.CdcEcmSettings.HostAddr), os.ModePerm)
+		os.WriteFile(USB_GADGET_DIR+"/functions/ecm.usb1/dev_addr", []byte(settings.CdcEcmSettings.DevAddr), os.ModePerm)
 
 		//activate function by symlinking to config 1
 		err := os.Symlink(USB_GADGET_DIR+"/functions/ecm.usb1", USB_GADGET_DIR+"/configs/c.1/ecm.usb1")
@@ -694,10 +694,10 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 		funcdir := USB_GADGET_DIR + "/functions/" + USB_FUNCTION_HID_KEYBOARD_name
 		os.Mkdir(funcdir, os.ModePerm) //create HID function for keyboard
 
-		ioutil.WriteFile(funcdir+"/protocol", []byte(USB_FUNCTION_HID_KEYBOARD_protocol), os.ModePerm)
-		ioutil.WriteFile(funcdir+"/subclass", []byte(USB_FUNCTION_HID_KEYBOARD_subclass), os.ModePerm)
-		ioutil.WriteFile(funcdir+"/report_length", []byte(USB_FUNCTION_HID_KEYBOARD_report_length), os.ModePerm)
-		ioutil.WriteFile(funcdir+"/report_desc", []byte(USB_FUNCTION_HID_KEYBOARD_report_desc), os.ModePerm)
+		os.WriteFile(funcdir+"/protocol", []byte(USB_FUNCTION_HID_KEYBOARD_protocol), os.ModePerm)
+		os.WriteFile(funcdir+"/subclass", []byte(USB_FUNCTION_HID_KEYBOARD_subclass), os.ModePerm)
+		os.WriteFile(funcdir+"/report_length", []byte(USB_FUNCTION_HID_KEYBOARD_report_length), os.ModePerm)
+		os.WriteFile(funcdir+"/report_desc", []byte(USB_FUNCTION_HID_KEYBOARD_report_desc), os.ModePerm)
 
 		err := os.Symlink(funcdir, USB_GADGET_DIR+"/configs/c.1/"+USB_FUNCTION_HID_KEYBOARD_name)
 		if err != nil {
@@ -710,10 +710,10 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 		funcdir := USB_GADGET_DIR + "/functions/" + USB_FUNCTION_HID_MOUSE_name
 		os.Mkdir(funcdir, os.ModePerm) //create HID function for mouse
 
-		ioutil.WriteFile(funcdir+"/protocol", []byte(USB_FUNCTION_HID_MOUSE_protocol), os.ModePerm)
-		ioutil.WriteFile(funcdir+"/subclass", []byte(USB_FUNCTION_HID_MOUSE_subclass), os.ModePerm)
-		ioutil.WriteFile(funcdir+"/report_length", []byte(USB_FUNCTION_HID_MOUSE_report_length), os.ModePerm)
-		ioutil.WriteFile(funcdir+"/report_desc", []byte(USB_FUNCTION_HID_MOUSE_report_desc), os.ModePerm)
+		os.WriteFile(funcdir+"/protocol", []byte(USB_FUNCTION_HID_MOUSE_protocol), os.ModePerm)
+		os.WriteFile(funcdir+"/subclass", []byte(USB_FUNCTION_HID_MOUSE_subclass), os.ModePerm)
+		os.WriteFile(funcdir+"/report_length", []byte(USB_FUNCTION_HID_MOUSE_report_length), os.ModePerm)
+		os.WriteFile(funcdir+"/report_desc", []byte(USB_FUNCTION_HID_MOUSE_report_desc), os.ModePerm)
 
 		err := os.Symlink(funcdir, USB_GADGET_DIR+"/configs/c.1/"+USB_FUNCTION_HID_MOUSE_name)
 		if err != nil {
@@ -726,10 +726,10 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 		funcdir := USB_GADGET_DIR + "/functions/" + USB_FUNCTION_HID_RAW_name
 		os.Mkdir(funcdir, os.ModePerm) //create HID function for mouse
 
-		ioutil.WriteFile(funcdir+"/protocol", []byte(USB_FUNCTION_HID_RAW_protocol), os.ModePerm)
-		ioutil.WriteFile(funcdir+"/subclass", []byte(USB_FUNCTION_HID_RAW_subclass), os.ModePerm)
-		ioutil.WriteFile(funcdir+"/report_length", []byte(USB_FUNCTION_HID_RAW_report_length), os.ModePerm)
-		ioutil.WriteFile(funcdir+"/report_desc", []byte(USB_FUNCTION_HID_RAW_report_desc), os.ModePerm)
+		os.WriteFile(funcdir+"/protocol", []byte(USB_FUNCTION_HID_RAW_protocol), os.ModePerm)
+		os.WriteFile(funcdir+"/subclass", []byte(USB_FUNCTION_HID_RAW_subclass), os.ModePerm)
+		os.WriteFile(funcdir+"/report_length", []byte(USB_FUNCTION_HID_RAW_report_length), os.ModePerm)
+		os.WriteFile(funcdir+"/report_desc", []byte(USB_FUNCTION_HID_RAW_report_desc), os.ModePerm)
 
 		err := os.Symlink(funcdir, USB_GADGET_DIR+"/configs/c.1/"+USB_FUNCTION_HID_RAW_name)
 		if err != nil {
@@ -742,18 +742,18 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 		funcdir := USB_GADGET_DIR + "/functions/mass_storage.ms1"
 		os.Mkdir(funcdir, os.ModePerm) //create HID function for mouse
 
-		ioutil.WriteFile(funcdir+"/stall", []byte("1"), os.ModePerm) // Allow bulk Endpoints
+		os.WriteFile(funcdir+"/stall", []byte("1"), os.ModePerm) // Allow bulk Endpoints
 		if settings.UmsSettings.Cdrom {
-			ioutil.WriteFile(funcdir+"/lun.0/cdrom", []byte("1"), os.ModePerm) // CD-Rom
+			os.WriteFile(funcdir+"/lun.0/cdrom", []byte("1"), os.ModePerm) // CD-Rom
 		} else {
-			ioutil.WriteFile(funcdir+"/lun.0/cdrom", []byte("0"), os.ModePerm) // Writable flashdrive
+			os.WriteFile(funcdir+"/lun.0/cdrom", []byte("0"), os.ModePerm) // Writable flashdrive
 		}
 
-		ioutil.WriteFile(funcdir+"/lun.0/ro", []byte("0"), os.ModePerm) // Don't restrict to read-only (is implied by cdrom=1 if needed, but causes issues on backend FS if enabled)
+		os.WriteFile(funcdir+"/lun.0/ro", []byte("0"), os.ModePerm) // Don't restrict to read-only (is implied by cdrom=1 if needed, but causes issues on backend FS if enabled)
 
 		// enable Force Unit Access (FUA) to make Windows write synchronously
 		// this is slow, but unplugging the stick without unmounting works
-		ioutil.WriteFile(funcdir+"/lun.0/nofua", []byte("0"), os.ModePerm) // Don't restrict to read-only (is implied by cdrom=1 if needed, but causes issues on backend FS if enabled)
+		os.WriteFile(funcdir+"/lun.0/nofua", []byte("0"), os.ModePerm) // Don't restrict to read-only (is implied by cdrom=1 if needed, but causes issues on backend FS if enabled)
 
 		//Provide the backing image
 		file := settings.UmsSettings.File
@@ -762,7 +762,7 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 		} else {
 			file = common.PATH_IMAGE_FLASHDRIVE + "/" + file
 		}
-		ioutil.WriteFile(funcdir+"/lun.0/file", []byte(file), os.ModePerm) // Set backing file (or block device) for USB Mass Storage
+		os.WriteFile(funcdir+"/lun.0/file", []byte(file), os.ModePerm) // Set backing file (or block device) for USB Mass Storage
 
 		err := os.Symlink(funcdir, USB_GADGET_DIR+"/configs/c.1/"+"mass_storage.ms1")
 		if err != nil {
@@ -782,7 +782,7 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 			return err
 		}
 		log.Printf("Enabeling gadget for UDC: %s\n", udcName)
-		if err = ioutil.WriteFile(USB_GADGET_DIR+"/UDC", []byte(udcName), os.ModePerm); err != nil {
+		if err = os.WriteFile(USB_GADGET_DIR+"/UDC", []byte(udcName), os.ModePerm); err != nil {
 			fmt.Println("... error enabling gadget:", err)
 			return err
 		}
@@ -847,7 +847,7 @@ func enumDevicePath(funcName string) (devPath string, err error){
 	devfile := USB_GADGET_DIR + "/functions/" + funcName + "/dev"
 
 	var udevNode string
-	if res, err := ioutil.ReadFile(devfile); err != nil {
+	if res, err := os.ReadFile(devfile); err != nil {
 		err1 := errors.New(fmt.Sprintf("Gadget error reading udevname for %s\n", funcName))
 		return "", err1
 	} else {
@@ -856,7 +856,7 @@ func enumDevicePath(funcName string) (devPath string, err error){
 
 
 	ueventPath := fmt.Sprintf("/sys/dev/char/%s/uevent", udevNode)
-	if ueventContent, err := ioutil.ReadFile(ueventPath); err != nil {
+	if ueventContent, err := os.ReadFile(ueventPath); err != nil {
 		err1 := errors.New(fmt.Sprintf("Gadget error reading uevent file '%s' for %s\n", ueventPath, funcName))
 		return "", err1
 	} else {
@@ -913,7 +913,7 @@ func (gm *UsbGadgetManager) DestroyGadget(gadgetName string) error {
 	log.Println("Deconstructing gadget " + gadgetName + "...")
 
 	//Assure gadget gets unbound from UDC
-	ioutil.WriteFile(gadgetDir+"/UDC", []byte("\x00"), os.ModePerm)
+	os.WriteFile(gadgetDir+"/UDC", []byte("\x00"), os.ModePerm)
 
 	//Iterate over configurations
 	configDirs, _ := ioutil.ReadDir(gadgetDir + "/configs")

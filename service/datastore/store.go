@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/options"
-	"io/ioutil"
 	"os"
 	"strings"
 )
@@ -118,7 +117,7 @@ func (s *Store) Restore(filePath string, replace bool) (err error) {
 
 		//create temp db
 		fmt.Println("... create temp DB")
-		tmpDbDir, err := ioutil.TempDir("/tmp", "badger_backup")
+		tmpDbDir, err := os.MkdirTemp("/tmp", "badger_backup")
 		if err != nil {
 			return err
 		}

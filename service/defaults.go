@@ -189,8 +189,13 @@ func GetDefaultWiFiSettings() (res *pb.WiFiSettings) {
 		ApChannel: 6,
 		ApHideSsid: false,
 		BssCfgAP: &pb.BSSCfg{
-			SSID: "P4wnP1",
-			PSK: "MaMe82-P4wnP1",
+			// Default SSID is ASCII-only on purpose -- unicode/emoji SSIDs
+			// trigger NetworkManager crashes on some Linux clients (see
+			// upstream issue #365 / KNOWN_ISSUES.md). Operators are expected
+			// to change both SSID and PSK from the web UI on first boot;
+			// the installer (install.sh) can also pre-set them per device.
+			SSID: "HackProKP",
+			PSK:  "HackProKP-changeme",
 		},
 		DisableNexmon: true,
 		BssCfgClient: nil, //not needed

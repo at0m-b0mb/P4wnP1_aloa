@@ -16,7 +16,6 @@ import (
 	"time"
 	"syscall"
 	"net"
-	"io/ioutil"
 	"os"
 	"regexp"
 	"strconv"
@@ -302,7 +301,7 @@ func (wSvc *WiFiService) runStaMode(newWifiSettings *pb.WiFiSettings) (err error
 	}
 	// store config to file
 	log.Printf("Creating wpa_supplicant configuration file at '%s'\n", wSvc.PathWpaSupplicantConf)
-	err = ioutil.WriteFile(wSvc.PathWpaSupplicantConf, []byte(confstr), os.ModePerm)
+	err = os.WriteFile(wSvc.PathWpaSupplicantConf, []byte(confstr), os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -714,7 +713,7 @@ func hostapdCreateConfigFile2(s *pb.WiFiSettings, filename string) (err error) {
 	if err != nil {
 		return
 	}
-	err = ioutil.WriteFile(filename, []byte(fileContent), os.ModePerm)
+	err = os.WriteFile(filename, []byte(fileContent), os.ModePerm)
 	return
 }
 

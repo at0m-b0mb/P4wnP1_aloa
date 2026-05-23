@@ -2,11 +2,11 @@ package datastore
 
 import (
 	"bytes"
+	"errors"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/encoding/proto"
-	"io/ioutil"
-	"errors"
+	"io"
 )
 
 
@@ -49,7 +49,7 @@ func (s *SerializerProtobuf) Decode(source []byte, destination interface{}) (err
 	} else {
 		targetReader,err := s.Compressor.Decompress(bytes.NewReader(source))
 		if err != nil { return err }
-		decompressed, err := ioutil.ReadAll(targetReader)
+		decompressed, err := io.ReadAll(targetReader)
 		if err != nil { return err }
 		return s.Codec.Unmarshal(decompressed, destination)
 	}

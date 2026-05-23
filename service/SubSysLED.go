@@ -2,7 +2,6 @@ package service
 
 import (
 	pb "github.com/mame82/P4wnP1_aloa/proto"
-	"io/ioutil"
 	"log"
 	"os"
 	"sync/atomic"
@@ -41,29 +40,29 @@ func NewLedService() (res *LedService) {
 }
 
 func (l *LedService) led_loop() {
-	ioutil.WriteFile(pLED_BRIGHTNESS_PATH, []byte(pLED_ON), os.ModePerm)
+	os.WriteFile(pLED_BRIGHTNESS_PATH, []byte(pLED_ON), os.ModePerm)
 
 	for l.state.IsRunning{
 		for i := uint32(0); i < atomic.LoadUint32(l.state.BlinkCount) && l.state.IsRunning; i++ {
-			ioutil.WriteFile(pLED_BRIGHTNESS_PATH, []byte(pLED_ON), os.ModePerm)
+			os.WriteFile(pLED_BRIGHTNESS_PATH, []byte(pLED_ON), os.ModePerm)
 			time.Sleep(pLED_DELAY_ON)
 
 			//Don't turn off led if blink_count >= 255 (solid)
 			if 255 > atomic.LoadUint32(l.state.BlinkCount) {
-				ioutil.WriteFile(pLED_BRIGHTNESS_PATH, []byte(pLED_OFF), os.ModePerm)
+				os.WriteFile(pLED_BRIGHTNESS_PATH, []byte(pLED_OFF), os.ModePerm)
 				time.Sleep(pLED_DELAY_OFF)
 			}
 		}
 		time.Sleep(pLED_DELAY_PAUSE)
 	}
 
-	ioutil.WriteFile(pLED_BRIGHTNESS_PATH, []byte(pLED_ON), os.ModePerm)
+	os.WriteFile(pLED_BRIGHTNESS_PATH, []byte(pLED_ON), os.ModePerm)
 }
 
 func (l *LedService) Start() error {
 	//set trigger of LED to manual
 	log.Println("Setting LED to manual trigger ...")
-	ioutil.WriteFile(pLED_TRIGGER_PATH, []byte(pLED_TRIGGER_MANUAL), os.ModePerm)
+	os.WriteFile(pLED_TRIGGER_PATH, []byte(pLED_TRIGGER_MANUAL), os.ModePerm)
 	l.state.IsRunning = true
 	go l.led_loop()
 

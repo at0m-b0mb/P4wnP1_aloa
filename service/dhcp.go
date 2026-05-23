@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"github.com/mame82/P4wnP1_aloa/common_web"
 	pb "github.com/mame82/P4wnP1_aloa/proto"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -83,7 +82,7 @@ func (nim *NetworkInterfaceManager) IsDHCPClientRunning() (running bool, pid int
 	}
 
 	//File exists, read the PID
-	content, err := ioutil.ReadFile(pid_file)
+	content, err := os.ReadFile(pid_file)
 	if err != nil { return false, 0, err}
 	pid, err = strconv.Atoi(strings.TrimSuffix(string(content), "\n"))
 	if err != nil { return false, 0, errors.New(fmt.Sprintf("Error parsing PID file %s: %v", pid_file, err))}
@@ -194,7 +193,7 @@ func (nim *NetworkInterfaceManager) StopDHCPServer() (err error)  {
 func DHCPCreateConfigFile(s *pb.DHCPServerSettings, filename string) (err error) {
 	file_content, err := DHCPCreateConfigFileString(s)
 	if err != nil {return}
-	err = ioutil.WriteFile(filename, []byte(file_content), os.ModePerm)
+	err = os.WriteFile(filename, []byte(file_content), os.ModePerm)
 	//ToDo: test config with `dnsmasq -C configfile --test`
 	return
 }

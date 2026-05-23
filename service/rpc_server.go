@@ -14,7 +14,6 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -666,44 +665,41 @@ func (s *server) EventListen(eReq *pb.EventRequest, eStream pb.P4WNP1_EventListe
 	}
 }
 
-func (s *server) FSWriteFile(ctx context.Context, req *pb.WriteFileRequest) (empty *pb.Empty, err error) {
-	filePath := "/" + req.Filename
-	perm := os.ModePerm
-	switch req.Folder {
+// resolveAccessibleFolder maps a (folder, filename) pair from a gRPC file IO
+// request to a path-traversal-safe absolute path and the permission bits to
+// use. Returns an error if the filename escapes the chosen folder.
+func resolveAccessibleFolder(folder pb.AccessibleFolder, filename string) (string, os.FileMode, error) {
+	var base string
+	var perm os.FileMode
+	switch folder {
 	case pb.AccessibleFolder_TMP:
-		filePath = "/tmp" + filePath
+		base, perm = "/tmp", os.ModePerm
 	case pb.AccessibleFolder_BASH_SCRIPTS:
-		filePath = common.PATH_BASH_SCRIPTS + filePath
-		perm = 0700
+		base, perm = common.PATH_BASH_SCRIPTS, 0700
 	case pb.AccessibleFolder_HID_SCRIPTS:
-		filePath = common.PATH_HID_SCRIPTS + filePath
-		perm = 0600
+		base, perm = common.PATH_HID_SCRIPTS, 0600
 	default:
-		err = errors.New("Unknown folder")
-		return
+		return "", 0, errors.New("unknown folder")
 	}
+	safe, err := safeJoinUnderBase(base, filename)
+	if err != nil {
+		return "", 0, err
+	}
+	return safe, perm, nil
+}
 
+func (s *server) FSWriteFile(ctx context.Context, req *pb.WriteFileRequest) (empty *pb.Empty, err error) {
+	filePath, perm, err := resolveAccessibleFolder(req.Folder, req.Filename)
+	if err != nil {
+		return &pb.Empty{}, err
+	}
 	return &pb.Empty{}, common.WriteFile(filePath, req.MustNotExist, req.Append, req.Data, perm)
-
 }
 
 func (s *server) FSReadFile(ctx context.Context, req *pb.ReadFileRequest) (resp *pb.ReadFileResponse, err error) {
-	//ToDo: check filename for path traversal attempts (don't care for security, currently - hey, we allow executing bash scripts as root - so what)
-
-	filePath := "/" + req.Filename
-	perm := os.ModePerm
-	switch req.Folder {
-	case pb.AccessibleFolder_TMP:
-		filePath = "/tmp" + filePath
-	case pb.AccessibleFolder_BASH_SCRIPTS:
-		filePath = common.PATH_BASH_SCRIPTS + filePath
-		perm = 0700
-	case pb.AccessibleFolder_HID_SCRIPTS:
-		filePath = common.PATH_HID_SCRIPTS + filePath
-		perm = 0600
-	default:
-		err = errors.New("Unknown folder")
-		return
+	filePath, perm, err := resolveAccessibleFolder(req.Folder, req.Filename)
+	if err != nil {
+		return nil, err
 	}
 
 	chunk := make([]byte, req.Len)
@@ -715,7 +711,15 @@ func (s *server) FSReadFile(ctx context.Context, req *pb.ReadFileRequest) (resp 
 }
 
 func (s *server) FSGetFileInfo(ctx context.Context, req *pb.FileInfoRequest) (resp *pb.FileInfoResponse, err error) {
-	fi, err := os.Stat(req.Path)
+	// FSGetFileInfo previously accepted any absolute path. Restrict to the
+	// same directories the read/write RPCs allow, plus /tmp for HIDScript
+	// temp files created by the CLI client.
+	safePath, err := safePathInAllowlist(req.Path,
+		common.PATH_ROOT, "/tmp")
+	if err != nil {
+		return &pb.FileInfoResponse{}, err
+	}
+	fi, err := os.Stat(safePath)
 	resp = &pb.FileInfoResponse{}
 	if err != nil { return }
 	resp.Name = fi.Name()
@@ -729,13 +733,13 @@ func (s *server) FSGetFileInfo(ctx context.Context, req *pb.FileInfoRequest) (re
 func (s *server) FSCreateTempDirOrFile(ctx context.Context, req *pb.TempDirOrFileRequest) (resp *pb.TempDirOrFileResponse, err error) {
 	resp = &pb.TempDirOrFileResponse{}
 	if req.OnlyFolder {
-		name, err := ioutil.TempDir(req.Dir, req.Prefix)
+		name, err := os.MkdirTemp(req.Dir, req.Prefix)
 		if err != nil { return resp, err }
 		resp.ResultPath = name
 		return resp, err
 	} else {
 		var f *os.File
-		f,err = ioutil.TempFile(req.Dir, req.Prefix)
+		f,err = os.CreateTemp(req.Dir, req.Prefix)
 		if err != nil { return resp,err }
 		defer f.Close()
 		resp.ResultPath = f.Name()
@@ -792,13 +796,20 @@ func (s *server) HIDRunScript(ctx context.Context, scriptReq *pb.HIDScriptReques
 	err = s.rootSvc.SubSysUSB.HidScriptUsable()
 	if err != nil { return }
 
-	scriptFile, err := ioutil.ReadFile(scriptReq.ScriptPath)
+	safePath, err := safePathInAllowlist(scriptReq.ScriptPath, common.PATH_HID_SCRIPTS, "/tmp")
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Couldn't load HIDScript '%s': %v\n", scriptReq.ScriptPath, err))
+		return nil, errors.New(fmt.Sprintf("HIDScript path rejected: %v", err))
+	}
+	scriptFile, err := os.ReadFile(safePath)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Couldn't load HIDScript '%s': %v\n", safePath, err))
 	}
 
-	// ToDo: we don't retrieve the cancelFunc which should be called to free resources. Solution: use withCancel context and call cancel by go routine on timeout
-	if scriptReq.TimeoutSeconds > 0 { ctx,_ = context.WithTimeout(ctx, time.Second * time.Duration(scriptReq.TimeoutSeconds))}
+	if scriptReq.TimeoutSeconds > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Second*time.Duration(scriptReq.TimeoutSeconds))
+		defer cancel()
+	}
 
 	val,err := s.rootSvc.SubSysUSB.HidScriptRun(ctx, string(scriptFile))
 	if err != nil { return nil,err }
@@ -821,15 +832,29 @@ func (s *server) HIDRunScriptJob(ctx context.Context, scriptReq *pb.HIDScriptReq
 	err = s.rootSvc.SubSysUSB.HidScriptUsable()
 	if err != nil { return }
 
-	scriptFile, err := ioutil.ReadFile(scriptReq.ScriptPath)
+	safePath, err := safePathInAllowlist(scriptReq.ScriptPath, common.PATH_HID_SCRIPTS, "/tmp")
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Couldn't load HIDScript '%s': %v\n", scriptReq.ScriptPath, err))
+		return nil, errors.New(fmt.Sprintf("HIDScript path rejected: %v", err))
+	}
+	scriptFile, err := os.ReadFile(safePath)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Couldn't load HIDScript '%s': %v\n", safePath, err))
 	}
 
 	//Note: Don't use the gRPC context, it would cancel after this call and thus interrupt the job immediately
 	jobCtx := context.Background()
-	// ToDo: we don't retrieve the cancelFunc which should be called to free resources. Solution: use withCancel context and call cancel by go routine on timeout
-	if scriptReq.TimeoutSeconds > 0 { jobCtx,_ = context.WithTimeout(jobCtx, time.Second * time.Duration(scriptReq.TimeoutSeconds))}
+	if scriptReq.TimeoutSeconds > 0 {
+		var cancel context.CancelFunc
+		jobCtx, cancel = context.WithTimeout(jobCtx, time.Second*time.Duration(scriptReq.TimeoutSeconds))
+		// The job runs asynchronously so we can't defer cancel(). Instead
+		// release the timer as soon as the context is done -- either by the
+		// timeout firing or by an external cancel. Prevents the timer leak
+		// that go vet -lostcancel would flag.
+		go func() {
+			<-jobCtx.Done()
+			cancel()
+		}()
+	}
 	job,err := s.rootSvc.SubSysUSB.HidScriptStartBackground(jobCtx, string(scriptFile))
 	if err != nil { return nil,err }
 

@@ -10,7 +10,7 @@ import (
 	"github.com/mame82/P4wnP1_aloa/common_web"
 	pb "github.com/mame82/P4wnP1_aloa/proto"
 	"github.com/mame82/P4wnP1_aloa/service/util"
-	"io/ioutil"
+	"os"
 	"sync"
 )
 
@@ -469,7 +469,7 @@ func (tam *TriggerActionManager) executeActionStartHidScript(evt *pb.Event, ta *
 		return
 	}
 
-	scriptFile, err := ioutil.ReadFile(scriptPath)
+	scriptFile, err := os.ReadFile(scriptPath)
 	if err != nil {
 		fmt.Printf("Couldn't load HIDScript '%s': %v\n", scriptPath, err)
 		return

@@ -1,12 +1,32 @@
 SHELL := /bin/bash
 PATH := /usr/local/go/bin:$(PATH)
 
+.PHONY: all help compile dep install installkali remove lint test
+
 all: compile
 
+help:
+	@echo "P4wnP1 A.L.O.A. -- Makefile targets"
+	@echo
+	@echo "  make compile       Cross-compile binaries + webapp.js into build/"
+	@echo "                     (For reliable cross builds prefer build_support/build.sh)"
+	@echo "  make dep           Install Go toolchain helpers (gopherjs)"
+	@echo "  make install       Install binaries + data into /usr/local on the current host"
+	@echo "  make installkali   Same as install, plus systemd enable + Kali-only steps"
+	@echo "  make remove        Uninstall service + binaries (keeps /usr/local/P4wnP1)"
+	@echo "  make lint          Run shellcheck + golangci-lint (require both installed)"
+	@echo "  make test          Run go test ./..."
+	@echo
+	@echo "Install / build documentation: INSTALL.md"
+
 test:
-#	export PATH="$$PATH:/usr/local/go/bin" # put into ~/.profile
-	echo $(CURDIR)
-	echo $(HOME)
+	go test ./...
+
+lint:
+	@command -v shellcheck >/dev/null || { echo "shellcheck not installed"; exit 1; }
+	shellcheck dist/scripts/*.sh build_support/*.sh
+	@command -v golangci-lint >/dev/null || { echo "golangci-lint not installed; skipping go lint"; exit 0; }
+	golangci-lint run ./...
 
 # make dep runs without sudo
 dep:
@@ -76,6 +96,7 @@ installkali:
 	cp build/P4wnP1_service /usr/local/bin/
 	cp build/P4wnP1_cli /usr/local/bin/
 	cp dist/P4wnP1.service /etc/systemd/system/P4wnP1.service
+	cp dist/p4wnp1-firstboot.service /etc/systemd/system/p4wnp1-firstboot.service
 	# copy over keymaps, scripts and www data
 	mkdir -p /usr/local/P4wnP1
 	cp -R dist/keymaps /usr/local/P4wnP1/
@@ -88,6 +109,7 @@ installkali:
 	cp -R dist/legacy /usr/local/P4wnP1/
 	cp build/webapp.js /usr/local/P4wnP1/www
 	cp build/webapp.js.map /usr/local/P4wnP1/www
+	chmod 0755 /usr/local/P4wnP1/scripts/firstboot-secure-defaults.sh
 
 	# careful testing
 	#sudo update-rc.d dhcpcd disable
@@ -98,11 +120,13 @@ installkali:
 	systemctl enable haveged
 	systemctl enable avahi-daemon
 	systemctl enable P4wnP1.service
+	systemctl enable p4wnp1-firstboot.service
 
 install:
 	cp build/P4wnP1_service /usr/local/bin/
 	cp build/P4wnP1_cli /usr/local/bin/
 	cp dist/P4wnP1.service /etc/systemd/system/P4wnP1.service
+	cp dist/p4wnp1-firstboot.service /etc/systemd/system/p4wnp1-firstboot.service
 	# copy over keymaps, scripts and www data
 	mkdir -p /usr/local/P4wnP1
 	cp -R dist/keymaps /usr/local/P4wnP1/
@@ -110,9 +134,10 @@ install:
 	cp -R dist/HIDScripts /usr/local/P4wnP1/
 	cp -R dist/www /usr/local/P4wnP1/
 	cp -R dist/db /usr/local/P4wnP1/
-	cp dist/bin/* /usr/local/bin/
+	cp dist/bin/* /usr/local/bin/ 2>/dev/null || true
 	cp build/webapp.js /usr/local/P4wnP1/www
 	cp build/webapp.js.map /usr/local/P4wnP1/www
+	chmod 0755 /usr/local/P4wnP1/scripts/firstboot-secure-defaults.sh
 
 	# careful testing
 	#sudo update-rc.d dhcpcd disable
@@ -129,12 +154,15 @@ install:
 
 remove:
 	# stop service
-	service P4wnP1 stop
+	-systemctl stop P4wnP1.service
+	-systemctl stop p4wnp1-firstboot.service
 	# disable service
-	systemctl disable P4wnP1.service
+	-systemctl disable P4wnP1.service
+	-systemctl disable p4wnp1-firstboot.service
 	rm -f /usr/local/bin/P4wnP1_service
 	rm -f /usr/local/bin/P4wnP1_cli
 	rm -f /etc/systemd/system/P4wnP1.service
+	rm -f /etc/systemd/system/p4wnp1-firstboot.service
 	rm -R /usr/local/P4wnP1/    # this folder should be kept, if only an update should be applied
 	# reinit service daemon
 	systemctl daemon-reload

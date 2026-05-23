@@ -7,7 +7,6 @@ import (
 	"github.com/mame82/P4wnP1_aloa/netlink"
 	pb "github.com/mame82/P4wnP1_aloa/proto"
 	"github.com/mame82/P4wnP1_aloa/service/util"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -317,11 +316,11 @@ func DeleteBridge(name string) error {
 func SetBridgeSTP(name string, stp_on bool) (err error) {
 	value := "0"
 	if (stp_on) { value = "1" }
-	return ioutil.WriteFile(fmt.Sprintf("/sys/class/net/%s/bridge/stp_state", name), []byte(value), os.ModePerm)
+	return os.WriteFile(fmt.Sprintf("/sys/class/net/%s/bridge/stp_state", name), []byte(value), os.ModePerm)
 }
 
 func SetBridgeForwardDelay(name string, fd uint) (err error) {
-	return ioutil.WriteFile(fmt.Sprintf("/sys/class/net/%s/bridge/forward_delay", name), []byte(fmt.Sprintf("%d", fd)), os.ModePerm)
+	return os.WriteFile(fmt.Sprintf("/sys/class/net/%s/bridge/forward_delay", name), []byte(fmt.Sprintf("%d", fd)), os.ModePerm)
 }
 
 
