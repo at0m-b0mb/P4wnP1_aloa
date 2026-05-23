@@ -115,6 +115,7 @@ fi
 required_files=(
     "${REPO_ROOT}/build/P4wnP1_service"
     "${REPO_ROOT}/build/P4wnP1_cli"
+    "${REPO_ROOT}/build/p4wnp1-hashpw"
     "${REPO_ROOT}/build/webapp.js"
     "${REPO_ROOT}/dist/P4wnP1.service"
     "${REPO_ROOT}/dist/p4wnp1-firstboot.service"
@@ -179,6 +180,7 @@ fi
 echo "==> installing binaries to /usr/local/bin"
 install -m 0755 "${REPO_ROOT}/build/P4wnP1_service" /usr/local/bin/
 install -m 0755 "${REPO_ROOT}/build/P4wnP1_cli"     /usr/local/bin/
+install -m 0755 "${REPO_ROOT}/build/p4wnp1-hashpw"  /usr/local/bin/
 
 echo "==> installing data files to /usr/local/P4wnP1"
 mkdir -p /usr/local/P4wnP1

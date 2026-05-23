@@ -104,6 +104,32 @@ for keyfile in /etc/ssh/ssh_host_*_key.pub; do
     SSH_FPS+="    ${fp}"$'\n'
 done
 
+# --- bootstrap web UI admin account -----------------------------------------
+# The P4wnP1 service refuses to authenticate anyone if /etc/p4wnp1/auth.json
+# is missing. Generate a random admin password and hand it to p4wnp1-hashpw,
+# which bcrypts it and writes the auth file. Surface the plaintext to the
+# operator (once) via INITIAL_CREDENTIALS.txt.
+ADMIN_USER="admin"
+NEW_ADMIN_PW=$(gen_password 20)
+ADMIN_BOOTSTRAP_OK=0
+if command -v p4wnp1-hashpw >/dev/null 2>&1; then
+    log "bootstrapping web UI admin account"
+    mkdir -p /etc/p4wnp1
+    # Pipe via stdin so the password never lands on disk in plaintext.
+    if printf '%s' "${NEW_ADMIN_PW}" | \
+        p4wnp1-hashpw \
+            --username "${ADMIN_USER}" \
+            --output /etc/p4wnp1/auth.json >/dev/null 2>&1; then
+        chmod 0600 /etc/p4wnp1/auth.json
+        chown root:root /etc/p4wnp1/auth.json
+        ADMIN_BOOTSTRAP_OK=1
+    else
+        log "p4wnp1-hashpw failed -- web UI admin NOT bootstrapped"
+    fi
+else
+    log "p4wnp1-hashpw not found in PATH -- web UI admin NOT bootstrapped"
+fi
+
 # --- write credentials file -------------------------------------------------
 umask 077
 cat > "${CREDS_FILE}" <<EOF
@@ -117,6 +143,21 @@ cat > "${CREDS_FILE}" <<EOF
 
   SSH host fingerprints (verify these on first connection):
 ${SSH_FPS}
+------------------------------------------------------------------------------
+ Web client (http://172.24.0.1:8000) admin login
+------------------------------------------------------------------------------
+
+  Username:             ${ADMIN_USER}
+  Password:             ${NEW_ADMIN_PW}
+  Bootstrap status:     $([ "${ADMIN_BOOTSTRAP_OK}" = "1" ] && echo "OK" || echo "FAILED -- log in via SSH and run p4wnp1-hashpw manually")
+
+  This password is bcrypt-hashed in /etc/p4wnp1/auth.json. Change it from
+  the web client (Settings -> Change Password) on first login.
+
+  Until you log in, EVERY gRPC and HTTP request to the P4wnP1 service is
+  rejected with HTTP 401 / gRPC Unauthenticated. There is no anonymous
+  access.
+
 ------------------------------------------------------------------------------
  WiFi credentials chosen at install time
 ------------------------------------------------------------------------------
@@ -158,5 +199,13 @@ log "WiFi PSK and Bluetooth PIN are STILL at shared defaults -- change via web U
 
 touch "${FLAG_FILE}"
 chmod 0600 "${FLAG_FILE}"
+
+# Kick the P4wnP1 service so it reloads /etc/p4wnp1/auth.json. The service
+# starts early in boot and may have already initialised with no users
+# (rejecting all requests); a restart re-reads the freshly-bootstrapped file.
+if [[ "${ADMIN_BOOTSTRAP_OK}" = "1" ]] && systemctl is-active --quiet P4wnP1.service; then
+    log "restarting P4wnP1.service to pick up new auth.json"
+    systemctl restart P4wnP1.service || log "warning: P4wnP1.service restart failed"
+fi
 
 exit 0

@@ -95,6 +95,7 @@ installkali:
 
 	cp build/P4wnP1_service /usr/local/bin/
 	cp build/P4wnP1_cli /usr/local/bin/
+	cp build/p4wnp1-hashpw /usr/local/bin/
 	cp dist/P4wnP1.service /etc/systemd/system/P4wnP1.service
 	cp dist/p4wnp1-firstboot.service /etc/systemd/system/p4wnp1-firstboot.service
 	# copy over keymaps, scripts and www data
@@ -125,6 +126,7 @@ installkali:
 install:
 	cp build/P4wnP1_service /usr/local/bin/
 	cp build/P4wnP1_cli /usr/local/bin/
+	cp build/p4wnp1-hashpw /usr/local/bin/
 	cp dist/P4wnP1.service /etc/systemd/system/P4wnP1.service
 	cp dist/p4wnp1-firstboot.service /etc/systemd/system/p4wnp1-firstboot.service
 	# copy over keymaps, scripts and www data
