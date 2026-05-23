@@ -118,6 +118,54 @@ shred -u /root/INITIAL_CREDENTIALS.txt
 
 Continue to [First boot](#first-boot) for what to do next.
 
+### A.5 Smoke-test after first boot
+
+The repo ships a post-install health-check script. SSH in (using the rotated root password from `INITIAL_CREDENTIALS.txt`) and run:
+
+```sh
+sudo /usr/local/P4wnP1/scripts/p4wnp1-healthcheck.sh
+```
+
+Expected output (abridged):
+
+```
+== 1. Binaries ==
+  ✓ /usr/local/bin/P4wnP1_service (executable)
+  ✓ /usr/local/bin/P4wnP1_cli (executable)
+  ✓ /usr/local/bin/p4wnp1-hashpw (executable)
+
+== 3. systemd units ==
+  ✓ P4wnP1.service (installed)
+  ✓ P4wnP1.service (enabled)
+  ✓ p4wnp1-firstboot.service (installed)
+  ✓ p4wnp1-firstboot.service (enabled)
+  ✓ P4wnP1.service (running)
+
+== 5. Auth store ==
+  ✓ /etc/p4wnp1/auth.json (mode 0600)
+  ✓ /etc/p4wnp1/auth.json contains at least one user
+  ✓ password_hash looks like bcrypt ($2a$/$2b$/$2y$)
+
+== 6. Network listeners ==
+  ✓ gRPC API (tcp/50051 listening)
+  ✓ gRPC-web + HTTP (tcp/8000 listening)
+  ✓ SSH (tcp/22 listening)
+
+== 7. HTTP auth endpoint smoke test ==
+  ✓ GET /api/auth/health -> 200
+  ✓ /api/auth/health body looks healthy
+
+Summary: 17 pass / 0 warn / 0 fail
+```
+
+For a deeper test that actually performs a login round-trip against `/api/auth/login` using the admin password from `INITIAL_CREDENTIALS.txt`:
+
+```sh
+sudo /usr/local/P4wnP1/scripts/p4wnp1-healthcheck.sh --login-test
+```
+
+If any check fails, the script exits 1 and prints `journalctl -u P4wnP1.service -n 100 --no-pager` as the next-step suggestion.
+
 ---
 
 ## Path B — Official Kali prebuilt image

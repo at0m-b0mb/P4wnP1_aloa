@@ -92,16 +92,15 @@ Severity legend:
 
 ## 🟡 Stale dependencies (no live CVE in this version, but old)
 
-### 🟡 `golang.org/x/net v0.0.0-20211112202133-69e39bad7dc2`
+### ✅ `golang.org/x/net` (CVE-2023-44487) — **fixed**
 
-- **CVE-2023-44487** (HTTP/2 Rapid Reset DoS) — fixed in `v0.17.0`; **this pin predates the fix.**
-- **Impact:** A network attacker that can reach the gRPC port can DoS the service by abusing HTTP/2 stream resets. In practice, the service is single-purpose on a Pi Zero and an attacker on the AP has higher-impact options (see code-level findings above), so this is medium risk in context.
-- **Fix:** Bump in [go.mod](go.mod). Pairs with the Go-build modernization slice.
+- **Was:** `v0.0.0-20211112202133-69e39bad7dc2` -- predated the **CVE-2023-44487** (HTTP/2 Rapid Reset DoS) fix shipped in `v0.17.0`.
+- **Fix applied:** Bumped to `v0.49.0` via `go mod tidy` during the unit-test pass. CVE long since closed in this version.
 
 ### 🟡 `google.golang.org/grpc v1.38.0`
 
-- Same Rapid Reset family of issues; mitigated in grpc-go v1.56.3 / v1.58.3 / v1.59.0.
-- **Fix:** Bump.
+- Same HTTP/2 Rapid Reset family of issues was mitigated in grpc-go v1.56.3 / v1.58.3 / v1.59.0.
+- **Partial:** The HTTP/2 stack underneath grpc-go is `golang.org/x/net/http2`, which was bumped above and now contains the fix. The grpc-go pin itself is still v1.38.0; a full grpc-go bump is out of scope for this pass (touches the entire RPC layer and may need proto regeneration).
 
 ### 🟢 `github.com/dgraph-io/badger v1.5.5-0.20181020...`
 

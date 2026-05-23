@@ -2,6 +2,33 @@
 
 ## unreleased
 
+- **Tests: `service/auth/` now has 25 unit tests** covering bcrypt
+  round-trip, atomic persist, file mode 0600, JSON format, token
+  randomness, expiry, sliding window, revocation, prune, login flow,
+  ChangePassword session revocation, and timing-oracle defense on
+  failed login. Tests run on every push via the new `go test` CI job.
+- **Deps: `go mod tidy` upgraded transitive dependencies.** Most
+  notably, `golang.org/x/net` went from `v0.0.0-20211112…` to `v0.49.0`,
+  which **closes CVE-2023-44487 (HTTP/2 Rapid Reset DoS)** -- a known
+  issue tracked in KNOWN_ISSUES.md. Also bumped `golang.org/x/crypto`
+  to v0.47.0 (latest), `golang.org/x/sys` to v0.40.0. `go.mod` directive
+  bumped from `go 1.16` to `go 1.24` (required by the new dep versions).
+- **CI bumped to Go 1.24** to match the new module directive. Added a
+  dedicated `go test (auth package)` job so the unit tests run on every
+  push.
+- **New: `dist/scripts/p4wnp1-healthcheck.sh`** -- post-install smoke
+  test the operator runs on the Pi after first boot. Verifies binaries,
+  data files, systemd units, firstboot completion, auth.json shape, port
+  listeners, the HTTP `/api/auth/health` endpoint, and (optionally with
+  `--login-test`) a real login round-trip using the credentials in
+  `INITIAL_CREDENTIALS.txt`. Color-coded PASS/WARN/FAIL output.
+- **Build-tag fix in `hid/AsyncOtto.go`:** added `// +build linux` so the
+  file no longer trips `go vet` on macOS / Darwin (it references
+  `haltirq` which is defined in `hid/controller.go`, a Linux-only file).
+  Pre-existing upstream bug, surfaced by running vet from a Mac.
+
+## unreleased (earlier in this branch)
+
 - **Auth (M1+M2): gRPC API is no longer wide-open.** New `service/auth/`
   package introduces a real authentication layer:
     - bcrypt (cost 12) password storage in `/etc/p4wnp1/auth.json` (mode 0600);
