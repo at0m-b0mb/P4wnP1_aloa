@@ -10,6 +10,7 @@ import (
 	"github.com/mame82/P4wnP1_aloa/common"
 	"github.com/mame82/P4wnP1_aloa/common_web"
 	pb "github.com/mame82/P4wnP1_aloa/proto"
+	"github.com/mame82/P4wnP1_aloa/service/auth"
 	"github.com/mame82/P4wnP1_aloa/service/bluetooth"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -1078,12 +1079,17 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 	listen_address_grpc := host + ":" + gRPCPort
 	listen_address_web := host + ":" + webPort
 
+	authMgr := srv.rootSvc.SubSysAuth // populated by NewService()
 
-	//Create gRPC Server
-	s := grpc.NewServer()
+	// gRPC server with auth interceptors. EVERY RPC requires a valid
+	// bearer token in metadata. There is no exempt-method list -- there
+	// are no RPCs that should be reachable without auth. (The HTTP
+	// /api/auth/login endpoint is what callers use to obtain a token.)
+	s := grpc.NewServer(
+		grpc.UnaryInterceptor(auth.UnaryInterceptor(authMgr)),
+		grpc.StreamInterceptor(auth.StreamInterceptor(authMgr)),
+	)
 	pb.RegisterP4WNP1Server(s, srv)
-
-
 
 	//Open TCP listener
 	lis, err := net.Listen("tcp", listen_address_grpc)
@@ -1099,26 +1105,42 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 	}()
 	log.Printf("P4wnP1 gRPC server listening on " + listen_address_grpc)
 
-
 	//Wrap the server into a gRPC-web server
-	grpc_web_srv := grpcweb.WrapServer(s, grpcweb.WithWebsockets(true)) //Wrap server to improbable grpc-web with websockets
-	//define a handler for a HTTP web server using the gRPC-web proxy
-	http_gRPC_web_handler := func(resp http.ResponseWriter, req *http.Request) {
-		//fmt.Printf("===========\nRequest: %s\n %v\n=============\n", req)
+	grpc_web_srv := grpcweb.WrapServer(s, grpcweb.WithWebsockets(true))
+
+	// HTTP auth handler -- serves /api/auth/login + whoami + changepw +
+	// logout + health. These bypass the gRPC interceptor entirely; the
+	// handler itself enforces token requirements for the operations that
+	// need them.
+	authHTTPHandler := auth.HTTPHandler(authMgr)
+
+	// Master HTTP router. Three buckets:
+	//   1. /api/auth/* -> auth HTTP handler (login, whoami, ...)
+	//   2. gRPC / gRPC-web (Content-Type or websocket header) -> grpc_web_srv
+	//   3. everything else -> static SPA files (loginscreen.html etc.)
+	//
+	// The static file server is intentionally unauthenticated: the SPA
+	// needs to load BEFORE the user can log in. JS code in the SPA is
+	// responsible for redirecting to /login when /api/auth/whoami 401s.
+	fileServer := http.FileServer(http.Dir(absWebRoot))
+	http_handler := func(resp http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, auth.HTTPPrefix) {
+			authHTTPHandler.ServeHTTP(resp, req)
+			return
+		}
 		if strings.Contains(req.Header.Get("Content-Type"), "application/grpc") ||
 			req.Method == "OPTIONS" ||
 			strings.Contains(req.Header.Get("Sec-Websocket-Protocol"), "grpc-websockets") {
-			//fmt.Printf("gRPC-web req:\n %v\n", req)
-			grpc_web_srv.ServeHTTP(resp, req) // if content type indicates grpc or REQUEST METHOD IS OPTIONS (pre-flight) serve gRPC-web
-		} else {
-			fmt.Printf("legacy web req: %v\n", req.RequestURI)
-			http.FileServer(http.Dir((absWebRoot))).ServeHTTP(resp, req)
+			grpc_web_srv.ServeHTTP(resp, req)
+			return
 		}
+		fileServer.ServeHTTP(resp, req)
 	}
+
 	//Setup our HTTP server
 	http_srv := &http.Server{
 		Addr: listen_address_web, //listen on port 80 with webservice
-		Handler: http.HandlerFunc(http_gRPC_web_handler),
+		Handler: http.HandlerFunc(http_handler),
 		ReadHeaderTimeout: 5*time.Second,
 		IdleTimeout: 120*time.Second,
 	}

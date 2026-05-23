@@ -8,11 +8,17 @@ import (
 	"github.com/mame82/P4wnP1_aloa/common"
 	"github.com/mame82/P4wnP1_aloa/common_web"
 	pb "github.com/mame82/P4wnP1_aloa/proto"
+	"github.com/mame82/P4wnP1_aloa/service/auth"
 	"github.com/mame82/P4wnP1_aloa/service/datastore"
 	"log"
 	"syscall"
 	"time"
 )
+
+// AuthFilePath is the on-disk location of the bcrypt password file. The
+// installer + first-boot helper write it; the service reads it. Mode 0600
+// owned by root.
+const AuthFilePath = "/etc/p4wnp1/auth.json"
 
 
 func RegisterDefaultTriggerActions(tam *TriggerActionManager) {
@@ -126,6 +132,7 @@ type Service struct {
 	SubSysWifi           *WiFiService
 	SubSysBluetooth      *BtService
 	SubSysRPC            *server
+	SubSysAuth           *auth.Manager
 	SubSysTriggerActions *TriggerActionManager
 	SubSysGpio *GpioManager
 
@@ -169,7 +176,21 @@ func NewService() (svc *Service, err error) {
 
 	svc.SubSysBluetooth = NewBtService(svc, time.Second * 120) //Depends on NetworkSubSys (try to bring up bluetooth for up to 120s in background)
 
-
+	// Auth subsystem: load the password file (mode 0600). A missing file is
+	// treated as "no users configured yet" -- the service still starts but
+	// every gRPC and HTTP request is rejected until the first-boot helper
+	// (or install.sh) bootstraps an admin account. We log loudly so the
+	// operator notices.
+	authStore, authErr := auth.NewStore(AuthFilePath)
+	if authErr != nil {
+		log.Printf("WARNING: auth: failed to load %s: %v", AuthFilePath, authErr)
+		log.Printf("WARNING: auth: starting with an empty user table -- ALL gRPC/HTTP CALLS WILL FAIL")
+		authStore, _ = auth.NewStore("") // empty store, no persistence
+	}
+	if !authStore.HasAnyUsers() {
+		log.Printf("WARNING: auth: no users in %s -- ALL gRPC/HTTP CALLS WILL FAIL until firstboot runs", AuthFilePath)
+	}
+	svc.SubSysAuth = auth.NewManager(authStore, auth.NewSessions(), auth.DefaultSessionTTL)
 
 	svc.SubSysRPC = NewRpcServerService(svc) //Depends on all other
 	return
