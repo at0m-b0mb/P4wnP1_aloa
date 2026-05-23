@@ -5,7 +5,6 @@ package hid
 import (
 	"encoding/binary"
 	"io"
-	"io/ioutil"
 	"os"
 	"math"
 	"time"
@@ -54,7 +53,7 @@ func (m *Mouse) writeReport(filepath string) error {
 	report, err := generateMouseReport(m.lastChangeWasAbsolute, m.buttons, m.axis)
 	if err != nil { return err }
 	//fmt.Printf("Writing %+v to %s\n", report, filepath)
-	return ioutil.WriteFile(filepath, report, os.ModePerm) //Serialize Report and write to specified file
+	return os.WriteFile(filepath, report, os.ModePerm) //Serialize Report and write to specified file
 }
 
 func (m *Mouse) writeReportToFile(file *os.File) (err error) {

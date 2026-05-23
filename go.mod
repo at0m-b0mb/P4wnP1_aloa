@@ -6,7 +6,6 @@ require (
 	github.com/dgraph-io/badger v1.5.5-0.20181020042726-fbb27786246d
 	github.com/dgryski/go-farm v0.0.0-20180109070241-2de33835d102 // indirect
 	github.com/godbus/dbus v4.1.0+incompatible
-	github.com/golang/lint v0.0.0-20180702182130-06c8688daad7 // indirect
 	github.com/golang/protobuf v1.5.2
 	github.com/gopherjs/gopherjs v1.18.0-beta2
 	github.com/gorilla/websocket v1.4.0 // indirect
@@ -27,4 +26,4 @@ require (
 	periph.io/x/periph v3.3.0+incompatible
 )
 
-go 1.13
+go 1.16

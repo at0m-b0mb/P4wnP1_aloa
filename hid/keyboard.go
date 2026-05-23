@@ -5,7 +5,6 @@ import (
 	"io"
 	"log"
 	"errors"
-	"io/ioutil"
 	"os"
 	"strings"
 	"fmt"
@@ -429,12 +428,12 @@ func (klm *HIDKeyboardLanguageMap) StoreToFile(filePath string) (err error) {
 	mapJson, err := json.MarshalIndent(klm, "", "\t")
 	if err != nil { return err }
 	//Write to file
-	return ioutil.WriteFile(filePath, mapJson, os.ModePerm)
+	return os.WriteFile(filePath, mapJson, os.ModePerm)
 }
 
 func loadKeyboardLanguageMapFromFile(filePath string) (result *HIDKeyboardLanguageMap, err error) {
 	result = &HIDKeyboardLanguageMap{}
-	mapJson, err := ioutil.ReadFile(filePath)
+	mapJson, err := os.ReadFile(filePath)
 	if err != nil { return nil,err }
 	err = json.Unmarshal(mapJson, result)
 	return
@@ -603,7 +602,7 @@ func (rep KeyboardOutReport) Deserialize(data []byte) (err error) {
 }
 
 func (rep KeyboardOutReport) WriteTo(filePath string) (err error) {
-	return ioutil.WriteFile(filePath, rep.Serialize(), os.ModePerm) //Serialize Report and write to specified file
+	return os.WriteFile(filePath, rep.Serialize(), os.ModePerm) //Serialize Report and write to specified file
 }
 
 // Accepts *os.File, in contrast to WriteTo() this allows keeping the file open

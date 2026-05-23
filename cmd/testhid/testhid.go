@@ -17,7 +17,6 @@ import(
 	"net/http"
 	"runtime"
 	"context"
-	"io/ioutil"
 )
 
 var (
@@ -338,7 +337,8 @@ func main() {
 	//add bg jobs waiting for LED
 	jobList := make([]int,0)
 	fmt.Println("Adding sleeping jobs with 5 seconds timeout context")
-	ctxT,_ := context.WithTimeout(context.Background(), time.Second * 2)
+	ctxT, cancelT := context.WithTimeout(context.Background(), time.Second*2)
+	defer cancelT()
 	//script := "console.log('START ' + JID + ' on VM ' + VMID);delay(5000);console.log(JID + ' returned from 5s blocking delay');"
 	script := "console.log('START ' + JID + ' on VM ' + VMID);waitLEDRepeat(ANY,5000);console.log(JID + ' returned from 5s blocking delay');"
 	startTime := time.Now()
@@ -374,7 +374,7 @@ func main() {
 
 	//try to load script file
 	filepath := "./hidtest1.js"
-	if scriptFile, err := ioutil.ReadFile(filepath); err != nil {
+	if scriptFile, err := os.ReadFile(filepath); err != nil {
 		log.Printf("Couldn't load HIDScript testfile: %s\n", filepath)
 	} else {
 		_,err = hidCtl.RunScript(context.Background(),string(scriptFile), true)
