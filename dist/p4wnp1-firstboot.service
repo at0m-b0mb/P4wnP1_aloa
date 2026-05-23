@@ -1,0 +1,24 @@
+[Unit]
+Description=P4wnP1 First-Boot Security Defaults
+Documentation=file:///usr/local/P4wnP1/scripts/firstboot-secure-defaults.sh
+ConditionPathExists=!/var/lib/p4wnp1/firstboot.done
+# Run after the network/SSH stack is up so host-key regeneration restarts cleanly.
+# We do not depend on P4wnP1.service itself -- we want secure defaults applied
+# even if the P4wnP1 service is failing.
+After=local-fs.target ssh.service
+Wants=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/P4wnP1/scripts/firstboot-secure-defaults.sh
+StandardOutput=journal
+StandardError=journal
+# Hardening: this script writes to /root, /etc/ssh, /var/lib/p4wnp1 only.
+# We avoid ProtectSystem=strict because chpasswd needs /etc/shadow.
+ProtectHome=false
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
