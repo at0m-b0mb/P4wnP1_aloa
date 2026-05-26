@@ -2,6 +2,20 @@
 
 ## unreleased
 
+- **Removed `.github/workflows/ci.yml`.** GitHub's anti-abuse layer kept
+  flagging the workflow's git-clone step on this repo (the runner saw
+  "Your account is suspended" 403s even though the account itself was
+  fine), most likely because of the security-themed pre-built ARM
+  binaries committed under `build/`. For a solo personal fork, local
+  verification covers the same ground:
+    - `make test`         -- run the `service/auth` unit tests
+    - `make lint`         -- shellcheck + golangci-lint
+    - `make build-armv6`  -- cross-compile the three binaries
+  `.golangci.yml` stays (used by `make lint`). If you want CI back later,
+  the workflow file is one `git revert e91f5e18^..HEAD` away in history.
+
+## unreleased (earlier in this branch)
+
 - **CLI auth subcommands (Milestone 3).** `P4wnP1_cli` now has built-in
   `auth login` / `auth logout` / `auth whoami` / `auth changepw` commands.
   Tokens cache at `~/.p4wnp1/token` (mode 0600, written atomically via
