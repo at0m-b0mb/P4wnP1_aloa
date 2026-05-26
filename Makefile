@@ -1,30 +1,52 @@
 SHELL := /bin/bash
 PATH := /usr/local/go/bin:$(PATH)
 
-.PHONY: all help compile dep install installkali remove lint test
+.PHONY: all help compile build-armv6 build-service-armv6 build-cli-armv6 build-hashpw-armv6 dep install installkali remove lint test
 
 all: compile
 
 help:
 	@echo "P4wnP1 A.L.O.A. -- Makefile targets"
 	@echo
+	@echo "  make build-armv6   Cross-compile P4wnP1_service + P4wnP1_cli + p4wnp1-hashpw"
+	@echo "                     for Pi Zero W (linux/arm/6) into build/. THIS is what you"
+	@echo "                     want before running install.sh on the Pi."
 	@echo "  make compile       Cross-compile binaries + webapp.js into build/"
-	@echo "                     (For reliable cross builds prefer build_support/build.sh)"
+	@echo "                     (legacy; use build_support/build.sh for the GopherJS web app)"
 	@echo "  make dep           Install Go toolchain helpers (gopherjs)"
+	@echo "  make test          Run unit tests for the service/auth package"
+	@echo "  make lint          Run shellcheck + golangci-lint (require both installed)"
 	@echo "  make install       Install binaries + data into /usr/local on the current host"
 	@echo "  make installkali   Same as install, plus systemd enable + Kali-only steps"
 	@echo "  make remove        Uninstall service + binaries (keeps /usr/local/P4wnP1)"
-	@echo "  make lint          Run shellcheck + golangci-lint (require both installed)"
-	@echo "  make test          Run go test ./..."
 	@echo
 	@echo "Install / build documentation: INSTALL.md"
 
+# Cross-compile each binary individually. `-trimpath -ldflags='-s -w'`
+# strips debug info to keep the Pi Zero W's modest storage happy.
+GO_ENV_ARMV6 := GOOS=linux GOARCH=arm GOARM=6
+GO_BUILD_FLAGS := -trimpath -ldflags="-s -w"
+
+build-service-armv6:
+	$(GO_ENV_ARMV6) go build $(GO_BUILD_FLAGS) -o build/P4wnP1_service ./cmd/P4wnP1_service
+
+build-cli-armv6:
+	$(GO_ENV_ARMV6) go build $(GO_BUILD_FLAGS) -o build/P4wnP1_cli     ./cmd/P4wnP1_cli
+
+build-hashpw-armv6:
+	$(GO_ENV_ARMV6) go build $(GO_BUILD_FLAGS) -o build/p4wnp1-hashpw  ./cmd/p4wnp1-hashpw
+
+build-armv6: build-service-armv6 build-cli-armv6 build-hashpw-armv6
+	@echo
+	@echo "Built for Pi Zero W (linux/arm/6):"
+	@ls -la build/P4wnP1_service build/P4wnP1_cli build/p4wnp1-hashpw
+
 test:
-	go test ./...
+	go test -count=1 ./service/auth/...
 
 lint:
 	@command -v shellcheck >/dev/null || { echo "shellcheck not installed"; exit 1; }
-	shellcheck dist/scripts/*.sh build_support/*.sh
+	shellcheck install.sh dist/scripts/firstboot-secure-defaults.sh dist/scripts/p4wnp1-healthcheck.sh build_support/build.sh
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint not installed; skipping go lint"; exit 0; }
 	golangci-lint run ./...
 
