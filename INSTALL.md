@@ -314,9 +314,22 @@ If the service is active, jump to [First boot](#first-boot).
 
 ## Building from source
 
-Build outputs are the three binaries / JS files referenced in Path C.
+The three Go binaries you need for `install.sh` are `P4wnP1_service`, `P4wnP1_cli`, and `p4wnp1-hashpw`. The web client (`webapp.js`) is a separate GopherJS build.
 
-### Option 1 — Docker (recommended for macOS / non-Linux hosts)
+### Option 0 — Use the pre-built binaries in this repo (easiest)
+
+This repo ships pre-built `linux/arm/6` binaries under [`build/`](build/) so a fresh clone is install-ready on a Pi Zero W without any local toolchain. Just `git clone` and run `install.sh`. The binaries in this branch are built from the current source, so they include the auth gate, the path-traversal fixes, and the new `auth` subcommand on the CLI.
+
+### Option 1 — `make build-armv6` (cross-compile on any host with Go 1.24+)
+
+```sh
+make build-armv6
+# -> Produces build/P4wnP1_service, build/P4wnP1_cli, build/p4wnp1-hashpw
+```
+
+Works on macOS, Linux, and Windows since Go's cross-compiler is in the stdlib. The webapp.js (web client) is **not** rebuilt by this target — see Option 3 if you've changed `web_client/`. The committed `build/webapp.js` is fine to use as-is otherwise.
+
+### Option 2 — Docker (rebuild the GopherJS web client too)
 
 ```sh
 cd build_support
@@ -325,16 +338,13 @@ docker run --rm -v "$PWD/../build:/out" p4wnp1-builder \
        bash -c 'cp /root/P4wnP1_aloa/build/{P4wnP1_service,P4wnP1_cli,webapp.js,webapp.js.map} /out/'
 ```
 
-The `Dockerfile` pins Go 1.12.16 (GopherJS dependency) — this is intentional and not something to "modernize" without also replacing GopherJS, which is a much larger change.
+The `Dockerfile` pins Go 1.12.16 for the **GopherJS step only**. The service binaries it produces are now too old (no auth), so use this image *just* for `webapp.js` and use Option 1 for everything else.
 
-### Option 2 — Native (Linux only)
-
-Requires Go 1.12 (1.13 also works for the service binary but **not** for the GopherJS web client build) and GopherJS:
+### Option 3 — Native build (Linux + Go 1.24 + GopherJS pinned to 1.12)
 
 ```sh
-go install github.com/gopherjs/gopherjs@latest      # if your Go is recent, you may need 1.12.x via gvm
-cd build_support
-./build.sh
+make build-armv6                         # service / CLI / hashpw (modern Go)
+cd build_support && ./build.sh           # adds webapp.js via GopherJS (needs Go 1.12)
 ```
 
 Outputs land in `../build/`.
@@ -364,16 +374,52 @@ After flashing and powering the Pi on, give it ~30 seconds. You should see:
 
 ### CLI authentication
 
-Once auth is enabled (Path A), `P4wnP1_cli` calls need an `Authorization: Bearer <token>` header. The CLI doesn't yet have a built-in `login` subcommand — that's slated for the next milestone. As a workaround, get a token via the HTTP endpoint and pass it via the gRPC metadata flag (if your CLI version supports it), or run the CLI on the Pi itself which can still hit the local listener with a manually-obtained token:
+`P4wnP1_cli` now has a built-in `auth` subcommand. On first use:
 
 ```sh
-# Get a token (run from the Pi or from any client that can reach :8000)
+# Look up the admin password generated at first boot:
+sudo cat /root/INITIAL_CREDENTIALS.txt | grep "admin"
+
+# Log in. The CLI caches a bearer token at ~/.p4wnp1/token (mode 0600)
+# and auto-attaches it to every subsequent RPC call.
+P4wnP1_cli auth login --user admin --password '<the-admin-password>'
+
+# Confirm:
+P4wnP1_cli auth whoami
+#   user:       admin
+#   host:       localhost
+#   expires_in: 23h59m54s
+#   expires_at: 2026-05-27T09:14:33Z
+
+# Any normal CLI command now works -- the token is attached automatically.
+P4wnP1_cli usb get device
+P4wnP1_cli hid run -c 'type("hello")'
+```
+
+Other useful subcommands:
+
+```sh
+# Read the password from stdin instead of the flag (safer; no shell history):
+read -s pw && echo "$pw" | P4wnP1_cli auth login --user admin
+
+# Talk to a remote Pi (e.g. from your laptop instead of via SSH):
+P4wnP1_cli --host 172.24.0.1 auth login --user admin --password '...'
+
+# Rotate the admin password (revokes every existing session, including yours):
+P4wnP1_cli auth changepw --user admin --old 'OldPw1234567' --new 'NewPw1234567!'
+
+# Wipe the local token + tell the server to revoke it:
+P4wnP1_cli auth logout
+```
+
+If the cached token expires or is revoked, every CLI call will fail with `Unauthenticated`. Just `P4wnP1_cli auth login` again.
+
+For raw HTTP integration (e.g. a shell script that needs a token):
+
+```sh
 TOKEN=$(curl -s -X POST http://172.24.0.1:8000/api/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"<your-password>"}' | jq -r .token)
-echo "$TOKEN"
-
-# Check it works
 curl -s http://172.24.0.1:8000/api/auth/whoami -H "Authorization: Bearer $TOKEN"
 ```
 

@@ -2,6 +2,26 @@
 
 ## unreleased
 
+- **CLI auth subcommands (Milestone 3).** `P4wnP1_cli` now has built-in
+  `auth login` / `auth logout` / `auth whoami` / `auth changepw` commands.
+  Tokens cache at `~/.p4wnp1/token` (mode 0600, written atomically via
+  tmpfile + rename) and a `grpc.PerRPCCredentials` implementation attaches
+  the cached token to every existing CLI command's gRPC call. After auth
+  hardening, this is what makes the CLI usable again. New files:
+  `cli_client/auth_client.go` (HTTP client + token store) and
+  `cli_client/cmd_auth.go` (cobra subcommands). `cli_client/rpc_client.go`
+  picks up `tokenAuthCreds` + a `metadataContextWithToken` helper. INSTALL.md
+  "CLI authentication" section rewritten with the real flow.
+- **Pre-built `linux/arm/6` binaries refreshed in `build/`.** The committed
+  `P4wnP1_service`, `P4wnP1_cli`, and the new `p4wnp1-hashpw` binaries are
+  now built from the current source -- they include auth, the path-traversal
+  fixes, and the M3 CLI subcommands. Previous binaries were upstream's 2020
+  build which lacked all of that. `install.sh` is now usable on a clean
+  `git clone` without any local toolchain.
+- **`make build-armv6` Makefile target** for rebuilding the three binaries
+  on any host with Go 1.24+ (works on macOS via cross-compile -- no Docker
+  needed). Includes `-trimpath -ldflags='-s -w'` for reproducible stripped
+  binaries.
 - **Tests: `service/auth/` now has 25 unit tests** covering bcrypt
   round-trip, atomic persist, file mode 0600, JSON format, token
   randomness, expiry, sliding window, revocation, prune, login flow,
