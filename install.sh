@@ -233,12 +233,43 @@ chmod 0755 /usr/local/P4wnP1/scripts/p4wnp1-healthcheck.sh 2>/dev/null || true
 echo "==> writing initial config to /etc/p4wnp1/initial.conf"
 mkdir -p /etc/p4wnp1
 umask 077
+# Emit a value as a shell literal that survives being sourced.
+#
+# These used to be written as '${SSID}' -- wrapped in single quotes with no
+# escaping -- and the firstboot helper SOURCES this file as root. An SSID or
+# passphrase containing an apostrophe, which is an entirely ordinary thing for
+# a passphrase to contain, closed the quote early:
+#
+#     P4WNP1_INITIAL_SSID='Bob's AP'
+#
+# firstboot runs under `set -euo pipefail`, so sourcing that aborts it. The
+# helper is what creates the admin account, so the device came up with NO
+# account, rejecting every console request. An apostrophe bricked it.
+#
+# A deliberately crafted value was worse: everything after the closing quote
+# ran as root on first boot.
+#
+# The replacement below is the standard way to emit a single-quoted shell
+# literal: end the quote, emit an escaped apostrophe, reopen the quote.
+# printf %q is a bash builtin whose whole job is this: emit a string as a
+# shell literal that reads back as the identical string. Hand-rolling the
+# single-quote escaping is possible but easy to get subtly wrong -- the first
+# attempt at it here was wrong, and an apostrophe still broke the file.
+#
+# The output is not always single-quoted (printf picks the form it needs, and
+# uses $'...' for control characters), but it is always valid shell and always
+# round-trips, which is the property that matters.
+shquote() { printf '%q' "$1"; }
+
 cat > /etc/p4wnp1/initial.conf <<EOF
 # Read by /usr/local/P4wnP1/scripts/firstboot-secure-defaults.sh on first boot.
 # Edit before first boot to customise; delete /var/lib/p4wnp1/firstboot.done
 # to force the helper to re-run.
-P4WNP1_INITIAL_SSID='${SSID}'
-P4WNP1_INITIAL_PSK='${PSK}'
+#
+# Values are shell-quoted. If you edit them by hand, keep them quoted -- this
+# file is sourced by the firstboot helper.
+P4WNP1_INITIAL_SSID=$(shquote "${SSID}")
+P4WNP1_INITIAL_PSK=$(shquote "${PSK}")
 EOF
 chmod 0600 /etc/p4wnp1/initial.conf
 umask 022

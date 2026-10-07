@@ -41,8 +41,23 @@ LOG_TAG=p4wnp1-firstboot
 P4WNP1_INITIAL_SSID=HackProKP
 P4WNP1_INITIAL_PSK="(unset -- still on service default 'MaMe82-P4wnP1')"
 
-# shellcheck source=/dev/null
-[[ -r "${INITIAL_CONF}" ]] && . "${INITIAL_CONF}"
+# Syntax-check before sourcing.
+#
+# This script runs under `set -euo pipefail`, so sourcing a file with an
+# unbalanced quote aborts it -- and this script is what creates the admin
+# account, so aborting leaves a device that rejects every console request. The
+# header of initial.conf invites hand-editing, so a stray quote is a question
+# of when, not whether. `bash -n` parses without executing, which turns a
+# bricked first boot into a warning and a fall back to the defaults above.
+if [[ -r "${INITIAL_CONF}" ]]; then
+    if bash -n "${INITIAL_CONF}" 2>/dev/null; then
+        # shellcheck source=/dev/null
+        . "${INITIAL_CONF}"
+    else
+        echo "[firstboot] WARNING: ${INITIAL_CONF} is not valid shell and was ignored." >&2
+        echo "[firstboot] WARNING: falling back to the built-in defaults." >&2
+    fi
+fi
 
 log() {
     logger -t "${LOG_TAG}" -p user.warn -- "$*"

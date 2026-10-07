@@ -3,7 +3,7 @@ PATH := /usr/local/go/bin:$(PATH)
 
 .PHONY: all help compile build-armv6 build-service-armv6 build-cli-armv6 build-hashpw-armv6 \
         build-arm64 build-service-arm64 build-cli-arm64 build-hashpw-arm64 \
-        image image-armhf image-arm64 contrast smoke feature-test access-control verify check-js check-rpc check-render mock dep install installkali remove lint test
+        image image-armhf image-arm64 contrast smoke feature-test access-control check-quoting verify check-js check-rpc check-render mock dep install installkali remove lint test
 
 all: compile
 
@@ -25,6 +25,7 @@ help:
 	@echo "                     report PASS / expected-without-hardware / FAIL"
 	@echo "  make access-control  Attack the running service: every check is an"
 	@echo "                     attack that must FAIL"
+	@echo "  make check-quoting Values install.sh writes must survive being sourced"
 	@echo "  make verify        Run every gate: js, render, rpc shapes, contrast,"
 	@echo "                     unit tests, vet (both arches), smoke, feature-test"
 	@echo "  make check-js      Syntax-check the web console JavaScript"
@@ -129,10 +130,18 @@ feature-test:
 access-control:
 	./tools/access-control-test.sh arm64
 
+# /etc/p4wnp1/initial.conf is SOURCED AS ROOT by the firstboot helper, which
+# runs under `set -e` and is what creates the admin account. An apostrophe in
+# an SSID or passphrase made that file unparseable, so firstboot aborted and
+# the device came up with no account at all; a crafted value ran as root.
+check-quoting:
+	./tools/check-shell-quoting.sh
+
 # The whole suite, in the order that fails cheapest-first.
 verify:
 	./tools/check-js.sh
 	./tools/check-render.sh
+	./tools/check-shell-quoting.sh
 	python3 tools/check-rpc-shapes.py
 	python3 tools/check_contrast.py
 	$(MAKE) test
@@ -170,7 +179,8 @@ lint:
 	          build_support/build.sh \
 	          image/build.sh image/lib/stage.sh image/lib/customize.sh image/lib/verify.sh \
 	          tools/smoke-test.sh tools/check-js.sh tools/check-render.sh \
-	          tools/feature-test.sh tools/access-control-test.sh tools/live-console.sh
+	          tools/feature-test.sh tools/access-control-test.sh tools/live-console.sh \
+	          tools/check-shell-quoting.sh
 	@# One shell, not two: each recipe line gets its own shell, so an `exit 0`
 	@# on the guard line ended only that shell and golangci-lint ran anyway --
 	@# which made `make lint` fail on every machine that does not have it.
