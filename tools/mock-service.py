@@ -56,6 +56,37 @@ SCRIPTS = {
 TMP = {}
 JOBS = [7]
 
+REFLEXES = [
+    {"id": 1, "isActive": True, "oneShot": False, "immutable": True,
+     "serviceStarted": {}, "bashScript": {"scriptName": "startup.sh"}},
+    {"id": 2, "isActive": True, "oneShot": True, "immutable": False,
+     "usbGadgetConnected": {}, "hidScript": {"scriptName": "hidtest1.js"}},
+    {"id": 3, "isActive": False, "oneShot": False, "immutable": False,
+     "dhcpLeaseGranted": {}, "log": {}},
+]
+
+
+def _add_reflex(b):
+    for ta in b.get("TriggerActions", []):
+        ta = dict(ta)
+        ta["id"] = max([r["id"] for r in REFLEXES] + [0]) + 1
+        REFLEXES.append(ta)
+    return {"TriggerActions": REFLEXES}
+
+
+def _remove_reflex(b):
+    ids = {ta.get("id") for ta in b.get("TriggerActions", [])}
+    REFLEXES[:] = [r for r in REFLEXES if r["id"] not in ids]
+    return {"TriggerActions": REFLEXES}
+
+
+def _update_reflex(b):
+    for ta in b.get("TriggerActions", []):
+        for i, r in enumerate(REFLEXES):
+            if r["id"] == ta.get("id"):
+                REFLEXES[i] = dict(r, **ta)
+    return {"TriggerActions": REFLEXES}
+
 
 def fs_create_temp(b):
     # TempDirOrFileRequest{ string dir = 1; string prefix = 2; bool onlyFolder = 3; }
@@ -149,16 +180,12 @@ RPC = {
     "FSWriteFile": fs_write,
     "FSReadFile": fs_read,
     "FSGetFileInfo": fs_info,
-    "GetDeployedTriggerActionSet": lambda b: {"Name": "default", "TriggerActions": [
-        {"id": 1, "isActive": True, "oneShot": False, "immutable": True,
-         "serviceStarted": {}, "bashScript": {"scriptName": "startup.sh"}},
-        {"id": 2, "isActive": True, "oneShot": True, "immutable": False,
-         "usbGadgetConnected": {}, "hidScript": {"scriptName": "hidtest1.js"}},
-        {"id": 3, "isActive": False, "oneShot": False, "immutable": False,
-         "dhcpLeaseGranted": {}, "log": {}},
-        {"id": 4, "isActive": True, "oneShot": False, "immutable": False,
-         "groupReceive": {"groupName": "svc", "value": 1}, "groupSend": {"groupName": "ack", "value": 1}}]},
+    "GetDeployedTriggerActionSet": lambda b: {"Name": "default", "TriggerActions": REFLEXES},
     "FireActionGroupSend": lambda b: {},
+    "ListStoredBashScripts": lambda b: {"msgArray": ["startup.sh", "servicestart.sh", "trigger-aware.sh"]},
+    "DeployTriggerActionSetAdd": lambda b: _add_reflex(b),
+    "DeployTriggerActionSetRemove": lambda b: _remove_reflex(b),
+    "DeployTriggerActionSetUpdate": lambda b: _update_reflex(b),
     "ListStoredMasterTemplate": lambda b: {"msgArray": ["initial", "hid_only", "rogue_ap", "usb_net"]},
     "GetStartupMasterTemplate": lambda b: {"templateName": "initial"},
     "DeployStoredMasterTemplate": lambda b: {},

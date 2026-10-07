@@ -530,3 +530,29 @@ details.ref > summary:hover { color: var(--text); }
   font-size: var(--t-small); color: var(--text-muted); line-height: 1.5;
   max-width: 46ch;
 }
+
+/* --- Reflex builder ----------------------------------------------------- */
+details.builder > summary {
+  cursor: pointer; font-size: var(--t-small); font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint);
+  list-style: none;
+}
+details.builder > summary::-webkit-details-marker { display: none; }
+details.builder > summary::before { content: '+ '; font-family: var(--font-mono); }
+details.builder[open] > summary::before { content: '– '; }
+details.builder > summary:hover { color: var(--text); }
+
+.builder-grid {
+  display: grid; gap: var(--s5);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+/* "When" / "Then" as the spine of the form, so the shape of a rule is legible
+   before you read any of the controls. */
+.builder-step {
+  display: block; font-family: var(--font-display);
+  font-optical-sizing: none; font-variation-settings: 'opsz' 18;
+  font-size: var(--t-lead); font-weight: 600;
+  margin-bottom: var(--s2);
+}
+.builder-fields { margin-top: var(--s3); }
+.builder-fields .field:last-child { margin-bottom: 0; }

@@ -841,69 +841,247 @@ async function refreshJobs() {
 
 /* --- Reflexes: trigger/action automation ------------------------------- */
 
-const TRIGGER_LABEL = {
-  serviceStarted: 'service started', usbGadgetConnected: 'USB host attached',
-  usbGadgetDisconnected: 'USB host detached', wifiAPStarted: 'WiFi AP started',
-  wifiConnectedAsSta: 'joined WiFi', sshLogin: 'SSH login',
-  dhcpLeaseGranted: 'DHCP lease granted', gpioIn: 'GPIO input',
-  groupReceive: 'group value', groupReceiveMulti: 'group values',
-};
-const ACTION_LABEL = {
-  bashScript: 'run bash script', hidScript: 'run HIDScript',
-  deploySettingsTemplate: 'deploy template', log: 'write log',
-  gpioOut: 'GPIO output', groupSend: 'send group value',
-};
+/* Triggers and actions are protobuf oneofs: the wire format is the member's own
+ * field name carrying its message, e.g. {"serviceStarted":{}} or
+ * {"bashScript":{"scriptName":"startup.sh"}}. The `fields` here drive the form
+ * AND the payload, so the two cannot drift apart.
+ *
+ * GPIO and the multi-value group trigger are deliberately not offered: they
+ * need hardware context the console cannot show, and putting them behind a
+ * select with no explanation would be worse than leaving them to the CLI. */
+const TRIGGERS = [
+  { key: 'serviceStarted', label: 'The device finishes booting',
+    hint: 'Fires once, every boot, as soon as the service is up.', fields: [] },
+  { key: 'usbGadgetConnected', label: 'A USB host attaches',
+    hint: 'Fires when the cable goes into a machine that powers up the gadget.', fields: [] },
+  { key: 'usbGadgetDisconnected', label: 'The USB host goes away',
+    hint: 'Fires when the cable is pulled or the host powers down.', fields: [] },
+  { key: 'wifiAPStarted', label: 'The access point comes up', fields: [] },
+  { key: 'wifiConnectedAsSta', label: 'The device joins a WiFi network', fields: [] },
+  { key: 'dhcpLeaseGranted', label: 'A client takes a DHCP lease',
+    hint: 'Fires when something connects and is given an address -- a good proxy for "a machine just joined".', fields: [] },
+  { key: 'sshLogin', label: 'Someone logs in over SSH',
+    fields: [{ name: 'loginUser', label: 'Username', placeholder: 'any user if left blank' }] },
+  { key: 'groupReceive', label: 'A group value arrives',
+    hint: 'Group values are how scripts on the device signal each other.',
+    fields: [
+      { name: 'groupName', label: 'Group', placeholder: 'svc', required: true },
+      { name: 'value', label: 'Value', type: 'number', value: '1', numeric: true },
+    ] },
+];
+
+const ACTIONS = [
+  { key: 'hidScript', label: 'Run a HIDScript',
+    hint: 'Types into the attached host.',
+    fields: [{ name: 'scriptName', label: 'Script', required: true, options: 'hid' }] },
+  { key: 'bashScript', label: 'Run a bash script',
+    hint: 'Runs on the device itself, as root.',
+    fields: [{ name: 'scriptName', label: 'Script', required: true, options: 'bash' }] },
+  { key: 'groupSend', label: 'Send a group value',
+    hint: 'Signal another script or reflex.',
+    fields: [
+      { name: 'groupName', label: 'Group', placeholder: 'ack', required: true },
+      { name: 'value', label: 'Value', type: 'number', value: '1', numeric: true },
+    ] },
+  { key: 'log', label: 'Write a line to the Journal',
+    hint: 'Useful for proving a trigger fires before you attach anything real to it.', fields: [] },
+];
+
+const byKey = (list, k) => list.find(x => x.key === k);
+
+function describeOneOf(obj, list) {
+  for (const item of list) if (obj && obj[item.key] !== undefined && obj[item.key] !== null) return item.label;
+  return 'unrecognised';
+}
 
 Views.reflexes = async function () {
   const main = clear($('#view'));
   main.append(pageHead('Reflexes',
-    'Rules the device acts on by itself: when a trigger fires, it runs an action. This is what makes it autonomous once the cable is in.'));
+    'Rules the device acts on by itself: when something happens, run something. This is what lets it work with nobody at the keyboard.'));
 
-  const set = await guard(() => Api.rpc('GetDeployedTriggerActionSet'), 'read trigger actions');
+  const [set, hidScripts, bashScripts] = await Promise.all([
+    guard(() => Api.rpc('GetDeployedTriggerActionSet'), 'read the reflexes'),
+    Api.rpc('ListStoredHIDScripts').catch(() => null),
+    Api.rpc('ListStoredBashScripts').catch(() => null),
+  ]);
   State.triggers = set;
   const items = (set && set.TriggerActions) || [];
-
-  const describe = (obj, labels) => {
-    for (const k of Object.keys(labels)) if (obj && obj[k] !== undefined && obj[k] !== null) return labels[k];
-    return 'unrecognised';
+  const scriptOptions = {
+    hid: (hidScripts && hidScripts.msgArray) || [],
+    bash: (bashScripts && bashScripts.msgArray) || [],
   };
 
+  main.append(renderReflexBuilder(scriptOptions));
+
   main.append(h('div.card',
-    h('h2.card-title', 'Deployed set' + (set && set.Name ? ' -- ' + set.Name : '')),
+    h('div.card-head',
+      h('h2.card-title', { style: 'margin:0' },
+        'Deployed' + (set && set.Name ? ' -- ' + set.Name : '')),
+      h('span.field-hint', items.length
+        ? items.filter(t => t.isActive).length + ' of ' + items.length + ' armed'
+        : '')),
     items.length ? h('table.data',
       h('thead', h('tr',
         h('th', 'Id'), h('th', 'When'), h('th', 'Then'),
-        h('th', 'Active'), h('th', 'One shot'), h('th', 'Locked'))),
+        h('th', 'Once'), h('th', 'State'), h('th', ''))),
       h('tbody', ...items.map(t => h('tr',
         h('td.mono', String(t.id ?? '--')),
-        h('td', describe(t, TRIGGER_LABEL)),
-        h('td', describe(t, ACTION_LABEL)),
-        h('td', h('span', { class: 'dot ' + (t.isActive ? 'dot-ok' : 'dot-idle') })),
+        h('td', describeOneOf(t, TRIGGERS)),
+        h('td', describeOneOf(t, ACTIONS)),
         h('td', t.oneShot ? 'yes' : 'no'),
-        h('td', t.immutable ? 'yes' : 'no')))))
-      : h('div.empty', 'No trigger actions are deployed.')));
+        h('td',
+          h('span.pill',
+            h('span', { class: 'dot ' + (t.isActive ? 'dot-ok' : 'dot-idle') }),
+            t.isActive ? 'Armed' : 'Off')),
+        h('td', h('div.btn-row',
+          t.immutable
+            ? h('span.field-hint', 'locked')
+            : [
+                h('button.btn.btn-sm', {
+                  type: 'button',
+                  onclick: async () => {
+                    const next = Object.assign({}, t, { isActive: !t.isActive });
+                    const r = await guard(
+                      () => Api.rpc('DeployTriggerActionSetUpdate', { TriggerActions: [next] }),
+                      t.isActive ? 'disarm the reflex' : 'arm the reflex');
+                    if (r !== undefined) { toast(t.isActive ? 'Disarmed.' : 'Armed.'); Views.reflexes(); }
+                  },
+                }, t.isActive ? 'Disarm' : 'Arm'),
+                h('button.btn.btn-sm.btn-danger', {
+                  type: 'button',
+                  onclick: async () => {
+                    const yes = await confirmAction({
+                      title: 'Delete reflex ' + t.id + '?',
+                      body: describeOneOf(t, TRIGGERS) + ' -> ' + describeOneOf(t, ACTIONS),
+                      consequence: 'The rule is removed from the running device immediately. If it is part of a stored loadout it will come back when that loadout is deployed again.',
+                      confirmLabel: 'Delete',
+                      danger: true,
+                    });
+                    if (!yes) return;
+                    const r = await guard(
+                      () => Api.rpc('DeployTriggerActionSetRemove', { TriggerActions: [t] }),
+                      'delete the reflex');
+                    if (r !== undefined) { toast('Deleted.'); Views.reflexes(); }
+                  },
+                }, 'Delete'),
+              ]))))))
+      : h('div.empty', 'No reflexes are deployed. Add one above and the device starts acting on its own.')));
 
   main.append(h('div.card',
-    h('h2.card-title', 'Group value'),
-    h('p.field-hint', { style: 'margin-top:-8px;margin-bottom:16px' },
-      'Group values are how bash scripts, HIDScripts and triggers signal each other on the device.'),
+    h('h2.card-title', 'Send a group value by hand'),
+    h('p.field-hint', { style: 'margin:-8px 0 16px' },
+      'Fires a group value right now, without waiting for a trigger. The quickest way to test a reflex you just built.'),
     (() => {
-      const g = h('input', { type: 'text', value: '' });
+      const g = h('input', { type: 'text', placeholder: 'svc' });
       const v = h('input', { type: 'number', value: '1' });
       return h('div.row',
         h('label.field', h('span.field-label', 'Group'), g),
         h('label.field', { style: 'max-width:140px' }, h('span.field-label', 'Value'), v),
         h('div', { style: 'padding-top:26px' },
           h('button.btn', {
+            type: 'button',
             onclick: async () => {
               if (!g.value.trim()) { toast('Name a group first.', true); return; }
               const r = await guard(() => Api.rpc('FireActionGroupSend',
-                { groupName: g.value.trim(), value: Number(v.value) || 0 }), 'send group value');
+                { groupName: g.value.trim(), value: Number(v.value) || 0 }), 'send the group value');
               if (r !== undefined) toast('Sent.');
             },
           }, 'Send')));
     })()));
 };
+
+/* The builder. Inline rather than a modal: it has two dependent selects and a
+   variable set of fields, which is more than a dialog should carry. */
+function renderReflexBuilder(scriptOptions) {
+  const triggerSel = h('select', { 'aria-label': 'Trigger' },
+    ...TRIGGERS.map(t => h('option', { value: t.key }, t.label)));
+  const actionSel = h('select', { 'aria-label': 'Action' },
+    ...ACTIONS.map(a => h('option', { value: a.key }, a.label)));
+  const oneShot = h('input', { type: 'checkbox' });
+
+  const triggerFields = h('div.builder-fields');
+  const actionFields = h('div.builder-fields');
+  const triggerHint = h('p.field-hint');
+  const actionHint = h('p.field-hint');
+
+  /* Build inputs for whichever member is selected, and keep the DOM nodes so
+     collect() can read them back without a second lookup table. */
+  function renderFields(spec, host, hintEl, store) {
+    clear(host); clear(hintEl);
+    if (spec.hint) hintEl.append(spec.hint);
+    store.inputs = {};
+    for (const f of spec.fields) {
+      let input;
+      if (f.options) {
+        const opts = scriptOptions[f.options] || [];
+        input = h('select', {},
+          h('option', { value: '' }, opts.length ? 'Choose a script...' : 'No scripts stored'),
+          ...opts.map(n => h('option', { value: n }, n)));
+      } else {
+        input = h('input', { type: f.type || 'text', value: f.value || '', placeholder: f.placeholder || '' });
+      }
+      store.inputs[f.name] = { el: input, spec: f };
+      host.append(h('label.field', h('span.field-label', f.label), input));
+    }
+  }
+
+  const tStore = { inputs: {} }, aStore = { inputs: {} };
+  const syncTrigger = () => renderFields(byKey(TRIGGERS, triggerSel.value), triggerFields, triggerHint, tStore);
+  const syncAction = () => renderFields(byKey(ACTIONS, actionSel.value), actionFields, actionHint, aStore);
+  triggerSel.addEventListener('change', syncTrigger);
+  actionSel.addEventListener('change', syncAction);
+  syncTrigger(); syncAction();
+
+  function collect(store) {
+    const out = {};
+    for (const [name, { el, spec }] of Object.entries(store.inputs)) {
+      const raw = el.value.trim();
+      if (spec.required && !raw) return { error: spec.label + ' is required.' };
+      if (!raw) continue;
+      out[name] = spec.numeric ? Number(raw) : raw;
+      if (spec.numeric && !Number.isFinite(out[name])) return { error: spec.label + ' must be a number.' };
+    }
+    return { value: out };
+  }
+
+  const createBtn = h('button.btn.btn-primary', { type: 'button' }, 'Add reflex');
+  createBtn.addEventListener('click', async () => {
+    const t = collect(tStore), a = collect(aStore);
+    if (t.error) { toast(t.error, true); return; }
+    if (a.error) { toast(a.error, true); return; }
+
+    const ta = { isActive: true, oneShot: oneShot.checked, immutable: false };
+    ta[triggerSel.value] = t.value;
+    ta[actionSel.value] = a.value;
+
+    createBtn.disabled = true;
+    const r = await guard(
+      () => Api.rpc('DeployTriggerActionSetAdd', { TriggerActions: [ta] }),
+      'add the reflex');
+    createBtn.disabled = false;
+    if (r !== undefined) { toast('Reflex added and armed.'); Views.reflexes(); }
+  });
+
+  return h('div.card',
+    h('details.builder', { open: 'open' },
+      h('summary', 'Add a reflex'),
+      h('div', { style: 'margin-top:16px' },
+        h('div.builder-grid',
+          h('div',
+            h('span.builder-step', 'When'),
+            h('label.field', h('span.field-label', 'Trigger'), triggerSel),
+            triggerHint,
+            triggerFields),
+          h('div',
+            h('span.builder-step', 'Then'),
+            h('label.field', h('span.field-label', 'Action'), actionSel),
+            actionHint,
+            actionFields)),
+        h('label.check', { style: 'margin-top:8px' },
+          oneShot,
+          h('span', 'Only once -- disarm itself after it fires')),
+        h('div.btn-row', { style: 'margin-top:12px' }, createBtn))));
+}
 
 /* --- Loadouts: master templates ---------------------------------------- */
 
