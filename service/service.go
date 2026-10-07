@@ -216,6 +216,23 @@ func (s *Service) Start() (context.Context, context.CancelFunc) {
 	s.SubSysGpio.Start()
 	s.SubSysLed.Start()
 	s.SubSysRPC.StartRpcServerAndWeb("0.0.0.0", "50051", "8000", common.PATH_WEBROOT) //start gRPC service
+
+	// Issue the credential the device's own scripts authenticate with, BEFORE
+	// anything that runs one. servicestart.sh and every user trigger action
+	// drive the box through P4wnP1_cli, which talks to the API we just
+	// started; without this they all fail Unauthenticated and a device whose
+	// startup template failed comes up with no USB gadget, no DHCP and no
+	// WiFi AP. See service/auth/localcred.go.
+	if err := s.SubSysAuth.ProvisionLocalToken(auth.LocalTokenPath); err != nil {
+		// Not fatal -- the console still works, and saying so beats dying
+		// silently -- but local scripts will not be able to authenticate.
+		log.Printf("WARNING: auth: could not issue the local script credential: %v", err)
+		log.Printf("WARNING: auth: P4wnP1_cli calls from scripts on this device will fail")
+	} else {
+		log.Printf("auth: issued local script credential at %s (root-only)", auth.LocalTokenPath)
+		go s.SubSysAuth.KeepLocalTokenFresh(auth.LocalTokenPath, s.Ctx.Done())
+	}
+
 	log.Println("Starting TriggerAction event listener ...")
 	s.SubSysTriggerActions.Start()
 
@@ -307,6 +324,16 @@ func (s *Service) Stop() {
 	}
 	if s.SubSysEvent != nil {
 		safeStop("event manager", s.SubSysEvent.Stop)
+	}
+	// Drop the local script credential. /run is a tmpfs so the file would go
+	// on reboot anyway, but `systemctl stop` is not a reboot.
+	if s.SubSysAuth != nil {
+		safeStop("local credential", func() {
+			if err := s.SubSysAuth.RemoveLocalToken(); err != nil {
+				log.Printf("WARNING: auth: could not remove %s: %v", auth.LocalTokenPath, err)
+			}
+			s.SubSysAuth.Close()
+		})
 	}
 	// The datastore was never closed. badger needs a clean close to flush its
 	// value log; skipping it is how template edits get lost on a reboot.

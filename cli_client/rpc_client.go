@@ -13,14 +13,15 @@ import (
 )
 
 // tokenAuthCreds implements grpc.PerRPCCredentials so every CLI RPC call
-// automatically carries the bearer token from ~/.p4wnp1/token. The token is
-// re-read fresh on each call so that a Login command issued mid-CLI-session
-// takes effect for subsequent commands without restarting.
+// automatically carries a bearer token (see CurrentToken for where it comes
+// from). The token is re-read fresh on each call so that a Login command
+// issued mid-CLI-session takes effect for subsequent commands without
+// restarting.
 type tokenAuthCreds struct{}
 
 func (tokenAuthCreds) GetRequestMetadata(_ context.Context, _ ...string) (map[string]string, error) {
-	_, _, token, _, err := LoadToken()
-	if err != nil || token == "" {
+	token := CurrentToken()
+	if token == "" {
 		// No token: return empty metadata. The server's interceptor will
 		// reject the call with Unauthenticated, and the wrapper at the
 		// call site translates that into a helpful "run auth login" hint.
@@ -60,11 +61,11 @@ func ClientConnectServer(rpcHost string, rpcPort string) (
 }
 
 // metadataContextWithToken decorates an outgoing context with the bearer
-// token from ~/.p4wnp1/token. Used by the few call sites in this file that
-// call grpc.Dial directly instead of going through ClientConnectServer.
+// token. Used by the few call sites in this file that call grpc.Dial directly
+// instead of going through ClientConnectServer.
 func metadataContextWithToken(ctx context.Context) context.Context {
-	_, _, token, _, err := LoadToken()
-	if err != nil || token == "" {
+	token := CurrentToken()
+	if token == "" {
 		return ctx
 	}
 	return metadata.AppendToOutgoingContext(ctx, "authorization", "bearer "+token)

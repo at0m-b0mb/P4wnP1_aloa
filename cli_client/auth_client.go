@@ -9,7 +9,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/mame82/P4wnP1_aloa/service/auth"
 )
 
 // authHTTPPort is the port the service exposes its HTTP auth endpoints on.
@@ -94,6 +97,35 @@ func LoadToken() (host, username, token string, expiresAt int64, err error) {
 		return "", "", "", 0, fmt.Errorf("parse token file %s: %w", path, err)
 	}
 	return t.Host, t.Username, t.Token, t.ExpiresAt, nil
+}
+
+// CurrentToken returns the bearer token this invocation should present, or
+// "" if there is none. Every outgoing call goes through here.
+//
+// Two sources, in order:
+//
+//  1. ~/.p4wnp1/token, written by `auth login`. This is a human at a
+//     keyboard, so it wins when it is still valid.
+//  2. The local script credential the service writes under /run, readable
+//     only by root. This is what makes `P4wnP1_cli` work from
+//     servicestart.sh and from trigger actions, which have no way to log in.
+//
+// The expiry check on (1) is the point of the ordering, not a nicety: root
+// on the device may well have run `auth login` once, days ago. If a stale
+// cached token shadowed the live local credential, every boot script would
+// resume failing with Unauthenticated -- the exact bug this fixes, returning
+// by a side door.
+func CurrentToken() string {
+	if _, _, tok, expiresAt, err := LoadToken(); err == nil && tok != "" {
+		if expiresAt == 0 || time.Now().Unix() < expiresAt {
+			return tok
+		}
+	}
+	tok, err := auth.ReadLocalToken(auth.LocalTokenPath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(tok)
 }
 
 // ClearToken deletes ~/.p4wnp1/token. Returns nil if the file didn't exist.

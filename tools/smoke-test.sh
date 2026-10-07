@@ -128,6 +128,37 @@ case "$USB_JSON" in
         ;;
 esac
 
+# The device drives ITSELF through P4wnP1_cli: servicestart.sh and every user
+# trigger action are shell scripts full of CLI calls. When the API began
+# requiring a bearer token, all of them started failing Unauthenticated -- so a
+# device whose startup template failed came up with no USB gadget, no DHCP and
+# no WiFi AP, and the fallback meant to rescue it was the thing that was
+# broken. The console looked perfect throughout, which is why this went
+# unnoticed; nothing here had ever read the service's own log.
+if grep -q 'Unauthenticated' /tmp/svc.log; then
+    bad "the device's own scripts can authenticate" \
+        "the service log contains Unauthenticated: $(grep -m1 'Unauthenticated' /tmp/svc.log | tail -c 90)"
+else
+    ok "the device's own scripts can authenticate"
+fi
+
+# ...and prove it directly rather than only by absence of an error. This runs
+# as root with no ~/.p4wnp1/token, exactly as a boot script does, so it passes
+# only if the local credential under /run is found and accepted.
+check "the local script credential exists, root-only" "600" \
+  "$(stat -c %a /run/p4wnp1/local.token 2>/dev/null)"
+
+if [ -z "${HOME:-}" ] || [ ! -f "$HOME/.p4wnp1/token" ]; then
+    if CLI_OUT=$(/usr/local/bin/P4wnP1_cli led -b 3 2>&1); then
+        ok "P4wnP1_cli works with no interactive login (as boot scripts run it)"
+    else
+        bad "P4wnP1_cli works with no interactive login (as boot scripts run it)" \
+            "${CLI_OUT##*$'\n'}"
+    fi
+else
+    ok "skipped CLI-without-login check (a cached token exists)"
+fi
+
 # After every malformed request above, it must still be serving.
 kill -0 "$SVC" 2>/dev/null && ok "service still alive after hostile input" \
                            || bad "service still alive after hostile input" "it died"

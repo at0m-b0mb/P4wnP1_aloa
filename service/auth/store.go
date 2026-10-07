@@ -128,9 +128,16 @@ func (s *Store) persist() error {
 
 // SetPassword creates or updates a user. Replaces any existing hash for the
 // username. Used by both the first-boot bootstrap and ChangePassword.
+//
+// LocalUsername is refused: it names the sessions the service issues to the
+// device's own scripts (see localcred.go), and a human account sharing that
+// name would make the console's session list lie about who called.
 func (s *Store) SetPassword(username, password string) error {
 	if username == "" {
 		return errors.New("auth: username is empty")
+	}
+	if username == LocalUsername {
+		return fmt.Errorf("auth: %q is reserved for the device's own scripts", LocalUsername)
 	}
 	if len(password) < MinPasswordLength {
 		return ErrWeakPassword
