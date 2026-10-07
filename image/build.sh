@@ -165,6 +165,25 @@ for ARCH in $ARCHES; do
 
     [ -f "$OUT_IMG" ] || die "stage.sh reported success but $OUT_IMG is missing"
 
+    # Verify BEFORE compressing.
+    #
+    # A build once produced 2.6GB of pure zeros, compressed it to 410KB, wrote
+    # a checksum for it and reported success. stage.sh had done everything
+    # correctly inside the container; the host read the file through the VM's
+    # shared filesystem before those writes were visible and compressed what it
+    # saw. Nothing caught it because nothing had ever looked at the output.
+    #
+    # `sync` on the host first, then mount the image in a container and check
+    # it really contains what it should.
+    sync 2>/dev/null || true
+    c "[$ARCH] Verifying the built image"
+    docker run --rm --privileged \
+        -v /dev:/dev \
+        -v "$REPO_ROOT:/repo" \
+        -e P4_ARCH="$ARCH" \
+        "$BUILDER_TAG" /repo/image/lib/verify.sh "/repo/image/out/$(basename "$OUT_IMG")" \
+        || die "the built image failed verification; not publishing it"
+
     if [ "$COMPRESS" = "1" ]; then
         c "[$ARCH] Compressing"
         rm -f "$OUT_IMG.xz"
