@@ -27,7 +27,25 @@ type Manager struct {
 
 	// failedLogin serialises the delay on a rejected login. See Login.
 	failedLogin sync.Mutex
+
+	// loginSlots bounds how many logins may be verifying AT ONCE. See Login.
+	loginSlots chan struct{}
 }
+
+// maxConcurrentLogins caps simultaneous password verifications.
+//
+// Serialising the post-failure delay stops an attacker getting more than one
+// GUESS per delay, but it does nothing about the cost of each attempt:
+// bcrypt at cost 12 takes roughly 250ms of CPU on a Pi Zero W, and it runs
+// BEFORE the delay. Fifty parallel attempts therefore still bought fifty
+// concurrent bcrypts on a single-core 1GHz board whose job at that moment may
+// be typing keystrokes into a host. The rate limit was real; the resource
+// limit was missing.
+//
+// Two slots, not one: the operator and whatever they have open elsewhere
+// should not queue behind each other, and two concurrent bcrypts is a
+// manageable load where fifty is not.
+const maxConcurrentLogins = 2
 
 // NewManager wires up a Manager from a Store and Sessions. Starts a
 // background goroutine that prunes expired sessions every minute.
@@ -40,6 +58,7 @@ func NewManager(store *Store, sessions *Sessions, ttl time.Duration) *Manager {
 		Sessions:   sessions,
 		ttl:        ttl,
 		stopPruner: make(chan struct{}),
+		loginSlots: make(chan struct{}, maxConcurrentLogins),
 	}
 	go m.runPruner()
 	return m
@@ -68,7 +87,19 @@ func (m *Manager) Close() {
 // Sleeps for FailedLoginDelay on failure -- caller doesn't need to add
 // extra delay.
 func (m *Manager) Login(_ context.Context, username, password string) (*Session, error) {
-	if !m.Store.Verify(username, password) {
+	// Hold a slot across the password check itself, so the number of bcrypt
+	// hashes running at once is bounded no matter how many connections an
+	// attacker opens. Released before the failure delay below, which has its
+	// own lock -- otherwise a slow attacker would also block the operator.
+	if m.loginSlots != nil {
+		m.loginSlots <- struct{}{}
+	}
+	ok := m.Store.Verify(username, password)
+	if m.loginSlots != nil {
+		<-m.loginSlots
+	}
+
+	if !ok {
 		// Hold a lock across the delay. Sleeping alone throttles nothing:
 		// each request sleeps in its own goroutine, so twenty parallel
 		// guesses cost about one second in total rather than twenty, and the

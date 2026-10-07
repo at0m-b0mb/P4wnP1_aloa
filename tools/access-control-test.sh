@@ -339,7 +339,41 @@ fi
 # blocked in ReadMessage with no read limit: an anonymous peer could park
 # goroutines and fds forever, or stream an unbounded frame into a root process.
 # Nothing shipped ever spoke this transport.
-section "9. the unauthenticated websocket upgrade is gone"
+# Authentication on the event stream happened ONCE, at open, and then the
+# connection blocked for its whole life. Nothing terminated an already-open
+# stream: a logout, a per-session revoke and a password change all left it
+# running, still delivering every device event -- HID activity, DHCP leases,
+# trigger fires -- to a credential that had been withdrawn.
+#
+# This check takes about half a minute because the re-check rides the 20s
+# keepalive tick. That is the honest cost of testing the real timing rather
+# than a mock of it.
+section "9. a revoked session stops receiving the event stream"
+VICTIM2=$(body -X POST $JSON -d "{\"username\":\"admin\",\"password\":\"$NEWPW\"}" $B/api/auth/login \
+          | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))' 2>/dev/null)
+if [ -n "$VICTIM2" ]; then
+    timeout 45 curl -sN -H "Authorization: Bearer $VICTIM2" "$B/api/v1/events" >/tmp/sse.out 2>&1 &
+    SSE_PID=$!
+    sleep 3
+    if ! kill -0 "$SSE_PID" 2>/dev/null; then
+        bad "the event stream opens for a valid session" "it closed immediately"
+    else
+        ok "the event stream opens for a valid session"
+        VID2=$(body -H "Authorization: Bearer $VICTIM2" $B/api/auth/sessions \
+               | python3 -c 'import sys,json;print(next((s["id"] for s in json.load(sys.stdin)["sessions"] if s["is_current"]),""))' 2>/dev/null)
+        curl -s -o /dev/null -X POST $JSON -H "$AUTHH" -d "{\"id\":\"$VID2\"}" $B/api/auth/sessions/revoke
+        if wait "$SSE_PID"; then SSE_RC=0; else SSE_RC=$?; fi
+        if [ "$SSE_RC" = "124" ]; then
+            bad "a revoked session's event stream is closed" "still streaming 45s after revocation"
+        else
+            ok "a revoked session's event stream is closed"
+        fi
+    fi
+else
+    bad "could open an event stream to revoke" "login failed"
+fi
+
+section "10. the unauthenticated websocket upgrade is gone"
 WS=$(python3 - <<'PYEOF'
 import socket, os, base64
 CRLF = chr(13) + chr(10)          # written this way so no layer of shell,
@@ -374,7 +408,7 @@ case "$WS" in
   *)                       bad "an anonymous websocket upgrade is refused" "the probe did not run: $WS" ;;
 esac
 
-section "10. path confusion must not skip authentication"
+section "11. path confusion must not skip authentication"
 for p in \
   "/api/v1/rpc/../../auth/health" \
   "/api/v1/../auth/health" \
@@ -407,7 +441,7 @@ case "$H" in
   *) ok "the unauthenticated health endpoint discloses nothing sensitive" ;;
 esac
 
-section "11. secrets must not leak into logs"
+section "12. secrets must not leak into logs"
 if grep -qiE "Bearer [A-Za-z0-9_-]{20,}|password_hash|\"password\"" /tmp/svc.log; then
     bad "no token or password in the service log" "$(grep -oiE 'Bearer [A-Za-z0-9_-]{20,}|password_hash|"password"' /tmp/svc.log | head -1)"
 else

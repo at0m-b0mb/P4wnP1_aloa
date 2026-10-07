@@ -576,3 +576,53 @@ func TestAnonymousLoginBodyIsBounded(t *testing.T) {
 		t.Fatalf("an ordinary login body was rejected: HTTP %d", resp2.StatusCode)
 	}
 }
+
+// Serialising the post-failure delay bounds the GUESS RATE. It does not bound
+// the COST of each attempt: bcrypt at cost 12 is ~250ms of CPU on a Pi Zero W
+// and it runs before the delay, so N parallel attempts bought N concurrent
+// bcrypts on a single-core board that may be mid-keystroke-injection.
+func TestConcurrentLoginsAreBounded(t *testing.T) {
+	store, _ := NewStore(filepath.Join(t.TempDir(), "auth.json"))
+	if err := store.SetPassword("admin", "the-real-password"); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(store, NewSessions(), time.Hour)
+	defer m.Close()
+
+	var inFlight, peak int64
+	var mu sync.Mutex
+	observe := func(delta int64) {
+		mu.Lock()
+		inFlight += delta
+		if inFlight > peak {
+			peak = inFlight
+		}
+		mu.Unlock()
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			observe(1)
+			_, _ = m.Login(nil, "admin", "wrong-password") //nolint:staticcheck // nil ctx unused
+			observe(-1)
+		}()
+	}
+	wg.Wait()
+
+	// The counter above brackets the whole Login call, including the delay, so
+	// it cannot measure bcrypt concurrency directly. What it CAN prove is that
+	// the slots exist and are sized as documented -- the useful regression
+	// guard, since the failure mode is someone removing them.
+	if cap(m.loginSlots) != maxConcurrentLogins {
+		t.Errorf("login slots = %d, want %d", cap(m.loginSlots), maxConcurrentLogins)
+	}
+	if maxConcurrentLogins < 1 {
+		t.Error("maxConcurrentLogins must leave at least one slot or no one can log in")
+	}
+	if peak == 0 {
+		t.Error("the probe never observed a login in flight")
+	}
+}

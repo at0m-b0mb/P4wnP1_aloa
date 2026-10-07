@@ -178,7 +178,7 @@ make test            # Go unit tests
 make verify          # every gate below, in order, cheapest failure first
 make smoke           # run the service in a container, end to end (28 checks)
 make feature-test    # call all 83 RPCs against the real binary (85 checks)
-make access-control  # attack the running service (57 checks, all must FAIL)
+make access-control  # attack the running service (60 checks, all must FAIL)
 make check-quoting   # values install.sh writes must survive being sourced
 make check-render    # render every console view in jsdom (11 checks)
 make check-rpc       # console RPC payloads vs the .proto
@@ -289,7 +289,7 @@ PASS  unauthenticated API is refused                 PASS  P4wnP1_cli works with
 ```
 
 `make access-control` is the adversarial gate: **every check in it is an attack that must fail** --
-57 of them, covering unauthenticated reach, cross-origin and DNS rebinding, path traversal on all
+60 of them, covering unauthenticated reach, cross-origin and DNS rebinding, path traversal on all
 three folders, symlink escape, token revocation, and the machine-local credential. Most were
 written by first demonstrating the attack *succeeding* against the real binary, then fixing the
 code, then confirming the check flipped. That is how the symlink escape above was found: a

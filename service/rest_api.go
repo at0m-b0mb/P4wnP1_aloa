@@ -403,6 +403,23 @@ func (a *apiHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// Heartbeat: an idle SSE connection behind a proxy or a sleeping phone gets
 	// silently dropped. A comment line every 20s keeps it alive and lets the
 	// client notice a dead link quickly.
+	//
+	// The same tick re-checks the token, because authentication on this
+	// endpoint happened ONCE, at open, and then EventListen blocks for the
+	// life of the connection. Nothing terminated an already-open stream: a
+	// logout, a per-session revoke and a password change all left it running,
+	// still delivering every device event -- HID activity, DHCP leases,
+	// trigger fires -- to a credential that had been withdrawn. Revocation
+	// that does not reach the one long-lived connection is not revocation.
+	//
+	// Lookup with ttl=0 so the check does NOT slide the expiry. Otherwise a
+	// console tab left open would keep its session alive forever without
+	// anyone touching the device.
+	tok := strings.TrimSpace(r.Header.Get(auth.HTTPAuthHeader))
+	if len(tok) >= len(auth.BearerPrefix) {
+		tok = strings.TrimSpace(tok[len(auth.BearerPrefix):])
+	}
+
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -415,6 +432,11 @@ func (a *apiHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
+				if _, err := a.authMgr.Sessions.Lookup(tok, 0); err != nil {
+					log.Printf("JSON API: event stream closed, its session is no longer valid")
+					cancel()
+					return
+				}
 				stream.comment("keepalive")
 			}
 		}
