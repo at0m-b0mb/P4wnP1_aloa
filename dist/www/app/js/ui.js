@@ -49,6 +49,18 @@ function toast(message, isError) {
   setTimeout(() => t.remove(), isError ? 9000 : 4000);
 }
 
+/* Remove every toast currently on screen.
+ *
+ * Error toasts live 12-20 seconds so there is time to read the hint and press
+ * the action button. That is right while you stay put, and wrong the moment
+ * you navigate: "This device has no usable WiFi" from the Radio page would
+ * still be sitting over the Keystrokes editor twenty seconds later, covering
+ * the Run button. Advice about a page you have left is just an obstruction. */
+function clearToasts() {
+  const box = $('#toasts');
+  if (box) clear(box);
+}
+
 /* --- base64 that survives non-ASCII ---------------------------------------
  * btoa() throws on any code point above 0xFF, so a script containing an
  * accented character or a smart quote -- which a payload pasted from a web page

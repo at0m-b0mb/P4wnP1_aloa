@@ -459,7 +459,12 @@ func (gm *UsbGadgetManager) ParseGadgetState(gadgetName string) (result *pb.Gadg
 
 	//check if root exists, return error otherwise
 	if _, err = os.Stat(gadgetDir); os.IsNotExist(err) {
-		err = errors.New(fmt.Sprintf("gadget %s doesn't exist", gadgetName))
+		// Wraps the sentinel so callers can tell "this box cannot do USB
+		// gadget at all" from "the service broke". Without it the RPC layer
+		// had no way to classify this and answered HTTP 500 -- claiming an
+		// internal fault -- on every board with no UDC bound, while the
+		// equivalent WiFi condition correctly answered 503.
+		err = fmt.Errorf("gadget %s doesn't exist: %w", gadgetName, ErrUsbNotUsable)
 		result = nil
 		return
 	}

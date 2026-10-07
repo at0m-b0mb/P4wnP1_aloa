@@ -119,12 +119,28 @@ function explainError(e, what) {
   return { message: (what ? 'Could not ' + what + '.' : 'That did not work.'), hint: trimmed };
 }
 
-/* Toast with guidance, and an action button when there is somewhere to go. */
+/* Toast with guidance, and an action button when there is somewhere to go.
+ *
+ * Identical messages collapse onto one another. A view that loads WiFi state,
+ * the AP config and the station list makes three calls that all fail for the
+ * same reason on a device with no WiFi, and three stacked copies of the same
+ * paragraph reads as three separate faults. */
 function reportError(e, what) {
   const { message, hint, action } = explainError(e, what);
   const box = $('#toasts');
   if (!box) return;
-  const t = h('div.toast.toast-err',
+
+  const key = message + '\u0000' + (hint || '');
+  const existing = box.querySelector('[data-toast-key="' + CSS.escape(key) + '"]');
+  if (existing) {
+    // Restart its clock rather than queueing a duplicate behind it.
+    clearTimeout(Number(existing.dataset.toastTimer));
+    existing.dataset.toastTimer = String(
+      setTimeout(() => existing.remove(), action ? 20000 : 12000));
+    return;
+  }
+
+  const t = h('div.toast.toast-err', { 'data-toast-key': key },
     h('p.toast-title', message),
     hint ? h('p.toast-hint', hint) : null,
     action ? h('button.btn.btn-sm', {
@@ -133,7 +149,7 @@ function reportError(e, what) {
     }, action.label) : null,
     h('button.toast-close', { type: 'button', 'aria-label': 'Dismiss', onclick: () => t.remove() }, '×'));
   box.append(t);
-  setTimeout(() => t.remove(), action ? 20000 : 12000);
+  t.dataset.toastTimer = String(setTimeout(() => t.remove(), action ? 20000 : 12000));
 }
 
 /* Any RPC can fail because the operator just reconfigured the very interface
@@ -900,6 +916,16 @@ const ACTIONS = [
     ] },
   { key: 'log', label: 'Write a line to the Journal',
     hint: 'Useful for proving a trigger fires before you attach anything real to it.', fields: [] },
+  // Two of the reflexes the device ships with use this, so leaving it out of
+  // the list made the Deployed table describe them as "unrecognised" -- an
+  // operator could see that something was armed but not what it would do.
+  { key: 'deploySettingsTemplate', label: 'Deploy a stored template',
+    hint: 'Applies a saved USB, network, WiFi, Bluetooth or trigger template.',
+    fields: [
+      { name: 'templateName', label: 'Template', required: true },
+      { name: 'type', label: 'Kind', value: 'NETWORK',
+        choices: ['USB', 'NETWORK', 'WIFI', 'BLUETOOTH', 'TRIGGER_ACTIONS'] },
+    ] },
 ];
 
 const byKey = (list, k) => list.find(x => x.key === k);
@@ -930,8 +956,10 @@ Views.reflexes = async function () {
 
   main.append(h('div.card',
     h('div.card-head',
-      h('h2.card-title', { style: 'margin:0' },
-        'Deployed' + (set && set.Name ? ' -- ' + set.Name : '')),
+      // The set's Name is an internal identifier -- it is literally the
+      // string "DeployedTriggerActions" -- so printing it just shouted a
+      // Go type name at the operator.
+      h('h2.card-title', { style: 'margin:0' }, 'Deployed'),
       h('span.field-hint', items.length
         ? items.filter(t => t.isActive).length + ' of ' + items.length + ' armed'
         : '')),
@@ -1032,6 +1060,12 @@ function renderReflexBuilder(scriptOptions) {
         input = h('select', {},
           h('option', { value: '' }, opts.length ? 'Choose a script...' : 'No scripts stored'),
           ...opts.map(n => h('option', { value: n }, n)));
+      } else if (f.choices) {
+        // A fixed set of values the API will accept. Typing these by hand
+        // into a text box only produces rejections the operator cannot
+        // predict -- the enum is not written down anywhere in the console.
+        input = h('select', {}, ...f.choices.map(c => h('option', { value: c }, c)));
+        if (f.value) input.value = f.value;
       } else {
         input = h('input', { type: f.type || 'text', value: f.value || '', placeholder: f.placeholder || '' });
       }
@@ -1378,6 +1412,7 @@ function runViewTeardown() {
 function go(view) {
   if (!Views[view]) view = 'overview';
   runViewTeardown();
+  clearToasts();
   State.view = view;
   try { location.hash = '#' + view; } catch (_) {}
   for (const b of document.querySelectorAll('.nav-item')) {
@@ -1501,11 +1536,7 @@ function renderSignIn(message) {
       h('button.btn.btn-primary', { id: 'signin-btn', type: 'submit', style: 'width:100%' }, 'Sign in'),
       h('p.field-hint', { style: 'margin-top:16px' },
         'The initial password is generated on the device at first boot and written to ',
-        h('span.mono', '/root/INITIAL_CREDENTIALS.txt'), '. Read it over SSH.'),
-      h('div.colophon',
-        'Fraunces for identity and figures, Inter for interface text, the system monospace for measured values. ',
-        'Warm paper and two golds: a deep brass that stays legible as small text, and a brighter tone reserved for marks that carry no words. ',
-        'Dark mode is true black.'))));
+        h('span.mono', '/root/INITIAL_CREDENTIALS.txt'), '. Read it over SSH.'))));
   pass.focus();
 }
 

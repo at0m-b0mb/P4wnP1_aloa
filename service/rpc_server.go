@@ -479,10 +479,25 @@ func (s *server) DeployStoredUSBSettings(ctx context.Context, m *pb.StringMessag
 	return
 }
 
+// usbStatus classifies an error from the USB subsystem. "There is no USB
+// gadget here" is an unavailable resource, not a server fault, and callers
+// -- scripts, monitoring, anything that retries on 5xx -- need to be able to
+// tell those apart. Anything else is passed through untouched so a real bug
+// still surfaces as one.
+func usbStatus(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrUsbNotUsable) {
+		return status.Error(codes.Unavailable, err.Error())
+	}
+	return err
+}
+
 func (s *server) StoreDeployedUSBSettings(ctx context.Context, m *pb.StringMessage) (e *pb.Empty, err error) {
 	gstate, err := s.rootSvc.SubSysUSB.ParseGadgetState(USB_GADGET_NAME)
 	if err != nil {
-		return &pb.Empty{}, err
+		return &pb.Empty{}, usbStatus(err)
 	}
 
 	return s.StoreUSBSettings(ctx, &pb.USBRequestSettingsStorage{
@@ -1103,6 +1118,7 @@ func (s *server) GetDeployedGadgetSetting(ctx context.Context, e *pb.Empty) (gs 
 
 	if err != nil {
 		log.Printf("Error parsing current gadget config: %v", err)
+		err = usbStatus(err)
 		return
 	}
 
@@ -1121,7 +1137,7 @@ func (s *server) DeployGadgetSetting(ctx context.Context, newGs *pb.GadgetSettin
 	errg := s.rootSvc.SubSysUSB.DeployGadgetSettings(newGs)
 	err = nil
 	if errg != nil {
-		err = errors.New(fmt.Sprintf("Deploying new gadget settings failed, reverted to old ones: %v", errg))
+		err = usbStatus(fmt.Errorf("Deploying new gadget settings failed, reverted to old ones: %w", errg))
 		s.rootSvc.SubSysUSB.DeployGadgetSettings(gs_backup) //We don't catch the error, as the old settings should have been working
 	}
 

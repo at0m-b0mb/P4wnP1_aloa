@@ -262,11 +262,6 @@ table.data td.mono { font-family: var(--font-mono); }
   border-radius: var(--radius-lg); padding: var(--s6);
 }
 .signin .brand { padding: 0 0 var(--s5); }
-.colophon {
-  margin-top: var(--s5); padding-top: var(--s4); border-top: 1px solid var(--border);
-  font-size: var(--t-micro); color: var(--text-faint); line-height: 1.6;
-}
-
 /* --- theme switch ------------------------------------------------------- */
 
 .theme-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; padding: 2px; }
