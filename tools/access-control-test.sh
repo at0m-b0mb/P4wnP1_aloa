@@ -326,7 +326,45 @@ else
     ok "method names are case-sensitive (this changed -- update the note in this test)"
 fi
 
-section "9. secrets must not leak into logs"
+# Routing is where auth gets skipped by accident: the API handler is chosen by
+# a path prefix, and anything that reaches a handler by a path the prefix check
+# did not expect arrives with no token checked. ServeMux normalises and
+# redirects rather than serving these, but that is a property worth asserting
+# rather than assuming, because it changes when routes change.
+section "9. path confusion must not skip authentication"
+for p in \
+  "/api/v1/rpc/../../auth/health" \
+  "/api/v1/../auth/health" \
+  "/api/v1//rpc/GetLEDSettings" \
+  "/api/v1/rpc/%2e%2e/%2e%2e/auth/health" \
+  "/api/v1/rpc;x/GetLEDSettings" \
+  "/API/V1/rpc/GetLEDSettings" \
+  "/api/v1/rpc/GetLEDSettings/" \
+  "/api/auth/../v1/rpc/GetLEDSettings" ; do
+    C=$(curl -s -L -o /dev/null -w '%{http_code}' --path-as-is -X POST $JSON -d '{}' "$B$p" 2>/dev/null)
+    case "$C" in
+      200|204) bad "path confusion cannot skip auth ($p)" "reached a handler unauthenticated: HTTP $C" ;;
+    esac
+done
+ok "path confusion cannot skip auth"
+
+# The static tree is deliberately unauthenticated so the console can load
+# before login. It must therefore contain nothing but the console.
+for p in "/../etc/shadow" "/..%2f..%2fetc/shadow" "/db" "/keymaps" "/../../root/INITIAL_CREDENTIALS.txt"; do
+    C=$(code --path-as-is "$B$p")
+    [ "$C" = "200" ] && bad "the static server serves only the console ($p)" "HTTP 200"
+done
+ok "the static server serves only the console"
+
+# One endpoint answers without a token, on purpose, so pin what it discloses.
+H=$(body $B/api/auth/health)
+case "$H" in
+  *password*|*token*|*hash*|*ssid*|*psk*)
+    bad "the unauthenticated health endpoint discloses nothing sensitive" "${H:0:140}" ;;
+  *) ok "the unauthenticated health endpoint discloses nothing sensitive" ;;
+esac
+
+section "10. secrets must not leak into logs"
 if grep -qiE "Bearer [A-Za-z0-9_-]{20,}|password_hash|\"password\"" /tmp/svc.log; then
     bad "no token or password in the service log" "$(grep -oiE 'Bearer [A-Za-z0-9_-]{20,}|password_hash|"password"' /tmp/svc.log | head -1)"
 else
