@@ -34,25 +34,25 @@
 
 ## Download
 
-Built from `v0.2.0`, on **Raspberry Pi OS Lite (Debian 13 "trixie"), 2026-09-15**, kernel
+Built from `v0.2.1`, on **Raspberry Pi OS Lite (Debian 13 "trixie"), 2026-09-15**, kernel
 `6.18.50+rpt-rpi`.
 
 | Image | Size | Boards |
 |---|---|---|
-| `P4wnP1-ALOA-v0.2.0-armhf.img.xz` | 640M | Pi Zero, **Pi Zero W**, Pi 1 |
-| `P4wnP1-ALOA-v0.2.0-arm64.img.xz` | 592M | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 |
+| `P4wnP1-ALOA-v0.2.1-armhf.img.xz` | 640M | Pi Zero, **Pi Zero W**, Pi 1 |
+| `P4wnP1-ALOA-v0.2.1-arm64.img.xz` | 592M | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 |
 
 ```
-armhf  sha256  1d57fd3071368c2250095e50ea66be655c120b211c91d992dbd410102450b568
-arm64  sha256  72794cd82d3fa1a45da14d6db6efc9818bf8d0e3cf3280f8879c8b8f1efe263f
+armhf  sha256  08723035d161d6b50e5db30b1272b859784d9589aaa5e576c9b0f140157dd426
+arm64  sha256  72865a77fa0fa9f392f107a308451c4da80010dc78b18af77547377ab1d35d82
 ```
 
 Verify, flash, and boot with the cable in the **data** port (the inner one on a Zero):
 
 ```bash
-sha256sum -c P4wnP1-ALOA-v0.2.0-armhf.img.xz.sha256
-xz -d P4wnP1-ALOA-v0.2.0-armhf.img.xz
-sudo dd if=P4wnP1-ALOA-v0.2.0-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
+sha256sum -c P4wnP1-ALOA-v0.2.1-armhf.img.xz.sha256
+xz -d P4wnP1-ALOA-v0.2.1-armhf.img.xz
+sudo dd if=P4wnP1-ALOA-v0.2.1-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
 Then, over the USB ethernet link the device brings up:
