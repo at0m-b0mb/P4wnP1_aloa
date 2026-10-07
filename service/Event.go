@@ -9,6 +9,7 @@ import (
 	pb "github.com/mame82/P4wnP1_aloa/proto"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -58,6 +59,16 @@ func (em *EventManager) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
+// RegisterReceiverDroppable registers a receiver whose events may be dropped
+// when it stops draining. Use it for anything that only displays events.
+func (em *EventManager) RegisterReceiverDroppable(filterEventType int64) *EventReceiver {
+	er := em.RegisterReceiver(filterEventType)
+	if er != nil {
+		er.Droppable = true
+	}
+	return er
+}
+
 func (em *EventManager) RegisterReceiver(filterEventType int64) *EventReceiver {
 	//	fmt.Println("!!!Event listener registered for " + strconv.Itoa(int(filterEventType)))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -104,7 +115,27 @@ loop:
 			for receiver := range em.registeredReceivers {
 				// check if this receiver is listening for this event type
 				if receiver != nil && receiver.isRegistered && (receiver.FilterEventType == evToDispatch.Type || receiver.FilterEventType == common_web.EVT_ANY) {
-					receiver.EventQueue <- evToDispatch
+					if receiver.Droppable {
+						// Non-blocking. This send used to block on a 10-deep
+						// buffer while holding registeredReceiversMutex, so a
+						// browser tab that stopped draining -- a closed laptop
+						// lid on the Journal view -- wedged the dispatcher
+						// permanently. Every RPC that emits an event then
+						// blocked too, and new stream clients hung in
+						// RegisterReceiver: the whole control plane died with
+						// no error anywhere.
+						select {
+						case receiver.EventQueue <- evToDispatch:
+						default:
+							if n := atomic.AddUint64(&receiver.dropped, 1); n == 1 || n%100 == 0 {
+								log.Printf("event stream: receiver not keeping up, %d event(s) dropped", n)
+							}
+						}
+					} else {
+						// Functional consumers (the trigger engine, group-value
+						// waiters) must not lose events.
+						receiver.EventQueue <- evToDispatch
+					}
 				}
 			}
 			em.registeredReceiversMutex.Unlock()
@@ -157,7 +188,22 @@ type EventReceiver struct {
 	Cancel          context.CancelFunc
 	EventQueue      chan *pb.Event
 	FilterEventType int64
+
+	// Droppable marks a receiver whose events may be discarded when its queue
+	// is full, instead of blocking the dispatcher. Set it ONLY for consumers
+	// that merely display events -- the browser's event stream. The trigger
+	// engine is also a receiver, and dropping its events means a configured
+	// reflex silently never fires, which on a walk-away appliance is worse
+	// than a stall.
+	Droppable bool
+
+	// dropped counts discarded events. Read with atomic; it is reported from
+	// outside the dispatcher's mutex.
+	dropped uint64
 }
+
+// Dropped reports how many events this receiver has missed.
+func (er *EventReceiver) Dropped() uint64 { return atomic.LoadUint64(&er.dropped) }
 
 func ConstructEventNotifyStateChange(stateType common_web.EvtStateChangeType) *pb.Event {
 	return &pb.Event{
@@ -169,16 +215,25 @@ func ConstructEventNotifyStateChange(stateType common_web.EvtStateChangeType) *p
 }
 
 /*
-	case 1:
-		return prefix + "critical"
-	case 2:
-		return prefix + "error"
-	case 3:
-		return prefix + "warning"
-	case 4:
-		return prefix + "information"
-	case 5:
-		return prefix + "verbose"
+case 1:
+
+	return prefix + "critical"
+
+case 2:
+
+	return prefix + "error"
+
+case 3:
+
+	return prefix + "warning"
+
+case 4:
+
+	return prefix + "information"
+
+case 5:
+
+	return prefix + "verbose"
 */
 type LogLevel int
 

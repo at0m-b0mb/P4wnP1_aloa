@@ -890,11 +890,23 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 
 			//log.Printf("Starting HID controller (kbd %s, mouse %s)...\n", devPathKeyboard, devPathMouse)
 			var errH error
+			// NewHIDController returns (nil, err) on failure -- a missing or
+			// unreadable keymap directory is enough. SetEventHandler used to be
+			// called on the result BEFORE this error check, which dereferences
+			// that nil. It is reachable at boot (DeployStoredMasterTemplate ->
+			// DeployGadgetSettings) with no recover in the path, so a stored
+			// startup loadout that enables HID took the whole appliance down.
 			gm.hidCtl, errH = hid.NewHIDController(context.Background(), devPathKeyboard, common.PATH_KEYBOARD_LANGUAGE_MAPS, devPathMouse)
-			gm.hidCtl.SetEventHandler(gm)
 			if errH != nil {
+				// Deliberately log-and-continue rather than returning the error.
+				// Returning it triggers the revert path in rpc_server.go, which
+				// would trade this panic for one there; and the rest of the USB
+				// composition is still perfectly usable without HID.
+				gm.hidCtl = nil
 				log.Printf("ERROR: Couldn't bring up an instance of HIDController for keyboard: '%s', mouse: '%s' and mapping path '%s'\nReason: %v\n", devPathKeyboard, devPathMouse, common.PATH_KEYBOARD_LANGUAGE_MAPS, errH)
+				log.Printf("       HID functions were requested but are NOT available. Everything else still comes up.")
 			} else {
+				gm.hidCtl.SetEventHandler(gm)
 				log.Printf("HIDController for keyboard: '%s', mouse: '%s' and mapping path '%s' initialized\n", devPathKeyboard, devPathMouse, common.PATH_KEYBOARD_LANGUAGE_MAPS)
 			}
 		} else {

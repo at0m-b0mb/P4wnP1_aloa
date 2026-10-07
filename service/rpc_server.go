@@ -694,7 +694,9 @@ func (s *server) EchoRequest(ctx context.Context, req *pb.StringMessage) (resp *
 
 func (s *server) EventListen(eReq *pb.EventRequest, eStream pb.P4WNP1_EventListenServer) (err error) {
 	//ToDo: check dependency from state (EvMgr initialized)
-	rcv := s.rootSvc.SubSysEvent.RegisterReceiver(eReq.ListenType)
+	// The browser event stream only displays events, so it is the one receiver
+	// that may lose them rather than stall the dispatcher for everything else.
+	rcv := s.rootSvc.SubSysEvent.RegisterReceiverDroppable(eReq.ListenType)
 
 	for {
 		select {
