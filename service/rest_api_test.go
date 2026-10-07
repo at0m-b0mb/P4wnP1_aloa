@@ -10,6 +10,8 @@ package service
 // Verified in a linux/arm64 container during development.
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -106,5 +108,82 @@ func TestAPIPrefixShape(t *testing.T) {
 	// Both break if it stops being a slash-terminated absolute path.
 	if !strings.HasPrefix(APIPrefix, "/") || !strings.HasSuffix(APIPrefix, "/") {
 		t.Errorf("APIPrefix = %q; must start and end with /", APIPrefix)
+	}
+}
+
+// TestRecoverHandlerSurvivesAPanic covers the gap the gRPC interceptors leave.
+//
+// jsonbridge invokes service methods directly by reflection, so a request over
+// /api/v1/rpc/ never passes through grpc.NewServer's interceptor chain. Before
+// RecoverHandler, a panic in any of the 82 RPCs reachable that way -- the path
+// the web console uses for everything -- ended the process.
+func TestRecoverHandlerSurvivesAPanic(t *testing.T) {
+	boom := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("boom")
+	})
+	rec := httptest.NewRecorder()
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("the panic escaped RecoverHandler: %v", r)
+			}
+		}()
+		RecoverHandler(boom).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/rpc/X", nil))
+	}()
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "internal error") {
+		t.Errorf("body = %q, want a JSON error", body)
+	}
+}
+
+// Once bytes are on the wire -- always true for SSE, which writes 200 and then
+// streams -- a response cannot be turned into an error. The handler must not
+// try, because WriteHeader after a write logs a spurious superfluous-call
+// warning and corrupts nothing useful.
+func TestRecoverHandlerAfterHeadersSent(t *testing.T) {
+	streamed := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: one\n\n"))
+		panic("died mid-stream")
+	})
+	rec := httptest.NewRecorder()
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("the panic escaped RecoverHandler: %v", r)
+			}
+		}()
+		RecoverHandler(streamed).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/events", nil))
+	}()
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d; the 200 was already sent and must not be rewritten", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "data: one") {
+		t.Errorf("the bytes written before the panic were lost: %q", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "internal error") {
+		t.Error("an error body was appended to an already-streaming response")
+	}
+}
+
+// The wrapper must forward the optional interfaces the handlers beneath it
+// rely on: Flush for SSE, Unwrap for http.NewResponseController.
+func TestRecordingWriterForwardsInterfaces(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := &recordingWriter{ResponseWriter: rec}
+	if _, ok := interface{}(w).(http.Flusher); !ok {
+		t.Error("recordingWriter is not an http.Flusher; SSE would buffer")
+	}
+	if u, ok := interface{}(w).(interface{ Unwrap() http.ResponseWriter }); !ok || u.Unwrap() != rec {
+		t.Error("recordingWriter does not Unwrap to the real writer")
 	}
 }

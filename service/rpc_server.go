@@ -1317,9 +1317,14 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 	}
 
 	//Setup our HTTP server
+	//
+	// Everything is wrapped in RecoverHandler. The JSON bridge calls service
+	// methods directly by reflection, so the gRPC interceptor chain does NOT
+	// run for requests arriving over /api/v1/ -- without this, a panic in any
+	// RPC reached from the web console ends the process.
 	http_srv := &http.Server{
 		Addr:              listen_address_web, //listen on port 80 with webservice
-		Handler:           http.HandlerFunc(http_handler),
+		Handler:           RecoverHandler(http.HandlerFunc(http_handler)),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}

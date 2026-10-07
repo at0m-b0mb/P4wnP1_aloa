@@ -27,6 +27,7 @@ package service
 // same-origin as the only acceptable case is the conservative choice.
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,6 +37,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -56,6 +58,81 @@ const APIPrefix = "/api/v1/"
 // stops an unauthenticated-at-the-TCP-level peer from ballooning memory before
 // the token check even runs.
 const maxAPIBodyBytes = 8 << 20
+
+// RecoverHandler wraps an http.Handler so a panic in anything below it becomes
+// a 500 instead of ending the process.
+//
+// This is not covered by the gRPC recovery interceptors. The JSON bridge
+// invokes service methods DIRECTLY by reflection (jsonbridge.Call ->
+// reflect.Value.Call), so grpc.NewServer's interceptor chain never runs for a
+// request that arrives over /api/v1/rpc/. A panic in any of the 82 RPCs
+// reached that way would take the whole appliance down -- and this is the path
+// the web console uses for everything.
+//
+// Wrapping the top-level router covers the JSON API, the auth endpoints, the
+// gRPC-web bridge and the static file server in one place.
+func RecoverHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rw := &recordingWriter{ResponseWriter: w}
+		defer func() {
+			rec := recover()
+			if rec == nil {
+				return
+			}
+			log.Printf("PANIC recovered serving %s %s: %v\n%s",
+				r.Method, r.URL.Path, rec, debug.Stack())
+
+			// Once a status line is out -- which it always is for SSE, where we
+			// write 200 and then stream -- there is no way to turn the response
+			// into an error. Dropping the connection is the only honest signal
+			// left, and the client's reconnect logic handles it.
+			if rw.wroteHeader {
+				return
+			}
+			rw.Header().Set("Content-Type", "application/json")
+			rw.WriteHeader(http.StatusInternalServerError)
+			_, _ = rw.Write([]byte(
+				`{"error":"internal error; the service survived and the details are in the journal"}`))
+		}()
+		next.ServeHTTP(rw, r)
+	})
+}
+
+// recordingWriter tracks whether the status line has gone out, and forwards the
+// optional interfaces the handlers below it rely on. Without Flush the SSE
+// stream would buffer; without Unwrap http.NewResponseController cannot reach
+// the real writer; without Hijack the gRPC-web websocket upgrade fails.
+type recordingWriter struct {
+	http.ResponseWriter
+	wroteHeader bool
+}
+
+func (w *recordingWriter) WriteHeader(code int) {
+	if !w.wroteHeader {
+		w.wroteHeader = true
+		w.ResponseWriter.WriteHeader(code)
+	}
+}
+
+func (w *recordingWriter) Write(b []byte) (int, error) {
+	w.wroteHeader = true
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *recordingWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w *recordingWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, fmt.Errorf("the underlying ResponseWriter does not support hijacking")
+}
+
+func (w *recordingWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // NewAPIHandler builds the JSON API handler for srv.
 func NewAPIHandler(srv *server, authMgr *auth.Manager) (http.Handler, error) {
