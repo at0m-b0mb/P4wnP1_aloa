@@ -204,13 +204,20 @@ const LEVEL_NAME = ['debug', 'info', 'warn', 'error'];
 /* The USB functions a composite gadget can expose, in the order they appear to
    a host. `on` and `detail` are read from the live GadgetSettings. */
 const USB_FUNCTIONS = [
-  { key: 'use_HID_KEYBOARD', name: 'Keyboard', detail: s => s.dev_path_hid_keyboard },
-  { key: 'use_HID_MOUSE',    name: 'Mouse',    detail: s => s.dev_path_hid_mouse },
-  { key: 'use_HID_RAW',      name: 'Raw HID',  detail: s => s.dev_path_hid_raw },
-  { key: 'use_RNDIS',        name: 'RNDIS',    detail: s => s.rndis_settings && s.rndis_settings.host_addr },
-  { key: 'use_CDC_ECM',      name: 'CDC ECM',  detail: s => s.cdc_ecm_settings && s.cdc_ecm_settings.host_addr },
-  { key: 'use_SERIAL',       name: 'Serial',   detail: () => 'ttyGS0' },
-  { key: 'use_UMS',          name: 'Storage',  detail: s => s.ums_settings && (s.ums_settings.file || (s.ums_settings.cdrom ? 'cdrom' : '')) },
+  { key: 'use_HID_KEYBOARD', name: 'Keyboard', detail: s => s.dev_path_hid_keyboard,
+    what: 'The host accepts anything the device types as real keystrokes. This is what HIDScript drives.' },
+  { key: 'use_HID_MOUSE', name: 'Mouse', detail: s => s.dev_path_hid_mouse,
+    what: 'Pointer control, including absolute positioning on Windows.' },
+  { key: 'use_HID_RAW', name: 'Raw HID', detail: s => s.dev_path_hid_raw,
+    what: 'A plain two-way data channel over HID. Useful for talking to software you control on the host; it types nothing by itself.' },
+  { key: 'use_RNDIS', name: 'RNDIS', detail: s => s.rndis_settings && s.rndis_settings.host_addr,
+    what: 'A USB network adapter that Windows picks up without a driver. Pair it with CDC ECM so one composition covers Windows, macOS and Linux.' },
+  { key: 'use_CDC_ECM', name: 'CDC ECM', detail: s => s.cdc_ecm_settings && s.cdc_ecm_settings.host_addr,
+    what: 'The same idea for macOS and Linux, which do not take to RNDIS. Harmless to enable alongside it.' },
+  { key: 'use_SERIAL', name: 'Serial', detail: () => 'ttyGS0',
+    what: 'A USB serial port. Mostly useful as a console into this device, not as something to do to the host.' },
+  { key: 'use_UMS', name: 'Storage', detail: s => s.ums_settings && (s.ums_settings.file || (s.ums_settings.cdrom ? 'cdrom' : '')),
+    what: 'The device appears as a USB stick or a CD-ROM, backed by an image file you choose.' },
 ];
 
 function renderCable() {
@@ -430,12 +437,16 @@ Views.cable = async function () {
     h('h2.card-title', 'Composition'),
     h('div.grid-2',
       h('div',
-        ...USB_FUNCTIONS.map(fn => h('label.check',
-          h('input', {
-            type: 'checkbox', checked: !!draft[fn.key],
-            onchange: e => { draft[fn.key] = e.target.checked; },
-          }),
-          h('span', fn.name))),
+        h('p.field-hint', { style: 'margin:-4px 0 14px' },
+          'Each of these is a separate device the host sets up. You can present several at once.'),
+        ...USB_FUNCTIONS.map(fn => h('div.fn-choice',
+          h('label.check',
+            h('input', {
+              type: 'checkbox', checked: !!draft[fn.key],
+              onchange: e => { draft[fn.key] = e.target.checked; },
+            }),
+            h('span.fn-choice-name', fn.name)),
+          h('p.fn-choice-what', fn.what))),
         h('label.check',
           h('input', {
             type: 'checkbox', checked: draft.enabled !== false,

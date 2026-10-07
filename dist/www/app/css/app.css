@@ -520,3 +520,13 @@ details.ref > summary:hover { color: var(--text); }
   padding: 2px 6px; border-radius: var(--radius);
 }
 .toast-close:hover { color: var(--text); background: var(--surface-sunk); }
+
+/* --- Cable: each USB function, explained -------------------------------- */
+.fn-choice { margin-bottom: var(--s4); }
+.fn-choice .check { margin-bottom: 2px; }
+.fn-choice-name { font-weight: 600; }
+.fn-choice-what {
+  margin: 0 0 0 24px;            /* line up under the label, past the checkbox */
+  font-size: var(--t-small); color: var(--text-muted); line-height: 1.5;
+  max-width: 46ch;
+}
