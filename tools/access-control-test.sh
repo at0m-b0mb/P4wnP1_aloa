@@ -331,7 +331,50 @@ fi
 # did not expect arrives with no token checked. ServeMux normalises and
 # redirects rather than serving these, but that is a property worth asserting
 # rather than assuming, because it changes when routes change.
-section "9. path confusion must not skip authentication"
+# The router used to dispatch on Sec-Websocket-Protocol BEFORE any auth check,
+# into a wrapper built with WithWebsockets(true). WithOriginFunc governs the
+# HTTP check, not the websocket one, and the library's default websocket origin
+# check compares two headers the caller writes -- so `Host: anything` plus a
+# matching Origin always passed. gorilla then cleared the socket deadline and
+# blocked in ReadMessage with no read limit: an anonymous peer could park
+# goroutines and fds forever, or stream an unbounded frame into a root process.
+# Nothing shipped ever spoke this transport.
+section "9. the unauthenticated websocket upgrade is gone"
+WS=$(python3 - <<'PYEOF'
+import socket, os, base64
+CRLF = chr(13) + chr(10)          # written this way so no layer of shell,
+BLANK = CRLF + CRLF               # heredoc or generator can mangle it
+key = base64.b64encode(os.urandom(16)).decode()
+req = CRLF.join([
+    "GET /P4wnP1_grpc.P4WNP1/EchoRequest HTTP/1.1",
+    "Host: anything",
+    "Origin: http://anything",
+    "Upgrade: websocket",
+    "Connection: Upgrade",
+    "Sec-WebSocket-Version: 13",
+    "Sec-WebSocket-Protocol: grpc-websockets",
+    "Sec-WebSocket-Key: " + key,
+]) + BLANK
+try:
+    s = socket.create_connection(("127.0.0.1", 8000), timeout=5)
+    s.sendall(req.encode())
+    data = s.recv(64).decode(errors="replace").strip()
+    print(data.splitlines()[0] if data else "EMPTY-RESPONSE")
+    s.close()
+except Exception as e:
+    print("PROBE-ERROR", e)
+PYEOF
+)
+case "$WS" in
+  *101*)                   bad "an anonymous websocket upgrade is refused" "server answered: $WS (pre-auth goroutine/heap DoS)" ;;
+  HTTP/*)                  ok  "an anonymous websocket upgrade is refused ($WS)" ;;
+  # Anything else means the probe did not actually speak to the server. A
+  # broken probe must fail loudly: the first version of this check had a
+  # mangled heredoc, never ran, and reported a clean pass.
+  *)                       bad "an anonymous websocket upgrade is refused" "the probe did not run: $WS" ;;
+esac
+
+section "10. path confusion must not skip authentication"
 for p in \
   "/api/v1/rpc/../../auth/health" \
   "/api/v1/../auth/health" \
@@ -364,7 +407,7 @@ case "$H" in
   *) ok "the unauthenticated health endpoint discloses nothing sensitive" ;;
 esac
 
-section "10. secrets must not leak into logs"
+section "11. secrets must not leak into logs"
 if grep -qiE "Bearer [A-Za-z0-9_-]{20,}|password_hash|\"password\"" /tmp/svc.log; then
     bad "no token or password in the service log" "$(grep -oiE 'Bearer [A-Za-z0-9_-]{20,}|password_hash|"password"' /tmp/svc.log | head -1)"
 else

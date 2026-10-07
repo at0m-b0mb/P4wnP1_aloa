@@ -1310,8 +1310,33 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 	// The library default is originFunc = allow-everything with
 	// AllowCredentials:true, which answers CORS preflights from any website.
 	// Every shipped client is same-origin, so deny cross-origin outright.
+	// NO WEBSOCKETS. This used to pass grpcweb.WithWebsockets(true), and the
+	// combination was a pre-authentication denial of service:
+	//
+	//   * The router dispatched on the Sec-Websocket-Protocol header BEFORE
+	//     any auth or origin check.
+	//   * WithOriginFunc governs the HTTP/CORS check, NOT the websocket one.
+	//     WithWebsocketOriginFunc was never passed, so the library default
+	//     applied: `parsedUrl.Host == req.Host`, which compares two headers
+	//     the caller writes. `Host: anything` + `Origin: http://anything`
+	//     always passes.
+	//   * gorilla's Upgrade calls netConn.SetDeadline(time.Time{}) on the
+	//     hijacked socket, so the ReadHeaderTimeout and IdleTimeout set below
+	//     stop applying, and handleWebSocket then blocks in ReadMessage with
+	//     no read limit (gorilla's readLimit defaults to unlimited).
+	//
+	// So an anonymous peer could park goroutines and file descriptors forever,
+	// or stream an unbounded first frame into the heap of a root process that
+	// drives HID injection, DHCP and hostapd. No token, no password, no victim.
+	//
+	// It is deleted rather than fixed because NOTHING SPEAKS IT. The websocket
+	// transport existed for the GopherJS client, which is documented below as
+	// non-functional, and the current console uses fetch and SSE against
+	// /api/v1. Keeping it would mean passing a real WithWebsocketOriginFunc
+	// and forking the wrapper to get a handshake timeout and a read limit,
+	// because upstream exposes no hook for either -- all that to keep a
+	// transport with no consumer.
 	grpc_web_srv := grpcweb.WrapServer(s,
-		grpcweb.WithWebsockets(true),
 		grpcweb.WithOriginFunc(func(string) bool { return false }),
 	)
 
@@ -1356,9 +1381,10 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 			apiHandler.ServeHTTP(resp, req)
 			return
 		}
+		// No Sec-Websocket-Protocol clause: see the WrapServer call above.
+		// A websocket upgrade now falls through to the file server and 404s.
 		if strings.Contains(req.Header.Get("Content-Type"), "application/grpc") ||
-			req.Method == "OPTIONS" ||
-			strings.Contains(req.Header.Get("Sec-Websocket-Protocol"), "grpc-websockets") {
+			req.Method == "OPTIONS" {
 			grpc_web_srv.ServeHTTP(resp, req)
 			return
 		}
