@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>P4wnP1 A.L.O.A.</title>
+
+<!-- Everything is served from the device. It is routinely operated with no
+     internet route at all, so a CDN reference would mean a broken console
+     exactly when it is in use. -->
+<!-- ?v= is bumped whenever these files change: the console is updated in
+     place on a device an operator reaches over USB or its own access point,
+     and a stale cached bundle talking to a new API is a confusing failure. -->
+<link rel="stylesheet" href="fonts/fonts.css?v=3">
+<link rel="stylesheet" href="css/tokens.css?v=3">
+<link rel="stylesheet" href="css/app.css?v=3">
+
+<!-- Set the theme before first paint so a dark-mode operator does not get a
+     white flash. Reads the stored *choice*; 'auto' resolves against the OS. -->
+<script>
+(function () {
+  try {
+    var c = localStorage.getItem('p4wnp1.theme') || 'auto';
+    var dark = c === 'dark' || (c === 'auto' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  } catch (e) {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+})();
+</script>
+</head>
+<body>
+<div id="root">
+  <div class="signin-wrap"><div class="signin"><p>Loading the console...</p></div></div>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script src="js/api.js?v=3"></script>
+<script src="js/app.js?v=3"></script>
+</body>
+</html>

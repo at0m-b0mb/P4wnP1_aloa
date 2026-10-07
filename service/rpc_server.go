@@ -1224,6 +1224,19 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 			grpc_web_srv.ServeHTTP(resp, req)
 			return
 		}
+		// The operator console lives under /app/. Send the bare root there
+		// rather than serving its index.html from "/", because the page loads
+		// its CSS and JS with relative paths -- served from "/" those would
+		// resolve to /css/... and 404.
+		//
+		// The legacy GopherJS client is still present at /index.html but is
+		// NOT functional: it predates the auth layer and has no code to send a
+		// bearer token, so every RPC it makes returns Unauthenticated. It is
+		// kept only so an existing deployment's bookmarks do not 404.
+		if req.URL.Path == "/" {
+			http.Redirect(resp, req, "/app/", http.StatusFound)
+			return
+		}
 		fileServer.ServeHTTP(resp, req)
 	}
 

@@ -1,0 +1,110 @@
+/* tokens.css -- the only place a colour, size or radius is chosen.
+ *
+ * Rules this file exists to enforce:
+ *   1. No component picks a raw colour. Everything reads a token.
+ *   2. Every colour is declared for BOTH themes. tools/check_contrast.py fails
+ *      the build if a token exists in one theme and not the other.
+ *   3. There are TWO golds, not one. --brass is dark enough to carry small
+ *      text; --shine is bright and is only ever used for marks that carry no
+ *      words. A single gold cannot do both jobs.
+ *   4. Dark mode is true black (#000). Nothing in it may read as blue.
+ *
+ * Verified with: python3 tools/check_contrast.py
+ */
+
+:root {
+  /* --- ground and surfaces ------------------------------------------- */
+  --canvas:         #F3F1EC;   /* warm paper, not flat white */
+  --surface:        #FFFFFF;   /* cards sit above the paper */
+  --surface-sunk:   #EDEAE3;   /* wells: code, logs, measured values */
+  --border:         #E3DFD6;   /* hairline */
+  --border-strong:  #8A8679;   /* emphasised divider, input outline (>=3:1) */
+
+  /* --- text ----------------------------------------------------------- */
+  --text:           #1A1815;
+  --text-muted:     #575147;
+  --text-faint:     #7D7569;
+  --mono:           #2A2622;   /* measured values; slightly warmer than --text */
+
+  /* --- gold, in two jobs ---------------------------------------------- */
+  --brass:          #7A5C14;   /* carries small text and links */
+  --shine:          #AE851D;   /* marks only -- never behind words */
+  --on-brass:       #FFFFFF;   /* label on a brass fill */
+
+  /* --- semantic ------------------------------------------------------- */
+  --ok:             #2F6B3A;
+  --warn:           #8A5B10;
+  --danger:         #A22B22;
+  --on-danger:      #FFFFFF;
+
+  /* --- type ----------------------------------------------------------- */
+  --font-display: 'Fraunces', ui-serif, Georgia, 'Times New Roman', serif;
+  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /* A restrained scale. Nothing between 15 and 20 -- hierarchy comes from
+     weight and the serif/sans switch, not from a dozen sizes. */
+  --t-micro: 11px;
+  --t-small: 13px;
+  --t-body:  15px;
+  --t-lead:  20px;
+  --t-head:  27px;
+  --t-hero:  40px;
+
+  /* --- 4pt rhythm ----------------------------------------------------- */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
+
+  --radius:    6px;
+  --radius-lg: 10px;
+
+  /* Shadows are nearly absent by design; one soft lift for overlays only. */
+  --shadow-overlay: 0 18px 48px rgba(26, 24, 21, 0.18);
+  --ring: 0 0 0 3px rgba(199, 154, 43, 0.32);   /* focus */
+}
+
+[data-theme="dark"] {
+  /* True black ground. The greys above it are strictly neutral -- the house
+     style rejects anything that reads as navy. */
+  --canvas:         #000000;
+  --surface:        #0E0E0E;
+  --surface-sunk:   #080808;
+  --border:         #232323;
+  --border-strong:  #666666;
+
+  /* Secondary text on true black needs to go well past the AA floor before it
+     stops looking washed out -- #C2BBB1 rather than a mid grey. */
+  --text:           #F2EFE9;
+  --text-muted:     #C2BBB1;
+  --text-faint:     #8F8882;
+  --mono:           #E8E2D8;
+
+  --brass:          #E3B957;   /* light enough to be small text on black */
+  --shine:          #F5CE6B;
+  --on-brass:       #141008;   /* dark label on a bright brass fill */
+
+  --ok:             #6FBF7F;
+  --warn:           #E0A646;
+  --danger:         #F08B80;
+  --on-danger:      #1A0806;
+
+  --font-display: 'Fraunces', ui-serif, Georgia, 'Times New Roman', serif;
+  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  --t-micro: 11px;
+  --t-small: 13px;
+  --t-body:  15px;
+  --t-lead:  20px;
+  --t-head:  27px;
+  --t-hero:  40px;
+
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
+
+  --radius:    6px;
+  --radius-lg: 10px;
+
+  --shadow-overlay: 0 18px 48px rgba(0, 0, 0, 0.7);
+  --ring: 0 0 0 3px rgba(227, 185, 87, 0.3);
+}

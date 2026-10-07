@@ -1,0 +1,333 @@
+/* app.css -- components, built only from tokens.css. No raw colours here. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Fraunces scales its optical-size axis up aggressively at display sizes,
+   which is right for print and wrong on a screen -- and on a true-black
+   ground a hairline stroke becomes an intermittent one. Pin opsz. */
+.display {
+  font-family: var(--font-display);
+  font-optical-sizing: none;
+  font-variation-settings: 'opsz' 15, 'SOFT' 0, 'WONK' 0;
+  letter-spacing: -0.01em;
+}
+.display-lg { font-variation-settings: 'opsz' 30, 'SOFT' 0, 'WONK' 0; }
+
+a { color: var(--brass); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+
+:focus-visible { outline: none; box-shadow: var(--ring); border-radius: var(--radius); }
+
+code, kbd, .mono { font-family: var(--font-mono); font-size: 0.92em; color: var(--mono); }
+
+/* --- layout ------------------------------------------------------------- */
+
+.app { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+
+/* Grid items default to min-width:auto, which means a track refuses to shrink
+   below its content's intrinsic width. Without this, the nav's row of buttons
+   stretches the rail past the viewport on a phone instead of scrolling inside
+   it, and the whole page gains a horizontal scrollbar. */
+.app > * { min-width: 0; }
+
+.rail {
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  padding: var(--s5) 0 var(--s4);
+  display: flex; flex-direction: column;
+}
+
+.brand { padding: 0 var(--s5) var(--s5); }
+.brand-mark { font-size: var(--t-head); font-weight: 700; display: block; }
+.brand-sub {
+  font-size: var(--t-micro); letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-faint); display: block; margin-top: 2px;
+}
+
+.nav { display: flex; flex-direction: column; gap: 2px; padding: 0 var(--s3); }
+.nav-item {
+  appearance: none; background: none; border: 0; cursor: pointer;
+  font: inherit; color: var(--text-muted); text-align: left;
+  padding: var(--s2) var(--s3); border-radius: var(--radius);
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2);
+}
+.nav-item:hover { background: var(--surface-sunk); color: var(--text); }
+.nav-item[aria-current="page"] {
+  background: var(--surface-sunk); color: var(--text); font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--brass);
+}
+.nav-item .count {
+  font-family: var(--font-mono); font-size: var(--t-micro); color: var(--text-faint);
+}
+
+.rail-foot { margin-top: auto; padding: var(--s4) var(--s5) 0; }
+
+.main { padding: var(--s6) var(--s7) var(--s8); max-width: 1180px; }
+
+.page-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--s5); margin-bottom: var(--s5);
+  padding-bottom: var(--s4); border-bottom: 1px solid var(--border);
+}
+.page-title { font-size: var(--t-head); font-weight: 600; margin: 0; }
+.page-note { color: var(--text-muted); margin: var(--s1) 0 0; max-width: 62ch; }
+
+/* --- cards -------------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--s5);
+}
+.card + .card { margin-top: var(--s4); }
+.card-title {
+  font-size: var(--t-small); font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-faint);
+  margin: 0 0 var(--s4);
+}
+.row { display: flex; gap: var(--s4); align-items: flex-start; }
+.row > * { min-width: 0; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--s4); }
+
+/* --- the cable: this console's signature element ------------------------
+   A live picture of what the device is presenting to whatever host its USB
+   cable is plugged into. Nothing else in this product -- and nothing in any
+   comparable tool -- shows the composite gadget as one object. */
+
+.cable {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--s5);
+}
+.cable-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: var(--s4);
+}
+.cable-state { font-family: var(--font-mono); font-size: var(--t-small); }
+.cable-strip { display: flex; gap: var(--s1); align-items: stretch; }
+.fn {
+  flex: 1 1 0; min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--s3) var(--s2);
+  text-align: center;
+  background: var(--surface);
+  color: var(--text-faint);
+}
+.fn-on {
+  border-color: var(--brass);
+  background: color-mix(in srgb, var(--shine) 12%, var(--surface));
+  color: var(--text);
+}
+.fn-name {
+  display: block; font-size: var(--t-micro); letter-spacing: 0.09em;
+  text-transform: uppercase; font-weight: 600;
+}
+.fn-detail {
+  display: block; font-family: var(--font-mono); font-size: var(--t-micro);
+  margin-top: var(--s1); color: var(--text-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fn-on .fn-detail { color: var(--text-muted); }
+
+/* --- figures: numbers set in the display serif -------------------------- */
+
+.figures { display: flex; gap: var(--s6); flex-wrap: wrap; }
+.figure { min-width: 92px; }
+.figure-n {
+  font-family: var(--font-display); font-optical-sizing: none;
+  font-variation-settings: 'opsz' 20;
+  font-size: var(--t-hero); font-weight: 600; line-height: 1;
+  font-variant-numeric: tabular-nums; display: block;
+}
+.figure-l {
+  font-size: var(--t-micro); letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-faint); margin-top: var(--s2); display: block;
+}
+
+/* --- controls ----------------------------------------------------------- */
+
+.btn {
+  appearance: none; font: inherit; font-weight: 500; cursor: pointer;
+  padding: var(--s2) var(--s4); border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text);
+}
+.btn:hover { border-color: var(--text-faint); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary {
+  background: var(--brass); border-color: var(--brass); color: var(--on-brass);
+}
+.btn-primary:hover { filter: brightness(1.08); }
+.btn-danger {
+  background: var(--danger); border-color: var(--danger); color: var(--on-danger);
+}
+.btn-quiet { border-color: transparent; background: none; color: var(--brass); }
+.btn-quiet:hover { background: var(--surface-sunk); border-color: transparent; }
+.btn-sm { padding: var(--s1) var(--s3); font-size: var(--t-small); }
+
+/* Button rows wrap. On a phone three actions do not fit side by side, and an
+   un-wrapped row pushes the page wider than the viewport. */
+.btn-row { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; }
+
+.field { display: block; margin-bottom: var(--s4); }
+.field-label {
+  display: block; font-size: var(--t-small); font-weight: 500;
+  margin-bottom: var(--s1); color: var(--text-muted);
+}
+.field-hint { font-size: var(--t-small); color: var(--text-faint); margin-top: var(--s1); }
+input[type=text], input[type=password], input[type=number], select, textarea {
+  width: 100%; font: inherit; color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  padding: var(--s2) var(--s3);
+}
+textarea { font-family: var(--font-mono); font-size: var(--t-small); line-height: 1.55; resize: vertical; }
+input[type=checkbox] { accent-color: var(--brass); width: 16px; height: 16px; }
+.check { display: flex; gap: var(--s2); align-items: center; margin-bottom: var(--s3); }
+
+/* --- status --------------------------------------------------------------- */
+
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+.dot-ok { background: var(--ok); }
+.dot-warn { background: var(--warn); }
+.dot-bad { background: var(--danger); }
+.dot-idle { background: var(--border-strong); }
+
+.pill {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  font-size: var(--t-small); padding: 2px var(--s2);
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface);
+}
+
+.banner {
+  border: 1px solid var(--border); border-left: 3px solid var(--warn);
+  background: var(--surface); border-radius: var(--radius);
+  padding: var(--s3) var(--s4); margin-bottom: var(--s4);
+}
+.banner-danger { border-left-color: var(--danger); }
+.banner-ok { border-left-color: var(--ok); }
+.banner-title { font-weight: 600; margin: 0 0 var(--s1); }
+.banner p { margin: 0; color: var(--text-muted); font-size: var(--t-small); }
+
+/* --- journal ------------------------------------------------------------ */
+
+.log {
+  background: var(--surface-sunk); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--s3);
+  font-family: var(--font-mono); font-size: var(--t-small); line-height: 1.6;
+  max-height: 58vh; overflow: auto;
+}
+.log-line { display: flex; gap: var(--s3); padding: 1px 0; }
+.log-t { color: var(--text-faint); flex: none; font-variant-numeric: tabular-nums; }
+.log-src { color: var(--brass); flex: none; min-width: 11ch; }
+.log-msg { color: var(--mono); white-space: pre-wrap; word-break: break-word; }
+.log-line.lv-warn .log-msg { color: var(--warn); }
+.log-line.lv-err .log-msg { color: var(--danger); }
+
+table.data { width: 100%; border-collapse: collapse; font-size: var(--t-small); }
+table.data th {
+  text-align: left; font-size: var(--t-micro); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-faint); font-weight: 600;
+  padding: 0 var(--s3) var(--s2); border-bottom: 1px solid var(--border);
+}
+table.data td { padding: var(--s2) var(--s3); border-bottom: 1px solid var(--border); vertical-align: top; }
+table.data tr:last-child td { border-bottom: 0; }
+table.data td.mono { font-family: var(--font-mono); }
+
+.empty { color: var(--text-faint); padding: var(--s5); text-align: center; }
+
+/* --- sign-in ------------------------------------------------------------ */
+
+.signin-wrap {
+  min-height: 100vh; display: grid; place-items: center; padding: var(--s5);
+}
+.signin {
+  width: 100%; max-width: 392px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: var(--s6);
+}
+.signin .brand { padding: 0 0 var(--s5); }
+.colophon {
+  margin-top: var(--s5); padding-top: var(--s4); border-top: 1px solid var(--border);
+  font-size: var(--t-micro); color: var(--text-faint); line-height: 1.6;
+}
+
+/* --- theme switch ------------------------------------------------------- */
+
+.theme-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; padding: 2px; }
+.theme-switch button {
+  appearance: none; border: 0; background: none; cursor: pointer; font: inherit;
+  font-size: var(--t-micro); color: var(--text-faint);
+  padding: 3px var(--s2); border-radius: 999px;
+}
+.theme-switch button[aria-pressed="true"] { background: var(--surface-sunk); color: var(--text); font-weight: 600; }
+
+/* --- toast -------------------------------------------------------------- */
+
+.toasts { position: fixed; right: var(--s5); bottom: var(--s5); display: flex; flex-direction: column; gap: var(--s2); z-index: 50; }
+.toast {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--ok);
+  box-shadow: var(--shadow-overlay); border-radius: var(--radius);
+  padding: var(--s3) var(--s4); max-width: 380px; font-size: var(--t-small);
+}
+.toast-err { border-left-color: var(--danger); }
+
+.spinner {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--border-strong); border-top-color: var(--brass);
+  display: inline-block; animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+/* --- narrow screens ----------------------------------------------------- */
+/* The console is frequently driven from a phone joined to the device's own
+   access point, so this is a primary layout, not a courtesy. */
+@media (max-width: 820px) {
+  .app { grid-template-columns: 1fr; }
+  .rail {
+    border-right: 0; border-bottom: 1px solid var(--border);
+    padding: var(--s4) 0;
+    /* The rail becomes a horizontal bar; it must not grow with its contents. */
+    overflow: hidden;
+  }
+  .brand { padding: 0 var(--s4) var(--s3); }
+  .brand-mark { font-size: var(--t-lead); }
+  .nav {
+    flex-direction: row; padding: 0 var(--s4);
+    overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: none;            /* the row is short; a bar would crowd it */
+    -webkit-overflow-scrolling: touch;
+  }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav-item { white-space: nowrap; flex: none; }
+  .nav-item[aria-current="page"] { box-shadow: inset 0 -2px 0 var(--brass); }
+  /* Account controls go to the end of the bar and stay on one line, so the
+     page content is not pushed a screenful down on a phone. */
+  .rail-foot {
+    margin-top: var(--s3); padding: var(--s3) var(--s4) 0;
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
+  }
+  .rail-foot > div:first-child { margin-bottom: 0 !important; }
+  .main { padding: var(--s5) var(--s4) var(--s8); }
+  .page-head { flex-direction: column; align-items: flex-start; }
+  .cable-strip { flex-wrap: wrap; }
+  .fn { flex-basis: calc(50% - var(--s1)); }
+}

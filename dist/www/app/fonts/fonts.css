@@ -1,0 +1,38 @@
+/* Local webfonts.
+ *
+ * This appliance is routinely operated with no internet route at all -- over
+ * USB ethernet, or joined to its own access point. Nothing here may reference
+ * a CDN or the UI loses its typography exactly when it is being used.
+ *
+ * Both files are variable fonts carrying the whole weight range we use, latin
+ * subset only: 112KB for the pair. Google serves one file per declared weight,
+ * which is three identical copies of the same variable font -- deduplicated
+ * here.
+ */
+
+/* Fraunces: identity and figures. A soft-serif rather than a Didone on
+ * purpose -- a Didone's hairlines break up on a true-black ground, and the
+ * dark theme here is #000. */
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('fraunces-var.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Inter: everything you actually have to read. Neutral by design; a geometric
+ * sans looks elegant in a wordmark and slows you down at 14px. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('inter-var.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
