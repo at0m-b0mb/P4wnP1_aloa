@@ -3,7 +3,7 @@ PATH := /usr/local/go/bin:$(PATH)
 
 .PHONY: all help compile build-armv6 build-service-armv6 build-cli-armv6 build-hashpw-armv6 \
         build-arm64 build-service-arm64 build-cli-arm64 build-hashpw-arm64 \
-        image image-armhf image-arm64 contrast smoke dep install installkali remove lint test
+        image image-armhf image-arm64 contrast smoke check-js mock dep install installkali remove lint test
 
 all: compile
 
@@ -21,6 +21,8 @@ help:
 	@echo "                     (see image/README.md). Needs Docker."
 	@echo "  make contrast      Check the web console palette against WCAG AA"
 	@echo "  make smoke         Run the service in a container and verify it works"
+	@echo "  make check-js      Syntax-check the web console JavaScript"
+	@echo "  make mock          Serve the console against a mock device (no Pi needed)"
 	@echo "  make test          Run unit tests (auth + jsonbridge)"
 	@echo "  make lint          Run shellcheck + golangci-lint (require both installed)"
 	@echo "  make install       Install binaries + data into /usr/local on the current host"
@@ -74,6 +76,16 @@ image-arm64:
 contrast:
 	python3 tools/check_contrast.py
 
+# Parse the console JavaScript. A missing paren makes the WHOLE file fail to
+# load, so the console renders nothing -- a total outage from one character,
+# invisible to every other check here.
+check-js:
+	./tools/check-js.sh
+
+# Serve the console against a mock device, for working on the UI with no Pi.
+mock:
+	python3 tools/mock-service.py
+
 # End-to-end smoke test: runs the REAL service binary against the REAL dist
 # tree in a container and checks that it comes up, serves, authenticates and
 # shuts down. "It compiles" and "the unit tests pass" were both true while the
@@ -99,9 +111,15 @@ test-linux:
 
 lint:
 	@command -v shellcheck >/dev/null || { echo "shellcheck not installed"; exit 1; }
-	shellcheck install.sh dist/scripts/firstboot-secure-defaults.sh dist/scripts/p4wnp1-healthcheck.sh build_support/build.sh
+	shellcheck --severity=warning install.sh \
+	          dist/scripts/firstboot-secure-defaults.sh \
+	          dist/scripts/p4wnp1-healthcheck.sh \
+	          build_support/build.sh \
+	          image/build.sh image/lib/stage.sh image/lib/customize.sh image/lib/verify.sh \
+	          tools/smoke-test.sh tools/check-js.sh
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint not installed; skipping go lint"; exit 0; }
 	golangci-lint run ./...
+	./tools/check-js.sh
 
 # make dep runs without sudo
 dep:

@@ -79,9 +79,12 @@ done
 
 log "installing data -> $P4ROOT"
 mkdir -p "$P4ROOT"
+# ${P4ROOT:?} rather than $P4ROOT: this is an `rm -rf` running as root inside a
+# chroot, and an empty variable would make it `rm -rf /keymaps`. P4ROOT is a
+# constant today, but the cost of being wrong here is the whole image.
 for d in keymaps scripts HIDScripts www db helper ums legacy; do
     if [ -d "$PAYLOAD/dist/$d" ]; then
-        rm -rf "$P4ROOT/$d"
+        rm -rf "${P4ROOT:?P4ROOT must be set}/$d"
         cp -R "$PAYLOAD/dist/$d" "$P4ROOT/$d"
     fi
 done
