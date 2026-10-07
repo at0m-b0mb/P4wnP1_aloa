@@ -261,7 +261,49 @@ else
     bad "the local credential file has contents" "it was empty or missing"
 fi
 
-section "7. dispatch surface"
+# An audit view that leaks the thing it is auditing is worse than none: this
+# list is rendered in a browser, so a token in it would be exposed to any XSS,
+# screenshot or shoulder-surf.
+section "7. the session list"
+check "listing sessions needs a token"      "401" "$(code $B/api/auth/sessions)"
+check "revoking a session needs a token"    "401" "$(code -X POST $JSON -d '{"id":"x"}' $B/api/auth/sessions/revoke)"
+
+SESSIONS=$(body -H "$AUTHH" $B/api/auth/sessions)
+if printf '%s' "$SESSIONS" | grep -qF "$TOK"; then
+    bad "the session list contains no tokens" "the caller's own token appears verbatim in the response"
+elif [ -n "$LOCAL_TOK" ] && printf '%s' "$SESSIONS" | grep -qF "$LOCAL_TOK"; then
+    bad "the session list contains no tokens" "the machine-local token appears in the response"
+else
+    ok "the session list contains no tokens"
+fi
+case "$SESSIONS" in
+  *local-script*) ok "the device's own credential is shown as a script, not a user" ;;
+  *) bad "the device's own credential is shown as a script, not a user" "no local-script entry: ${SESSIONS:0:140}" ;;
+esac
+
+# Revoke a DIFFERENT session and confirm the caller's own survives: a revoke
+# that signs you out while removing someone else is not a usable control.
+VICTIM=$(body -X POST $JSON -d "{\"username\":\"admin\",\"password\":\"$NEWPW\"}" $B/api/auth/login \
+         | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))' 2>/dev/null)
+VID=$(body -H "Authorization: Bearer $VICTIM" $B/api/auth/sessions \
+      | python3 -c 'import sys,json;print(next((s["id"] for s in json.load(sys.stdin)["sessions"] if s["is_current"]),""))' 2>/dev/null)
+if [ -n "$VID" ]; then
+    check "revoking a named session returns 204" "204" \
+      "$(code -X POST $JSON -H "$AUTHH" -d "{\"id\":\"$VID\"}" $B/api/auth/sessions/revoke)"
+    check "that session is now dead"            "401" "$(code -H "Authorization: Bearer $VICTIM" $B/api/auth/whoami)"
+    check "the caller's own session survived"   "200" "$(code -H "$AUTHH" $B/api/auth/whoami)"
+else
+    bad "could identify a session to revoke" "no is_current entry in the list"
+fi
+check "revoking an unknown id says so"      "404" \
+  "$(code -X POST $JSON -H "$AUTHH" -d '{"id":"0000000000000000"}' $B/api/auth/sessions/revoke)"
+
+# A session id must name a session without being usable as one.
+if [ -n "$VID" ]; then
+    check "a session id is not a usable token" "401" "$(code -H "Authorization: Bearer $VID" $B/api/auth/whoami)"
+fi
+
+section "8. dispatch surface"
 check "an unknown method is 404, not a crash" "404" \
   "$(code -X POST $JSON -H "$AUTHH" -d '{}' $B/api/v1/rpc/NoSuchMethodAtAll)"
 check "a method name with a slash is rejected" "400" \
@@ -284,7 +326,7 @@ else
     ok "method names are case-sensitive (this changed -- update the note in this test)"
 fi
 
-section "8. secrets must not leak into logs"
+section "9. secrets must not leak into logs"
 if grep -qiE "Bearer [A-Za-z0-9_-]{20,}|password_hash|\"password\"" /tmp/svc.log; then
     bad "no token or password in the service log" "$(grep -oiE 'Bearer [A-Za-z0-9_-]{20,}|password_hash|"password"' /tmp/svc.log | head -1)"
 else

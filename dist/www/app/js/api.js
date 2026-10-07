@@ -89,6 +89,26 @@ const Api = (() => {
     setToken(null, null);
   }
 
+  /* Who is signed in right now, and the means to end one of them.
+   *
+   * The response deliberately carries no tokens -- see
+   * service/auth/token.go:SessionInfo -- so an id here names a session without
+   * being usable as one. */
+  async function listSessions() {
+    const res = await fetch('/api/auth/sessions', { headers: authHeaders() });
+    if (!res.ok) throw new ApiError(res.status, await readError(res), 'list sessions');
+    return (await res.json()).sessions || [];
+  }
+
+  async function revokeSession(id) {
+    const res = await fetch('/api/auth/sessions/revoke', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify({ id }),
+    });
+    if (!res.ok) throw new ApiError(res.status, await readError(res), 'revoke session');
+  }
+
   async function whoami() {
     const res = await fetch('/api/auth/whoami', { headers: authHeaders() });
     if (!res.ok) throw new ApiError(res.status, await readError(res), 'whoami');
@@ -255,7 +275,7 @@ const Api = (() => {
 
   return {
     ApiError,
-    login, logout, whoami, changePassword,
+    login, logout, whoami, changePassword, listSessions, revokeSession,
     rpc, methods, streamEvents,
     hasToken, setToken, currentUser,
   };

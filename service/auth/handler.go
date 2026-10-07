@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -28,6 +29,12 @@ const HTTPPrefix = "/api/auth/"
 //	POST /api/auth/changepw {"username":"...","old_password":"...","new_password":"..."}
 //	      -> 204
 //	      -> 401 {"error":"invalid credentials"}
+//	GET  /api/auth/sessions (Authorization: Bearer ...)
+//	      -> 200 {"sessions":[{"id","username","issued_at","expires_at",
+//	                           "is_local_script","is_current"}, ...]}
+//	POST /api/auth/sessions/revoke {"id":"..."}  (Authorization: Bearer ...)
+//	      -> 204
+//	      -> 404 {"error":"no such session"}
 //	GET  /api/auth/health   -> 200 {"status":"ok","authenticated":<bool>}
 func HTTPHandler(m *Manager) http.Handler {
 	mux := http.NewServeMux()
@@ -45,6 +52,14 @@ func HTTPHandler(m *Manager) http.Handler {
 	})
 	mux.HandleFunc("/changepw", func(w http.ResponseWriter, r *http.Request) {
 		handleChangePassword(m, w, r)
+	})
+	// Register the more specific route first: ServeMux would otherwise match
+	// "/sessions/revoke" against the "/sessions" pattern's subtree.
+	mux.HandleFunc("/sessions/revoke", func(w http.ResponseWriter, r *http.Request) {
+		handleRevokeSession(m, w, r)
+	})
+	mux.HandleFunc("/sessions", func(w http.ResponseWriter, r *http.Request) {
+		handleListSessions(m, w, r)
 	})
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		handleHealth(m, w, r)
@@ -151,6 +166,87 @@ func handleWhoAmI(m *Manager, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleListSessions answers "who is logged in right now".
+//
+// A device that can be reached over USB, over its own access point and over
+// Bluetooth, with one shared account, had no way at all to answer that. An
+// operator who suspected a session was not theirs could only change the
+// password and revoke everything, including the device's own script
+// credential.
+//
+// The response carries no tokens. This is served to a browser, and a list of
+// live tokens would turn an audit view into a credential dump.
+func handleListSessions(m *Manager, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "GET required")
+		return
+	}
+	tok := extractBearer(r)
+	if tok == "" {
+		writeError(w, http.StatusUnauthorized, "no token")
+		return
+	}
+	if _, err := m.ValidateToken(tok); err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"sessions": m.Sessions.List(tok),
+	})
+}
+
+type revokeSessionRequest struct {
+	ID string `json:"id"`
+}
+
+// handleRevokeSession ends one named session.
+//
+// Without this, the only way to remove a session you did not recognise was to
+// change the password, which revokes every session including the one the
+// device uses to drive itself.
+func handleRevokeSession(m *Manager, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+	tok := extractBearer(r)
+	if tok == "" {
+		writeError(w, http.StatusUnauthorized, "no token")
+		return
+	}
+	if _, err := m.ValidateToken(tok); err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	var req revokeSessionRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed request body")
+		return
+	}
+	if req.ID == "" {
+		writeError(w, http.StatusBadRequest, "id is required")
+		return
+	}
+	// Revoking the device's own script credential would stop its startup and
+	// trigger actions working, with no sign of why. Re-issue it instead of
+	// refusing, so the operator still gets the "this session is gone" they
+	// asked for.
+	isLocal := false
+	for _, s := range m.Sessions.List(tok) {
+		if s.ID == req.ID && s.IsLocalScript {
+			isLocal = true
+		}
+	}
+	if !m.Sessions.RevokeByID(req.ID) {
+		writeError(w, http.StatusNotFound, "no such session")
+		return
+	}
+	if isLocal {
+		m.ReprovisionLocalTokenIfConfigured()
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type changePasswordRequest struct {
 	Username    string `json:"username"`
 	OldPassword string `json:"old_password"`
@@ -230,8 +326,8 @@ func handleHealth(m *Manager, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status":         "ok",
-		"authenticated":  authenticated,
-		"server_time":    time.Now().Unix(),
+		"status":        "ok",
+		"authenticated": authenticated,
+		"server_time":   time.Now().Unix(),
 	})
 }

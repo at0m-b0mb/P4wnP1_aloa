@@ -288,6 +288,25 @@ function showDetail({ title, body, mono = false }) {
 const fmtTime = ms => new Date(Number(ms) || Date.now())
   .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
+/* A point in time relative to now: "in 23h", "4m ago", "just now".
+ *
+ * fmtTime shows a clock time only, which is wrong for anything more than a few
+ * hours out: a session expiring in 24 hours renders with the same HH:MM:SS it
+ * was issued at, so "expires 08:04:24" reads as six seconds away rather than
+ * tomorrow morning. That was shipped in the sessions view and spotted by
+ * reading the rendered table. */
+const fmtRelative = ms => {
+  const diff = Number(ms) - Date.now();
+  const abs = Math.abs(diff);
+  const mins = Math.round(abs / 60000);
+  if (mins < 1) return 'just now';
+  let span;
+  if (mins < 60) span = mins + 'm';
+  else if (mins < 60 * 48) span = Math.round(mins / 60) + 'h';
+  else span = Math.round(mins / (60 * 24)) + ' days';
+  return diff >= 0 ? 'in ' + span : span + ' ago';
+};
+
 const fmtBytes = n => {
   n = Number(n) || 0;
   if (n < 1024) return n + ' B';

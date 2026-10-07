@@ -3,7 +3,10 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"sort"
 	"sync"
 	"time"
 )
@@ -128,4 +131,67 @@ func ContextWithSession(ctx context.Context, sess *Session) context.Context {
 func SessionFromContext(ctx context.Context) (*Session, bool) {
 	sess, ok := ctx.Value(sessionContextKey).(*Session)
 	return sess, ok
+}
+
+// SessionInfo describes a live session for display. It deliberately carries
+// no token: this is served over HTTP to a browser, and a list of live tokens
+// would turn a read-only audit view into a credential dump.
+type SessionInfo struct {
+	// ID identifies a session well enough to revoke it, without being usable
+	// as one. It is a truncated SHA-256 of the token, so it cannot be turned
+	// back into the token it names.
+	ID        string `json:"id"`
+	Username  string `json:"username"`
+	IssuedAt  int64  `json:"issued_at"`
+	ExpiresAt int64  `json:"expires_at"`
+	// IsLocalScript marks the credential the device issues to its own startup
+	// and trigger scripts, so an operator reading this list can tell the
+	// machine's own activity from a human's.
+	IsLocalScript bool `json:"is_local_script"`
+	// IsCurrent marks the session making the request.
+	IsCurrent bool `json:"is_current"`
+}
+
+// SessionID derives the public identifier for a token. One-way: knowing an ID
+// does not let you reconstruct the token.
+func SessionID(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:8])
+}
+
+// List returns every live session, newest first, without their tokens.
+// Expired entries are pruned on the way so the list cannot show a session
+// that would no longer authenticate.
+func (s *Sessions) List(currentToken string) []SessionInfo {
+	s.PruneExpired()
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]SessionInfo, 0, len(s.m))
+	for tok, sess := range s.m {
+		out = append(out, SessionInfo{
+			ID:            SessionID(tok),
+			Username:      sess.Username,
+			IssuedAt:      sess.IssuedAt.Unix(),
+			ExpiresAt:     sess.Expires.Unix(),
+			IsLocalScript: sess.Username == LocalUsername,
+			IsCurrent:     tok != "" && tok == currentToken,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].IssuedAt > out[j].IssuedAt })
+	return out
+}
+
+// RevokeByID revokes the session with the given public ID. Reports whether
+// one was found, so the caller can answer 404 rather than pretending.
+func (s *Sessions) RevokeByID(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for tok := range s.m {
+		if SessionID(tok) == id {
+			delete(s.m, tok)
+			return true
+		}
+	}
+	return false
 }

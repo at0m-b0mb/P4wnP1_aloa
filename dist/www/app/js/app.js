@@ -1440,6 +1440,9 @@ function renderConsole() {
           h('div.field-hint', { style: 'margin-bottom:8px' },
             'Signed in as ', h('span.mono', Api.currentUser() || 'operator')),
           h('button.btn.btn-sm.btn-quiet', {
+            onclick: () => sessionsFlow(),
+          }, 'Who is signed in'),
+          h('button.btn.btn-sm.btn-quiet', {
             onclick: () => changePasswordFlow(),
           }, 'Change password'),
           h('button.btn.btn-sm.btn-quiet', {
@@ -1449,6 +1452,71 @@ function renderConsole() {
   renderThemeSwitch();
   startStream();
   go((location.hash || '#overview').slice(1));
+}
+
+/* Who is signed in right now.
+ *
+ * This device is reachable over USB, over its own access point and over
+ * Bluetooth, and every operator shares one account. Until this existed there
+ * was no way to answer "is anyone else on my device?" -- an operator who
+ * suspected a session was not theirs could only change the password, which
+ * ends every session including the one the device uses to drive itself.
+ *
+ * The list carries no tokens. An id names a session well enough to end it and
+ * cannot be used as one. */
+async function sessionsFlow() {
+  const sessions = await guard(() => Api.listSessions(), 'list the signed-in sessions');
+  if (!sessions) return;
+
+  const row = s => h('tr',
+    h('td',
+      s.is_local_script
+        ? h('span.pill', h('span.dot.dot-idle'), 'this device')
+        : h('span', s.username || 'operator'),
+      s.is_current ? h('span.field-hint', { style: 'margin-left:8px' }, '(you)') : null),
+    h('td', { style: 'white-space:nowrap' }, fmtRelative(Number(s.issued_at) * 1000)),
+    h('td', { style: 'white-space:nowrap' }, fmtRelative(Number(s.expires_at) * 1000)),
+    h('td', s.is_current
+      ? h('span.field-hint', 'sign out instead')
+      : h('button.btn.btn-sm.btn-danger', {
+          type: 'button',
+          onclick: async () => {
+            // Close this dialog BEFORE confirming. Modal.open's focus trap
+            // assumes one dialog at a time; stacking a confirmation on top of
+            // the list leaves the trap pointing at the dialog underneath.
+            close();
+            const ok = await confirmAction({
+              title: 'End a session',
+              body: s.is_local_script
+                ? 'This is the credential the device uses to run its own startup and trigger scripts.'
+                : 'Whoever is using this session is signed out at once.',
+              consequence: s.is_local_script
+                ? 'It is re-issued immediately, so the device keeps working. Anything holding the old one stops.'
+                : 'They can sign in again with the console password.',
+              confirmLabel: 'End it',
+              danger: true,
+            });
+            if (ok) {
+              if (await guard(() => Api.revokeSession(s.id), 'end that session') !== undefined) {
+                toast('Session ended.');
+              }
+            }
+            sessionsFlow();
+          },
+        }, 'End')));
+
+  const close = Modal.open({
+    title: 'Signed-in sessions',
+    body: h('div',
+      h('p.field-hint', { style: 'margin-bottom:12px' },
+        sessions.length === 1
+          ? 'One session is active.'
+          : sessions.length + ' sessions are active. "This device" is the credential the device uses to run its own startup and trigger scripts.'),
+      dataTable(
+        h('thead', h('tr', h('th', 'Who'), h('th', 'Signed in'), h('th', 'Expires'), h('th', ''))),
+        h('tbody', ...sessions.map(row)))),
+    actions: [h('button.btn.btn-primary', { type: 'button', onclick: () => close() }, 'Close')],
+  });
 }
 
 /* Changing the console password.

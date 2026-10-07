@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -240,5 +242,300 @@ func TestChangepwRequiresABearerToken(t *testing.T) {
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusNoContent && resp2.StatusCode != http.StatusOK {
 		t.Errorf("changepw WITH a token = %d, want 204/200", resp2.StatusCode)
+	}
+}
+
+// The session list is served to a browser. If it carried tokens it would stop
+// being an audit view and become a credential dump -- any XSS, any shoulder
+// surf, any screenshot would hand over every live session on the device.
+func TestSessionListNeverContainsAToken(t *testing.T) {
+	store, _ := NewStore(filepath.Join(t.TempDir(), "auth.json"))
+	if err := store.SetPassword("admin", "the-real-password"); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(store, NewSessions(), time.Hour)
+	defer m.Close()
+	srv := httptest.NewServer(HTTPHandler(m))
+	defer srv.Close()
+
+	var tokens []string
+	for i := 0; i < 3; i++ {
+		sess, err := m.Login(nil, "admin", "the-real-password") //nolint:staticcheck // nil ctx unused
+		if err != nil {
+			t.Fatal(err)
+		}
+		tokens = append(tokens, sess.Token)
+	}
+	if err := m.ProvisionLocalToken(filepath.Join(t.TempDir(), "local.token")); err != nil {
+		t.Fatal(err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/auth/sessions", nil)
+	req.Header.Set("Authorization", "Bearer "+tokens[0])
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/auth/sessions = %d, want 200", resp.StatusCode)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	body := string(raw)
+
+	for i, tok := range tokens {
+		if strings.Contains(body, tok) {
+			t.Fatalf("token %d appears verbatim in the session list response", i)
+		}
+	}
+	local, _ := ReadLocalToken(filepath.Join(t.TempDir(), "local.token"))
+	if local != "" && strings.Contains(body, local) {
+		t.Fatal("the machine-local token appears in the session list response")
+	}
+
+	var got struct {
+		Sessions []SessionInfo `json:"sessions"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("response is not the documented shape: %v", err)
+	}
+	if len(got.Sessions) != 4 { // three logins plus the local script
+		t.Errorf("listed %d sessions, want 4", len(got.Sessions))
+	}
+	current, localSeen := 0, 0
+	for _, s := range got.Sessions {
+		if s.IsCurrent {
+			current++
+		}
+		if s.IsLocalScript {
+			localSeen++
+			if s.Username != LocalUsername {
+				t.Errorf("local script session username = %q", s.Username)
+			}
+		}
+	}
+	if current != 1 {
+		t.Errorf("%d sessions marked current, want exactly 1", current)
+	}
+	if localSeen != 1 {
+		t.Errorf("%d sessions marked as the local script, want 1", localSeen)
+	}
+}
+
+func TestSessionListRequiresAToken(t *testing.T) {
+	store, _ := NewStore(filepath.Join(t.TempDir(), "auth.json"))
+	m := NewManager(store, NewSessions(), time.Hour)
+	defer m.Close()
+	srv := httptest.NewServer(HTTPHandler(m))
+	defer srv.Close()
+
+	for _, path := range []string{"/api/auth/sessions", "/api/auth/sessions/revoke"} {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			t.Errorf("%s served without a token", path)
+		}
+	}
+}
+
+// A session ID must name a session without being usable as one.
+func TestSessionIDIsNotAUsableCredential(t *testing.T) {
+	store, _ := NewStore(filepath.Join(t.TempDir(), "auth.json"))
+	if err := store.SetPassword("admin", "the-real-password"); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(store, NewSessions(), time.Hour)
+	defer m.Close()
+
+	sess, err := m.Login(nil, "admin", "the-real-password") //nolint:staticcheck // nil ctx unused
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := SessionID(sess.Token)
+	if id == sess.Token {
+		t.Fatal("the session ID is the token")
+	}
+	if _, err := m.ValidateToken(id); err == nil {
+		t.Fatal("the session ID authenticates as a token")
+	}
+}
+
+func TestRevokeByIDEndsOnlyThatSession(t *testing.T) {
+	store, _ := NewStore(filepath.Join(t.TempDir(), "auth.json"))
+	if err := store.SetPassword("admin", "the-real-password"); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(store, NewSessions(), time.Hour)
+	defer m.Close()
+	srv := httptest.NewServer(HTTPHandler(m))
+	defer srv.Close()
+
+	mine, _ := m.Login(nil, "admin", "the-real-password")   //nolint:staticcheck // nil ctx unused
+	theirs, _ := m.Login(nil, "admin", "the-real-password") //nolint:staticcheck // nil ctx unused
+	other, _ := m.Login(nil, "admin", "the-real-password")  //nolint:staticcheck // nil ctx unused
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/auth/sessions/revoke",
+		strings.NewReader(`{"id":"`+SessionID(theirs.Token)+`"}`))
+	req.Header.Set("Authorization", "Bearer "+mine.Token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("revoke = %d, want 204", resp.StatusCode)
+	}
+
+	if _, err := m.ValidateToken(theirs.Token); err == nil {
+		t.Error("the named session survived revocation")
+	}
+	if _, err := m.ValidateToken(mine.Token); err != nil {
+		t.Error("revoking another session killed the caller's own")
+	}
+	if _, err := m.ValidateToken(other.Token); err != nil {
+		t.Error("revoking one session killed an unrelated one")
+	}
+
+	// An unknown id must say so rather than silently succeeding.
+	req2, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/auth/sessions/revoke",
+		strings.NewReader(`{"id":"0000000000000000"}`))
+	req2.Header.Set("Authorization", "Bearer "+mine.Token)
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusNotFound {
+		t.Errorf("revoking an unknown id = %d, want 404", resp2.StatusCode)
+	}
+}
+
+// Revoking the device's own credential must not leave the device unable to
+// drive itself -- that is the outage the local credential exists to prevent.
+func TestRevokingTheLocalScriptSessionReissuesIt(t *testing.T) {
+	store, _ := NewStore(filepath.Join(t.TempDir(), "auth.json"))
+	if err := store.SetPassword("admin", "the-real-password"); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(store, NewSessions(), time.Hour)
+	defer m.Close()
+	srv := httptest.NewServer(HTTPHandler(m))
+	defer srv.Close()
+
+	path := filepath.Join(t.TempDir(), "local.token")
+	if err := m.ProvisionLocalToken(path); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := ReadLocalToken(path)
+	mine, _ := m.Login(nil, "admin", "the-real-password") //nolint:staticcheck // nil ctx unused
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/auth/sessions/revoke",
+		strings.NewReader(`{"id":"`+SessionID(before)+`"}`))
+	req.Header.Set("Authorization", "Bearer "+mine.Token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("revoke = %d, want 204", resp.StatusCode)
+	}
+
+	if _, err := m.ValidateToken(before); err == nil {
+		t.Error("the revoked local session still authenticates")
+	}
+	after, _ := ReadLocalToken(path)
+	if after == "" || after == before {
+		t.Fatal("the local credential was not re-issued")
+	}
+	if _, err := m.ValidateToken(after); err != nil {
+		t.Errorf("the re-issued local credential does not authenticate: %v", err)
+	}
+}
+
+// Provisioning must be atomic. Taking the lock only around the state swap left
+// a window as wide as one file write: two overlapping calls each wrote their
+// own token, then each revoked what it believed was the previous one, and the
+// loser's revocation could land on the token actually left in the file.
+// Measured before the fix: with calls started within 100us of each other the
+// file held a REVOKED token 97-99% of the time.
+//
+// On a device the overlap is the twelve-hourly refresh colliding with a
+// password change -- rare, and silent, and it leaves the device unable to
+// authenticate to itself until the next refresh.
+func TestConcurrentProvisioningAlwaysLeavesAValidToken(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "local.token")
+	store, err := NewStore(filepath.Join(dir, "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(store, NewSessions(), time.Hour)
+	defer m.Close()
+	if err := m.ProvisionLocalToken(path); err != nil {
+		t.Fatal(err)
+	}
+
+	broken := 0
+	for i := 0; i < 300; i++ {
+		var wg sync.WaitGroup
+		for j := 0; j < 2; j++ {
+			wg.Add(1)
+			go func() { defer wg.Done(); _ = m.ProvisionLocalToken(path) }()
+		}
+		wg.Wait()
+
+		tok, err := ReadLocalToken(path)
+		if err != nil {
+			t.Fatalf("round %d: reading the token file: %v", i, err)
+		}
+		if _, err := m.ValidateToken(tok); err != nil {
+			broken++
+		}
+	}
+	if broken > 0 {
+		t.Errorf("the token file held a revoked token in %d/300 rounds -- the "+
+			"device would be unable to authenticate to itself", broken)
+	}
+}
+
+// Two concurrent password changes are the realistic way to hit the above: both
+// call RevokeAll and then re-issue.
+func TestConcurrentPasswordChangesLeaveTheDeviceAbleToAuthenticate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "local.token")
+	store, err := NewStore(filepath.Join(dir, "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pw = "a-stable-test-password"
+	if err := store.SetPassword("admin", pw); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(store, NewSessions(), time.Hour)
+	defer m.Close()
+	if err := m.ProvisionLocalToken(path); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 25; i++ {
+		var wg sync.WaitGroup
+		for j := 0; j < 2; j++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_ = m.ChangePassword(nil, "admin", pw, pw) //nolint:staticcheck // nil ctx unused
+			}()
+		}
+		wg.Wait()
+
+		tok, _ := ReadLocalToken(path)
+		if _, err := m.ValidateToken(tok); err != nil {
+			t.Fatalf("round %d: the device cannot authenticate to itself after "+
+				"two concurrent password changes", i)
+		}
 	}
 }
