@@ -539,3 +539,40 @@ func TestConcurrentPasswordChangesLeaveTheDeviceAbleToAuthenticate(t *testing.T)
 		}
 	}
 }
+
+// /api/auth/login is the only endpoint an anonymous caller can reach that
+// parses a request body, and it used an unbounded json.NewDecoder(r.Body). On
+// a 512MB Pi running as root, that is a denial of service against the whole
+// appliance requiring no credential of any kind.
+func TestAnonymousLoginBodyIsBounded(t *testing.T) {
+	store, _ := NewStore(filepath.Join(t.TempDir(), "auth.json"))
+	if err := store.SetPassword("admin", "the-real-password"); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(store, NewSessions(), time.Hour)
+	defer m.Close()
+	srv := httptest.NewServer(HTTPHandler(m))
+	defer srv.Close()
+
+	huge := `{"username":"admin","password":"` + strings.Repeat("A", maxAuthBodyBytes*4) + `"}`
+	resp, err := http.Post(srv.URL+"/api/auth/login", "application/json", strings.NewReader(huge))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		t.Fatal("an oversized anonymous login body was accepted")
+	}
+
+	// ...and an ordinary body still works, so the limit is not just "reject
+	// everything", which would also pass the check above.
+	ok := `{"username":"admin","password":"the-real-password"}`
+	resp2, err := http.Post(srv.URL+"/api/auth/login", "application/json", strings.NewReader(ok))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("an ordinary login body was rejected: HTTP %d", resp2.StatusCode)
+	}
+}

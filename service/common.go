@@ -112,6 +112,15 @@ func safePathInAllowlist(absPath string, allowedBases ...string) (string, error)
 		cleanedBase := filepath.Clean(base)
 		if cleaned == cleanedBase ||
 			strings.HasPrefix(cleaned, cleanedBase+string(filepath.Separator)) {
+			// Same reason as safeJoinUnderBase: Clean is lexical and proves
+			// nothing about where the path leads. This function guards
+			// HIDRunScript, HIDRunScriptJob and FSGetFileInfo, and /tmp is one
+			// of the bases they allow -- so without this, a local user plants
+			// a symlink and HIDRunScript reads an arbitrary root-readable file
+			// and TYPES IT INTO THE ATTACHED HOST.
+			if err := verifyResolvesUnderBase(cleanedBase, cleaned); err != nil {
+				return "", err
+			}
 			return cleaned, nil
 		}
 	}

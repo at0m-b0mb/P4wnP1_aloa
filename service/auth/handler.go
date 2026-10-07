@@ -3,7 +3,6 @@ package auth
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +12,20 @@ import (
 // HTTP router routes anything beginning with this to the auth handler
 // before falling through to gRPC-web / static files.
 const HTTPPrefix = "/api/auth/"
+
+// maxAuthBodyBytes caps every request body these handlers parse.
+//
+// /api/auth/login is the ONE endpoint an anonymous caller can reach that
+// parses a body, and it did so with an unbounded json.NewDecoder(r.Body). A Pi
+// Zero W has 512MB of RAM and this service runs as root driving HID injection,
+// DHCP and hostapd, so an anonymous POST of a few hundred megabytes was a
+// memory-exhaustion denial of service against the whole appliance with no
+// credential of any kind.
+//
+// A credentials object is a few hundred bytes. 16 KiB is generous enough that
+// no legitimate client can hit it and small enough that hitting it costs an
+// attacker more than it costs the device.
+const maxAuthBodyBytes = 16 << 10
 
 // HTTPHandler returns an http.Handler that serves the auth-related HTTP
 // endpoints. None of these endpoints require an existing valid token --
@@ -68,6 +81,14 @@ func HTTPHandler(m *Manager) http.Handler {
 	return http.StripPrefix(strings.TrimSuffix(HTTPPrefix, "/"), mux)
 }
 
+// decodeLimited parses a JSON request body, refusing to read more than
+// maxAuthBodyBytes. http.MaxBytesReader, rather than io.LimitReader, because
+// it also stops the client sending more once the limit is hit instead of
+// silently truncating and leaving the connection to drain.
+func decodeLimited(w http.ResponseWriter, r *http.Request, dst interface{}) error {
+	return json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)).Decode(dst)
+}
+
 // --- JSON helpers ----------------------------------------------------------
 
 func writeJSON(w http.ResponseWriter, status int, body interface{}) {
@@ -113,7 +134,7 @@ func handleLogin(m *Manager, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req loginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeLimited(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -219,7 +240,7 @@ func handleRevokeSession(m *Manager, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req revokeSessionRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
+	if err := decodeLimited(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "malformed request body")
 		return
 	}
@@ -297,7 +318,7 @@ func handleChangePassword(m *Manager, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req changePasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeLimited(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}

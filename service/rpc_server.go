@@ -403,7 +403,16 @@ func (s *server) DBBackup(ctx context.Context, filename *pb.StringMessage) (e *p
 		fname = fname + ".db"
 	}
 
-	err = s.rootSvc.SubSysDataStore.Backup(common.PATH_DATA_STORE_BACKUP + "/" + fname)
+	// The filename came straight off the wire and was concatenated onto the
+	// backup directory, so "../../../etc/whatever.db" wrote wherever it liked
+	// -- and a symlink in the backup directory sent an ordinary-looking name
+	// anywhere at all. Route it through the same containment as every other
+	// file RPC, which resolves symlinks rather than only cleaning the string.
+	safePath, err := safeJoinUnderBase(common.PATH_DATA_STORE_BACKUP, fname)
+	if err != nil {
+		return e, err
+	}
+	err = s.rootSvc.SubSysDataStore.Backup(safePath)
 	return
 }
 

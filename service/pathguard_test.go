@@ -213,3 +213,59 @@ func TestWriteFileRefusesToFollowASymlinkedLeaf(t *testing.T) {
 		t.Fatalf("the target was modified through the symlink: %q", got)
 	}
 }
+
+// safePathInAllowlist is the OTHER entry point, and it was missed when
+// safeJoinUnderBase was hardened. It guards HIDRunScript, HIDRunScriptJob and
+// FSGetFileInfo, and /tmp is one of the bases they allow -- so without symlink
+// containment a local user plants a link and HIDRunScript reads an arbitrary
+// root-readable file and TYPES IT INTO THE ATTACHED HOST. That is exfiltration
+// to the machine the device is plugged into, which is the one place it must
+// not leak to.
+func TestSafePathInAllowlistRejectsSymlinkedLeaf(t *testing.T) {
+	base := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(outside, []byte("bcrypt-hashes-here"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "innocent.js")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := safePathInAllowlist(link, base); err == nil {
+		t.Fatalf("a symlinked leaf was accepted: %q", got)
+	}
+}
+
+func TestSafePathInAllowlistRejectsSymlinkedDirectory(t *testing.T) {
+	base := t.TempDir()
+	outsideDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outsideDir, "secret.js"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideDir, filepath.Join(base, "jump")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := safePathInAllowlist(filepath.Join(base, "jump", "secret.js"), base); err == nil {
+		t.Fatalf("a symlinked directory component was accepted: %q", got)
+	}
+}
+
+func TestSafePathInAllowlistStillAcceptsOrdinaryPaths(t *testing.T) {
+	base := t.TempDir()
+	real := filepath.Join(base, "script.js")
+	if err := os.WriteFile(real, []byte("layout('US');"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := safePathInAllowlist(real, base); err != nil {
+		t.Errorf("an ordinary path inside the base was rejected: %v", err)
+	}
+	// And a second allowed base must still work -- the real callers pass two.
+	other := t.TempDir()
+	if _, err := safePathInAllowlist(real, other, base); err != nil {
+		t.Errorf("a path in the SECOND allowed base was rejected: %v", err)
+	}
+	// Outside every base, still refused.
+	if _, err := safePathInAllowlist(filepath.Join(t.TempDir(), "x"), base, other); err == nil {
+		t.Error("a path outside every base was accepted")
+	}
+}

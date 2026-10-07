@@ -337,9 +337,56 @@ func (wSvc *WiFiService) runAPMode(newWifiSettings *pb.WiFiSettings) (err error)
 	return nil
 }
 
+// describeWifiSettings renders WiFi settings for a log line WITHOUT their
+// pre-shared keys.
+//
+// The previous line was `log.Printf("Settings: %+v\n", newWifiSettings)`.
+// protoc-gen-go gives every message a String() that text-marshals the whole
+// nested structure, so %+v expanded it in full -- including the access point's
+// PSK and the PSK of every saved client network. Those went to the systemd
+// journal, which any local account can read:
+//
+//	journalctl -u P4wnP1.service | grep -o 'PSK:"[^"]*"'
+//
+// The client keys are the worse half: they are the OPERATOR'S own networks --
+// home, office, a client site -- not the appliance's.
+//
+// This also contradicted the policy already written down in
+// wifi_psk_guard.go, which deliberately declines to print even a PSK that is
+// public, on the grounds that a log line which sometimes contains a key trains
+// everyone reading logs to expect keys in them.
+func describeWifiSettings(s *pb.WiFiSettings) string {
+	if s == nil {
+		return "<nil>"
+	}
+	ap := "none"
+	if s.Ap_BSS != nil {
+		ap = fmt.Sprintf("SSID %q, PSK %s", s.Ap_BSS.SSID, redactedPSK(s.Ap_BSS.PSK))
+	}
+	clients := make([]string, 0, len(s.Client_BSSList))
+	for _, c := range s.Client_BSSList {
+		if c == nil {
+			continue
+		}
+		clients = append(clients, fmt.Sprintf("%q (PSK %s)", c.SSID, redactedPSK(c.PSK)))
+	}
+	return fmt.Sprintf("name=%q mode=%v reg=%q channel=%d disabled=%v nexmon=%v ap={%s} clients=[%s]",
+		s.Name, s.WorkingMode, s.Regulatory, s.Channel, s.Disabled, s.Nexmon,
+		ap, strings.Join(clients, ", "))
+}
+
+// redactedPSK says whether a key is set, and nothing else. Not even its
+// length: that is a meaningful hint when someone is guessing.
+func redactedPSK(psk string) string {
+	if psk == "" {
+		return "unset"
+	}
+	return "set"
+}
+
 func (wSvc *WiFiService) DeploySettings(newWifiSettings *pb.WiFiSettings) (wstate *pb.WiFiState, err error) {
 	log.Println("Deploying new WiFi settings...")
-	log.Printf("Settings: %+v\n", newWifiSettings)
+	log.Printf("Settings: %s", describeWifiSettings(newWifiSettings))
 
 	wSvc.mutexSettings.Lock()
 	defer wSvc.mutexSettings.Unlock()

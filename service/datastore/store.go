@@ -10,6 +10,7 @@ import (
 	"github.com/dgraph-io/badger/options"
 	"os"
 	"strings"
+	"syscall"
 )
 
 /*
@@ -110,7 +111,13 @@ func (s *Store) Clear() (err error) {
 
 // ToDo: Backup and restore could be synchronized to avoid concurrent transactions
 func (s *Store) Backup(filePath string) (err error) {
-	f, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0664)
+	// O_NOFOLLOW: this runs as root and the caller names the file. Without it
+	// a symlink left in the backup directory redirects the write anywhere.
+	//
+	// 0600, not 0664: the datastore holds every stored template, which
+	// includes WiFi pre-shared keys. A world-readable copy of it in a
+	// directory served by the device is not a backup, it is a disclosure.
+	f, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0600)
 	if err != nil {
 		return err
 	}
