@@ -138,6 +138,155 @@ function figure(n, label) {
 
 const Views = {};
 
+/* --- Overview: what this device is, and what it is doing right now -------
+ *
+ * This view exists because the console used to open on Cable, which shows seven
+ * checkboxes labelled RNDIS, CDC ECM and Raw HID and explains none of them. A
+ * competent security person who has not used a P4wnP1 before has no way in
+ * from there. Everything here is assembled from RPCs that already existed --
+ * no new backend capability. */
+
+const CONCEPTS = [
+  {
+    term: 'The cable',
+    view: 'cable',
+    plain: 'What the device pretends to be when you plug it into a computer.',
+    detail: 'A Pi can present itself over one USB cable as several devices at once: a keyboard, a mouse, a network adapter, a USB stick, a serial port. The target machine sees ordinary hardware and sets it up without asking. Choosing which of those to present is the first thing you do.',
+  },
+  {
+    term: 'Keystrokes',
+    view: 'keystrokes',
+    plain: 'Typing into the target, from a script.',
+    detail: 'Because the target believes a real keyboard is attached, anything the device types is accepted as if you had typed it. HIDScript is JavaScript that runs on the device and drives that keyboard, with control over speed, layout and timing.',
+  },
+  {
+    term: 'Reflexes',
+    view: 'reflexes',
+    plain: 'Rules that make the device act on its own.',
+    detail: 'A reflex is "when X happens, do Y" -- when a host attaches, when an access point starts, when a DHCP lease is granted. This is what lets the device work with nobody at the keyboard, which is the point of leaving one plugged in.',
+  },
+  {
+    term: 'Loadouts',
+    view: 'loadouts',
+    plain: 'A whole configuration, saved and recalled as one.',
+    detail: 'USB composition, WiFi, Bluetooth, networking and reflexes together under one name. Build a setup once, store it, and deploy the same thing again later or at boot.',
+  },
+];
+
+function statusTile(value, label, state) {
+  return h('div.tile' + (state ? '.tile-' + state : ''),
+    h('span.tile-value', value),
+    h('span.tile-label', label));
+}
+
+Views.overview = async function () {
+  const main = clear($('#view'));
+  main.append(pageHead('Overview', 'What this device is presenting, and what it is doing right now.'));
+
+  /* The primer is dismissible and the choice is remembered, so it helps a
+     newcomer without nagging someone on their fiftieth engagement. */
+  let dismissed = false;
+  try { dismissed = localStorage.getItem('p4wnp1.primerDismissed') === '1'; } catch (_) {}
+  if (!dismissed) main.append(renderPrimer());
+
+  const statusHost = h('div.card',
+    h('h2.card-title', 'Right now'),
+    h('div#overview-tiles.tiles', h('div.empty', 'Reading device state...')));
+  main.append(statusHost);
+
+  main.append(h('div.card',
+    h('h2.card-title', 'The four things this device does'),
+    h('div.concepts', ...CONCEPTS.map(c =>
+      h('details.concept',
+        h('summary',
+          h('span.concept-term', c.term),
+          h('span.concept-plain', c.plain)),
+        h('div.concept-detail',
+          h('p', c.detail),
+          h('button.btn.btn-sm', {
+            type: 'button', onclick: () => go(c.view),
+          }, 'Open ' + c.term)))))));
+
+  /* Every call is independent; one failure must not blank the whole view. */
+  const [usb, wifi, eth, triggers, jobs] = await Promise.all([
+    Api.rpc('GetDeployedGadgetSetting').catch(() => null),
+    Api.rpc('GetWiFiState').catch(() => null),
+    Api.rpc('GetAllDeployedEthernetInterfaceSettings').catch(() => null),
+    Api.rpc('GetDeployedTriggerActionSet').catch(() => null),
+    Api.rpc('HIDGetRunningScriptJobs').catch(() => null),
+  ]);
+  State.usb = usb || State.usb;
+
+  const tiles = $('#overview-tiles');
+  if (!tiles) return;
+  clear(tiles);
+
+  const fnCount = usb ? USB_FUNCTIONS.filter(f => usb[f.key]).length : null;
+  const attached = State.usbAttached;
+  const armed = triggers ? ((triggers.TriggerActions || []).filter(t => t.isActive).length) : null;
+  const running = jobs ? (jobs.ids || []).length : null;
+  const ifaces = eth ? ((eth.list || []).filter(i => i.settingsInUse).length) : null;
+
+  tiles.append(
+    statusTile(
+      attached === true ? 'Attached' : attached === false ? 'No host' : 'Unknown',
+      'USB host',
+      attached === true ? 'ok' : attached === false ? 'idle' : 'warn'),
+    statusTile(fnCount === null ? '--' : String(fnCount), 'USB functions presented'),
+    statusTile(wifi && wifi.ssid ? wifi.ssid : '--', 'WiFi'),
+    statusTile(ifaces === null ? '--' : String(ifaces), 'Interfaces up'),
+    statusTile(armed === null ? '--' : String(armed), 'Reflexes armed'),
+    statusTile(running === null ? '--' : String(running), 'Scripts running',
+      running ? 'ok' : null));
+
+  if (usb) main.insertBefore(renderCable(), statusHost.nextSibling);
+
+  /* Say the obvious thing out loud when the device cannot do anything useful,
+     rather than leaving the operator to infer it from a row of zeroes. */
+  if (usb && usb.enabled === false) {
+    main.insertBefore(h('div.banner.banner-danger',
+      h('p.banner-title', 'The USB gadget is switched off'),
+      h('p', 'The target machine sees nothing at all when the cable goes in. Turn it on under Cable and deploy.'),
+      h('button.btn.btn-sm', { style: 'margin-top:10px', onclick: () => go('cable') }, 'Open Cable')),
+      statusHost);
+  }
+};
+
+function renderPrimer() {
+  const card = h('div.card.primer',
+    h('div.card-head',
+      h('h2.card-title', { style: 'margin:0' }, 'New to this device?'),
+      h('button.btn.btn-sm.btn-quiet', {
+        type: 'button',
+        onclick: () => {
+          try { localStorage.setItem('p4wnp1.primerDismissed', '1'); } catch (_) {}
+          card.remove();
+          toast('Hidden. It is still in the Overview if you clear site data.');
+        },
+      }, 'Dismiss')),
+    h('p.primer-lede',
+      'P4wnP1 is a Raspberry Pi that pretends to be USB devices. Plug it into a computer and ' +
+      'that computer sets it up as a keyboard, a network adapter or a USB stick, without asking anyone. ' +
+      'What you do with that is up to you.'),
+    h('ol.primer-steps',
+      h('li',
+        h('strong', 'Decide what the cable presents.'),
+        ' Under Cable, tick the functions you want and deploy. A keyboard lets you type into the host; ' +
+        'a network adapter lets you route its traffic.'),
+      h('li',
+        h('strong', 'Write what should happen.'),
+        ' Under Keystrokes, a script types into the host. The reference on that page lists every ' +
+        'function you can call.'),
+      h('li',
+        h('strong', 'Make it automatic.'),
+        ' Under Reflexes, bind that script to an event -- "when a USB host attaches, run this" -- so ' +
+        'the device works with nobody present.')),
+    h('p.field-hint',
+      'Everything you deploy is live immediately and not saved. Store a Loadout when you have ' +
+      'something worth keeping.'));
+  return card;
+}
+
 /* --- Cable: USB gadget composition ------------------------------------- */
 
 Views.cable = async function () {
@@ -827,6 +976,7 @@ function textField(label, value, onInput, placeholder) {
 /* ------------------------------------------------------------------ chrome */
 
 const NAV = [
+  ['overview', 'Overview'],
   ['cable', 'Cable'],
   ['radio', 'Radio'],
   ['keystrokes', 'Keystrokes'],
@@ -836,7 +986,7 @@ const NAV = [
 ];
 
 function go(view) {
-  if (!Views[view]) view = 'cable';
+  if (!Views[view]) view = 'overview';
   State.view = view;
   try { location.hash = '#' + view; } catch (_) {}
   for (const b of document.querySelectorAll('.nav-item')) {
@@ -869,7 +1019,7 @@ function renderConsole() {
       h('main.main', h('div#view'))));
   renderThemeSwitch();
   startStream();
-  go((location.hash || '#cable').slice(1));
+  go((location.hash || '#overview').slice(1));
 }
 
 /* Changing the console password.
@@ -987,6 +1137,6 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 window.addEventListener('hashchange', () => {
-  const v = (location.hash || '#cable').slice(1);
+  const v = (location.hash || '#overview').slice(1);
   if (v !== State.view && Views[v]) go(v);
 });

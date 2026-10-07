@@ -442,3 +442,66 @@ details.ref > summary:hover { color: var(--text); }
   margin: 2px 0 0; padding-left: 0;
   font-size: var(--t-small); color: var(--text-muted);
 }
+
+/* --- Overview ----------------------------------------------------------- */
+
+.tiles {
+  display: grid; gap: var(--s3);
+  grid-template-columns: repeat(auto-fit, minmax(146px, 1fr));
+}
+.tile {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--s3) var(--s4);
+  min-width: 0;
+}
+.tile-ok   { border-left-color: var(--ok); }
+.tile-warn { border-left-color: var(--warn); }
+.tile-idle { border-left-color: var(--border-strong); }
+.tile-value {
+  display: block;
+  font-family: var(--font-display);
+  font-optical-sizing: none; font-variation-settings: 'opsz' 20;
+  font-size: var(--t-lead); font-weight: 600; line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tile-label {
+  display: block; margin-top: var(--s1);
+  font-size: var(--t-micro); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* The newcomer primer. Softer than a warning banner -- it is an offer, not an
+   alert -- but distinct enough from a plain card to read as addressed to you. */
+.primer { border-left: 3px solid var(--brass); }
+.primer-lede { color: var(--text); margin: 0 0 var(--s4); max-width: 66ch; }
+.primer-steps { margin: 0; padding-left: 1.2em; color: var(--text-muted); max-width: 70ch; }
+.primer-steps li { margin-bottom: var(--s3); }
+.primer-steps li:last-child { margin-bottom: 0; }
+.primer-steps strong { color: var(--text); font-weight: 600; }
+
+.concepts { display: flex; flex-direction: column; gap: var(--s2); }
+.concept {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.concept > summary {
+  cursor: pointer; padding: var(--s3) var(--s4);
+  display: flex; gap: var(--s3); align-items: baseline; flex-wrap: wrap;
+  list-style: none;
+}
+.concept > summary::-webkit-details-marker { display: none; }
+.concept > summary::after {
+  content: '+'; margin-left: auto; color: var(--text-faint);
+  font-family: var(--font-mono);
+}
+.concept[open] > summary::after { content: '–'; }
+.concept > summary:hover { background: var(--surface-sunk); }
+.concept-term { font-weight: 600; min-width: 9ch; }
+.concept-plain { color: var(--text-muted); font-size: var(--t-small); }
+.concept-detail { padding: 0 var(--s4) var(--s4); }
+.concept-detail p { margin: 0 0 var(--s3); color: var(--text-muted); max-width: 70ch; }
