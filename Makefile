@@ -3,7 +3,7 @@ PATH := /usr/local/go/bin:$(PATH)
 
 .PHONY: all help compile build-armv6 build-service-armv6 build-cli-armv6 build-hashpw-armv6 \
         build-arm64 build-service-arm64 build-cli-arm64 build-hashpw-arm64 \
-        image image-armhf image-arm64 contrast dep install installkali remove lint test
+        image image-armhf image-arm64 contrast smoke dep install installkali remove lint test
 
 all: compile
 
@@ -20,6 +20,7 @@ help:
 	@echo "  make image         Build flashable .img.xz for BOTH architectures"
 	@echo "                     (see image/README.md). Needs Docker."
 	@echo "  make contrast      Check the web console palette against WCAG AA"
+	@echo "  make smoke         Run the service in a container and verify it works"
 	@echo "  make test          Run unit tests (auth + jsonbridge)"
 	@echo "  make lint          Run shellcheck + golangci-lint (require both installed)"
 	@echo "  make install       Install binaries + data into /usr/local on the current host"
@@ -72,6 +73,13 @@ image-arm64:
 
 contrast:
 	python3 tools/check_contrast.py
+
+# End-to-end smoke test: runs the REAL service binary against the REAL dist
+# tree in a container and checks that it comes up, serves, authenticates and
+# shuts down. "It compiles" and "the unit tests pass" were both true while the
+# service panicked on every cold boot -- only starting it catches that.
+smoke:
+	./tools/smoke-test.sh arm64
 
 build-armv6: build-service-armv6 build-cli-armv6 build-hashpw-armv6
 	@echo

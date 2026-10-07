@@ -156,6 +156,7 @@ make build-armv6     # binaries for Pi Zero / Zero W
 make build-arm64     # binaries for Pi Zero 2 W / 3 / 4 / 5
 make image           # flashable .img.xz for both, via Docker
 make test            # unit tests
+make smoke           # run the service in a container, end to end (21 checks)
 make contrast        # WCAG check on the console palette
 ```
 
@@ -205,12 +206,33 @@ Being specific about this matters more than the feature list.
 
 **No physical Raspberry Pi was used at any point.**
 
-*Verified by automation:* both architectures cross-compile and `go vet` is clean for both;
-81 test functions across the auth, JSON-bridge, PSK-guard and DuckyScript packages pass on
-linux/arm64; images build from official Raspberry Pi OS releases and pass the mount-and-inspect
-check above; the console was exercised in a browser against a mock implementing the real API
-shapes — sign-in, all six views, the live event stream, both themes and a phone viewport — with
-no console errors.
+*Verified by automation.* `make smoke` runs the **real service binary against the real data
+tree in a container** and checks 21 things end to end — all passing:
+
+```
+PASS  firstboot bootstrap writes auth.json 0600      PASS  login returns a token (43 chars)
+PASS  service survived startup without hardware      PASS  JSON bridge exposes 82 RPCs
+PASS  reached 'service initialized'                  PASS  wrong password is refused
+PASS  gRPC listener up                               PASS  login without Content-Type is refused
+PASS  HTTP listener up                               PASS  changepw without a token is refused
+PASS  no panic in the log                            PASS  cross-origin is refused even with a token
+PASS  GET / redirects to the console                 PASS  unimplemented RPC returns 501, not a corpse
+PASS  the console is served                          PASS  a hostile read length is rejected
+PASS  console JS is served                           PASS  service still alive after hostile input
+PASS  console favicon is served                      PASS  clean shutdown on SIGTERM
+PASS  unauthenticated API is refused
+```
+
+That test exists because "it compiles" and "the unit tests pass" were both true the whole time
+the service was panicking on every cold boot. The panic was on a success path, inside a
+constructor, behind a `modprobe` that made a manual restart look healthy. Nothing short of
+starting the binary would have caught it — and it caught a second one while being written.
+
+Also verified: both architectures cross-compile and `go vet` is clean for both; 81 test
+functions across the auth, JSON-bridge, PSK-guard and DuckyScript packages pass on linux/arm64;
+images build from official Raspberry Pi OS releases and pass the mount-and-inspect check above;
+the console was exercised in a browser against a mock implementing the real API shapes — sign-in,
+all six views, the live event stream, both themes and a phone viewport — with no console errors.
 
 *Not verified at all:* that an image boots. That USB gadget mode initialises on real silicon and
 a host enumerates the functions. That keystroke injection types correctly into a real machine.
