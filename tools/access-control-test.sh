@@ -97,6 +97,15 @@ check "lookalike host refused"              "403" \
 check "no Origin (curl, the CLI) still works" "200" \
   "$(code -X POST $JSON -H "$AUTHH" -d '{}' $B/api/v1/rpc/GetLEDSettings)"
 
+# DNS rebinding: the attacker controls the domain, so they control BOTH Origin
+# and Host, and the two match. Before the Host guard this executed the RPC --
+# confirmed against a running service, 200 with Host+Origin both evil.example
+# while forging Origin alone was correctly refused 403.
+check "a rebindable Host is refused even when Origin matches it" "403" \
+  "$(code -X POST $JSON -H "$AUTHH" -H 'Host: evil.example' -H 'Origin: http://evil.example' -d '{}' $B/api/v1/rpc/GetLEDSettings)"
+check "an IP-literal Host still works (an IP cannot be rebound)" "200" \
+  "$(code -X POST $JSON -H "$AUTHH" -H 'Host: 127.0.0.1:8000' -d '{}' $B/api/v1/rpc/GetLEDSettings)"
+
 # OPTIONS is routed to the gRPC-web wrapper before any auth check, so confirm
 # it cannot be turned into a permissive preflight. If a CORS header ever shows
 # up here, the origin checks above stop being worth anything.

@@ -128,6 +128,23 @@ case "$USB_JSON" in
         ;;
 esac
 
+# A 500 asserts that the SERVICE is broken. On a board with no USB device
+# controller, no WiFi and no Bluetooth -- which is a normal, supported state,
+# and exactly what a container is -- the service is fine and the hardware is
+# simply absent. Reporting that as an internal fault misleads anyone reading
+# logs and anything that retries on 5xx. Every one of these answered 500 until
+# the bridge got a central error classifier.
+INTERNAL_ERRORS=0
+for m in GetDeployedGadgetSetting GetWiFiState HIDGetRunningScriptJobs \
+         GetBluetoothControllerInformation HIDCancelAllScriptJobs; do
+    C=$(code -X POST $JSON -H "Authorization: Bearer $TOK" -d '{}' "http://127.0.0.1:8000/api/v1/rpc/$m")
+    if [ "$C" = "500" ]; then
+        bad "missing hardware is 503, not 500 ($m)" "got 500: the service claims it is itself broken"
+        INTERNAL_ERRORS=$((INTERNAL_ERRORS+1))
+    fi
+done
+[ "$INTERNAL_ERRORS" -eq 0 ] && ok "missing hardware reports 503, not an internal server error"
+
 # The device drives ITSELF through P4wnP1_cli: servicestart.sh and every user
 # trigger action are shell scripts full of CLI calls. When the API began
 # requiring a bearer token, all of them started failing Unauthenticated -- so a

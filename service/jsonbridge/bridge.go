@@ -88,6 +88,28 @@ type Bridge struct {
 	mu      sync.RWMutex
 	methods map[string]*Method // key: lowercased name
 	names   []string           // canonical names, sorted
+
+	// classify, when set, gets a chance to attach a gRPC status code to an
+	// error a handler returned bare. See SetErrorClassifier.
+	classify func(error) error
+}
+
+// SetErrorClassifier installs a function that may attach a gRPC status code to
+// errors handlers return bare.
+//
+// It exists so classification happens in ONE place. Handlers that return a
+// plain errors.New become codes.Unknown, which the HTTP layer reports as 500 --
+// an assertion that the SERVICE is broken. For this device the commonest cause
+// is simply that a piece of hardware is absent (no USB device controller, no
+// WiFi adapter, no Bluetooth controller), which is a normal supported state.
+//
+// Doing this per-handler meant editing thirteen of them and silently getting
+// it wrong on the fourteenth someone adds later. A classifier here covers
+// every RPC the JSON API exposes, including ones that do not exist yet.
+func (b *Bridge) SetErrorClassifier(fn func(error) error) {
+	b.mu.Lock()
+	b.classify = fn
+	b.mu.Unlock()
 }
 
 // New reflects over target (a gRPC service implementation, e.g. *server) and
@@ -201,6 +223,12 @@ func (b *Bridge) Call(ctx context.Context, name string, body []byte) ([]byte, er
 	// HTTP layer reports PermissionDenied as 403 rather than a blanket 500.
 	if errv := out[1]; !errv.IsNil() {
 		err := errv.Interface().(error)
+		b.mu.RLock()
+		classify := b.classify
+		b.mu.RUnlock()
+		if classify != nil {
+			err = classify(err)
+		}
 		if st, ok := status.FromError(err); ok {
 			return nil, &CallError{Code: st.Code(), Msg: st.Message()}
 		}

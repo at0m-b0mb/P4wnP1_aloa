@@ -37,6 +37,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -140,6 +141,9 @@ func NewAPIHandler(srv *server, authMgr *auth.Manager) (http.Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("building JSON bridge: %w", err)
 	}
+	// One place where "the hardware is not here" stops looking like "the
+	// service is broken", for every RPC including ones added later.
+	bridge.SetErrorClassifier(hardwareUnavailable)
 	log.Printf("JSON API: exposing %d unary RPCs under %s", len(bridge.Methods()), APIPrefix)
 
 	a := &apiHandler{srv: srv, authMgr: authMgr, bridge: bridge}
@@ -170,6 +174,56 @@ func apiError(w http.ResponseWriter, status int, msg string) {
 	apiJSON(w, status, map[string]string{"error": msg})
 }
 
+// allowedHostEnv lets an operator who reaches the device by some name of their
+// own add it, e.g. P4WNP1_ALLOWED_HOSTS="p4wnp1.lan,box.internal".
+const allowedHostEnv = "P4WNP1_ALLOWED_HOSTS"
+
+// knownHost reports whether the Host header names this device in a way that
+// cannot be forged by an attacker's DNS.
+//
+// This exists because sameOrigin compares Origin against Host, and an attacker
+// who controls a domain controls BOTH. Point evil.example at 172.16.0.1 and a
+// victim's browser sends Origin: http://evil.example with
+// Host: evil.example -- they match, so the origin check passes and the
+// attacker's page is same-origin with the device. That was confirmed against a
+// running service: an RPC executed with Host and Origin both set to
+// evil.example, while the same request with only Origin forged was correctly
+// refused 403. This is classic DNS rebinding, and the origin check alone
+// offers nothing against it.
+//
+// The device is reached at an IP literal: 172.16.0.1 over the USB ethernet
+// link, 172.24.0.1 over its own access point, or localhost on the device
+// itself. Rebinding REQUIRES a name, because an IP literal resolves to itself.
+// So accepting IP literals, loopback names and mDNS .local names -- and
+// refusing other DNS names -- removes the attack without constraining any
+// legitimate route to the console.
+func knownHost(host string) bool {
+	if host == "" {
+		return true // HTTP/1.0 and some non-browser clients send no Host
+	}
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	host = strings.Trim(host, "[]") // IPv6 literal
+
+	if net.ParseIP(host) != nil {
+		return true // an IP literal cannot be rebound: it resolves to itself
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	if strings.HasSuffix(host, ".local") {
+		return true // mDNS; not resolvable from the public DNS
+	}
+	for _, extra := range strings.Split(os.Getenv(allowedHostEnv), ",") {
+		if extra = strings.ToLower(strings.TrimSpace(extra)); extra != "" && extra == host {
+			return true
+		}
+	}
+	return false
+}
+
 // sameOrigin reports whether the request is safe to serve.
 //
 // A missing Origin header is accepted: that is what non-browser clients (curl,
@@ -198,6 +252,12 @@ func sameOrigin(r *http.Request) bool {
 // session, plus gRPC metadata so any downstream code that reads metadata (as
 // the gRPC handlers may) still finds the token.
 func (a *apiHandler) authenticate(w http.ResponseWriter, r *http.Request) (context.Context, bool) {
+	if !knownHost(r.Host) {
+		apiError(w, http.StatusForbidden,
+			"this device is reached by IP address (e.g. 172.16.0.1), not by the name '"+
+				r.Host+"'. If that name really is yours, list it in "+allowedHostEnv+".")
+		return nil, false
+	}
 	if !sameOrigin(r) {
 		apiError(w, http.StatusForbidden, "cross-origin requests are not permitted")
 		return nil, false

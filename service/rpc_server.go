@@ -479,20 +479,37 @@ func (s *server) DeployStoredUSBSettings(ctx context.Context, m *pb.StringMessag
 	return
 }
 
-// usbStatus classifies an error from the USB subsystem. "There is no USB
-// gadget here" is an unavailable resource, not a server fault, and callers
-// -- scripts, monitoring, anything that retries on 5xx -- need to be able to
-// tell those apart. Anything else is passed through untouched so a real bug
-// still surfaces as one.
-func usbStatus(err error) error {
+// hardwareUnavailable classifies an error that means "this hardware is not
+// present or not configured" as codes.Unavailable rather than letting it
+// become codes.Unknown and, over HTTP, a 500.
+//
+// A 500 asserts that the SERVICE is broken. On a board with no USB device
+// controller bound, no WiFi adapter or no Bluetooth controller -- which is a
+// normal, supported state for this device -- the service is working perfectly
+// and the hardware simply is not there. Reporting that as an internal fault
+// misleads an operator reading logs and misleads anything that retries on 5xx.
+//
+// Everything that is NOT one of these sentinels is passed through untouched,
+// so a genuine bug still surfaces as one. That distinction is the whole point;
+// a blanket conversion would be worse than the original problem.
+func hardwareUnavailable(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, ErrUsbNotUsable) {
-		return status.Error(codes.Unavailable, err.Error())
+	for _, sentinel := range []error{
+		ErrUsbNotUsable,
+		ErrHidNotUsable,
+		bluetooth.ErrBtSvcNotAvailable,
+	} {
+		if errors.Is(err, sentinel) {
+			return status.Error(codes.Unavailable, err.Error())
+		}
 	}
 	return err
 }
+
+// usbStatus is the USB-specific spelling, kept for call-site readability.
+func usbStatus(err error) error { return hardwareUnavailable(err) }
 
 func (s *server) StoreDeployedUSBSettings(ctx context.Context, m *pb.StringMessage) (e *pb.Empty, err error) {
 	gstate, err := s.rootSvc.SubSysUSB.ParseGadgetState(USB_GADGET_NAME)

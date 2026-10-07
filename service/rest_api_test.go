@@ -187,3 +187,55 @@ func TestRecordingWriterForwardsInterfaces(t *testing.T) {
 		t.Error("recordingWriter does not Unwrap to the real writer")
 	}
 }
+
+// knownHost is the only thing standing between this device and DNS rebinding.
+// sameOrigin compares Origin against Host, and an attacker who controls a
+// domain controls both: point evil.example at 172.16.0.1 and a victim's
+// browser sends Origin and Host that match, so the origin check passes. That
+// was confirmed against a running service before this guard existed.
+func TestKnownHostAcceptsEveryRouteToTheDevice(t *testing.T) {
+	for _, h := range []string{
+		"172.16.0.1:8000",   // USB ethernet, the primary route
+		"172.24.0.1:8000",   // the device's own access point
+		"172.26.0.1:8000",   // bluetooth tethering
+		"127.0.0.1:8000",    // on the device itself
+		"localhost:8000",    //
+		"[::1]:8000",        // IPv6 loopback
+		"192.168.1.50",      // no port
+		"p4wnp1.local:8000", // mDNS
+		"",                  // HTTP/1.0 and some non-browser clients
+	} {
+		if !knownHost(h) {
+			t.Errorf("knownHost(%q) = false; this would lock the operator out", h)
+		}
+	}
+}
+
+func TestKnownHostRejectsRebindableNames(t *testing.T) {
+	for _, h := range []string{
+		"evil.example:8000",
+		"rebind.attacker.com",
+		"172.16.0.1.evil.example", // looks like the device, is not
+		"localhost.evil.example",  // ditto
+	} {
+		if knownHost(h) {
+			t.Errorf("knownHost(%q) = true; DNS rebinding is possible", h)
+		}
+	}
+}
+
+func TestKnownHostHonoursTheOperatorsOwnName(t *testing.T) {
+	if knownHost("box.internal") {
+		t.Fatal("box.internal was accepted before being allowed")
+	}
+	t.Setenv(allowedHostEnv, "p4wnp1.lan, box.internal")
+	if !knownHost("box.internal:8000") {
+		t.Error("a host listed in " + allowedHostEnv + " was still refused")
+	}
+	if !knownHost("P4wnP1.LAN") {
+		t.Error("the allowlist should be case-insensitive")
+	}
+	if knownHost("other.internal") {
+		t.Error("a host NOT in the allowlist was accepted")
+	}
+}
