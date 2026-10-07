@@ -108,8 +108,8 @@ An audit of access control specifically: seven parallel reviewers over the
 routing, token, origin, path, dispatch, privilege and test-coverage surfaces,
 every finding adversarially re-checked by three reviewers with different
 lenses, and the survivors confirmed by ATTACKING A RUNNING SERVICE rather than
-by reading code. `make access-control` is the gate that came out of it; every
-check in it is an attack that must fail, and most were written by first
+by reading code. `make access-control` is the gate that came out of it -- 60
+checks, every one an attack that must fail, and most were written by first
 demonstrating the attack succeeding.
 
 ### Critical -- arbitrary root file write through the file-IO allowlist
@@ -285,6 +285,72 @@ three folders for both read and write, including encoded and doubled forms;
 logout revokes one session and only one; a password change revokes all; an
 oversized request body is refused; no token or password appears in the service
 log.
+
+### Medium -- an unauthenticated websocket upgrade parked goroutines forever
+
+The router dispatched on `Sec-Websocket-Protocol` **before any auth or origin
+check**, into a wrapper built with `WithWebsockets(true)`. `WithOriginFunc`
+governs the HTTP check, not the websocket one, and the library's default
+websocket origin check compares `Origin` with `Host` -- two headers the caller
+writes. gorilla's `Upgrade` then clears the socket deadline, so the server's
+`ReadHeaderTimeout` and `IdleTimeout` stop applying, and `handleWebSocket`
+blocks in `ReadMessage` with no read limit.
+
+An anonymous peer with nothing but TCP reach could park goroutines and file
+descriptors indefinitely, or stream an unbounded first frame into the heap of
+a root process driving HID injection, DHCP and hostapd. Confirmed against the
+running service: `HTTP/1.1 101 Switching Protocols`, no credential.
+
+Deleted rather than fixed, because nothing speaks it: the transport existed
+for the GopherJS client, which is documented as non-functional, and the
+console uses fetch and SSE.
+
+### Medium -- a revoked session kept receiving the event stream
+
+Authentication on `/api/v1/events` happened once, at open, and then the
+connection blocked for its whole life. A logout, a per-session revoke and a
+password change all left it running, still delivering every device event --
+HID activity, DHCP leases, trigger fires -- to a credential that had been
+withdrawn. The keepalive tick now re-checks the session (without sliding its
+expiry) and closes the stream.
+
+### Medium -- `/api/auth/login` decoded an unbounded request body
+
+The one endpoint an anonymous caller can reach that parses a body, on a 512MB
+device running as root. All three auth handlers now share a 16 KiB limit.
+
+### Medium -- the login throttle bounded the rate but not the cost
+
+Serialising the post-failure delay stops an attacker getting more than one
+guess per delay. It does nothing about each attempt's cost: bcrypt at cost 12
+is roughly 250ms of CPU on a Pi Zero W and runs *before* the delay, so fifty
+parallel attempts still bought fifty concurrent bcrypts on a single-core board
+that may be mid-keystroke-injection. Concurrent verifications are now capped
+at two.
+
+### Medium -- WiFi pre-shared keys were written to the systemd journal
+
+`log.Printf("Settings: %+v", ...)` on the WiFi deploy path. protoc-gen-go
+gives every message a `String()` that text-marshals the whole nested
+structure, so the access point's PSK **and the PSK of every saved client
+network** went to the journal, readable by any local account. The client keys
+are the worse half: those are the operator's own home, office and client-site
+networks.
+
+### Medium -- `DBBackup` wrote anywhere, world-readable
+
+A caller-supplied filename was concatenated onto the backup directory with no
+containment, and `Store.Backup` opened it `O_CREAT|O_TRUNC` with no
+`O_NOFOLLOW` at mode `0664` -- a world-readable dump of a datastore that holds
+every stored WiFi PSK.
+
+### Medium -- `safePathInAllowlist` had no symlink containment
+
+The other entry point to the path allowlist, missed when `safeJoinUnderBase`
+was hardened. It guards `HIDRunScript`, `HIDRunScriptJob` and `FSGetFileInfo`,
+with `/tmp` among the bases they allow -- so a local user could plant a
+symlink and have `HIDRunScript` read an arbitrary root-readable file and
+**type it into the attached host**.
 
 ### Added: the console can answer "is anyone else signed in?"
 
