@@ -160,18 +160,46 @@ EOF
 # 5. operator SSH account
 #
 # Raspberry Pi OS no longer ships a default user. Without one, and with the
-# root account locked, a flashed image is unreachable. We create a dedicated
-# account and FORCE a password change on first login (`chage -d 0`) so the
-# documented default cannot survive as a real credential.
+# root account locked, a flashed image is unreachable. So we create a dedicated
+# account -- but it ships with NO PASSWORD AT ALL.
+#
+# It used to ship with `p4wnp1:p4wnp1`, and the comment here argued that
+# `chage -d 0` made that safe because a password change is forced at first
+# login. That reasoning is wrong, and the way it is wrong is worth stating so
+# it is not reintroduced: expiring the password stops the default PERSISTING,
+# it does not stop it being USED once, and once is all an attacker needs --
+# they answer the change prompt themselves and own the account permanently.
+#
+# The account also has NOPASSWD:ALL sudo, SSH is enabled headless
+# (stage.sh touches /boot/firmware/ssh), and the USB gadget hands the attached
+# host an address on the same subnet. So the shared default meant: plug the
+# appliance into any machine, `ssh p4wnp1@172.16.0.1` with the published
+# password, and take root on it. The device built to attack a host could be
+# taken by the host instead, and every flashed image shared the credential.
+#
+# Now: locked unless the builder explicitly passes --ssh-pass. An unlocked
+# account appears on first boot, with a password generated ON THE DEVICE and
+# written where the operator can read it. See
+# dist/scripts/firstboot-secure-defaults.sh.
 # ---------------------------------------------------------------------------
 SSH_USER="${P4_SSH_USER:-p4wnp1}"
-SSH_PASS="${P4_SSH_PASS:-p4wnp1}"
-log "creating operator account '$SSH_USER' (password change forced at first login)"
+SSH_PASS="${P4_SSH_PASS:-}"
 if ! id -u "$SSH_USER" >/dev/null 2>&1; then
     useradd -m -s /bin/bash -G sudo,dialout,plugdev,video "$SSH_USER"
 fi
-echo "${SSH_USER}:${SSH_PASS}" | chpasswd
-chage -d 0 "$SSH_USER"          # expire immediately -> must set a new password
+if [ -n "$SSH_PASS" ]; then
+    log "WARNING: operator account '$SSH_USER' has a BUILD-TIME password."
+    log "WARNING: every device flashed from this image will share it."
+    echo "${SSH_USER}:${SSH_PASS}" | chpasswd
+    chage -d 0 "$SSH_USER"      # expire immediately -> must set a new password
+else
+    log "creating operator account '$SSH_USER', locked until first boot issues a per-device password"
+    passwd -l "$SSH_USER" >/dev/null 2>&1 || true
+    # An account with no password at all must not be loginable. "!" in the
+    # hash field is a lock; make it explicit rather than relying on useradd's
+    # default, which has differed between distributions.
+    usermod -p '!' "$SSH_USER"
+fi
 # Give the operator passwordless sudo: this is a single-purpose appliance and
 # every useful P4wnP1 action needs root anyway.
 echo "${SSH_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/010_${SSH_USER}-nopasswd"

@@ -55,19 +55,29 @@ xz -d P4wnP1-ALOA-v0.3.0-armhf.img.xz
 sudo dd if=P4wnP1-ALOA-v0.3.0-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
+**Before you flash**, set a username and password in Raspberry Pi Imager ("Set username and
+password" under the gear icon). The image ships with **no usable account**, so this is how you
+get in. If you skip it, boot the device once, put the card back in your laptop, and read
+`p4wnp1-credentials.txt` on the boot partition — first boot generates a password for this one
+device and writes it there.
+
 Then, over the USB ethernet link the device brings up:
 
 ```bash
-ssh p4wnp1@172.16.0.1                      # forced password change on first login
+ssh p4wnp1@172.16.0.1                      # or the account you set at flash time
 sudo cat /root/INITIAL_CREDENTIALS.txt     # console password and WiFi PSK for THIS device
 ```
 
 Open **<http://172.16.0.1:8000>**.
 
-Nothing is shared between devices: the SSH password must be changed at first login, host keys
-are generated per device, and the console password and WiFi PSK are random per device. That is
-why the first login has to come over USB or serial — the WiFi key is not knowable until you
-have read it off the device.
+Nothing is shared between devices: there is no password in the image at all, host keys are
+generated per device, and the console password and WiFi PSK are random per device. That is why
+the first login has to come over USB or serial — the WiFi key is not knowable until you have
+read it off the device.
+
+Earlier images shipped `p4wnp1:p4wnp1`. If you flashed one of those, change that password: the
+forced change at first login did not protect it, because whoever logs in first is the one who
+answers the prompt.
 
 ---
 
@@ -206,8 +216,14 @@ This is a tool for attacking systems, which makes its own security worth stating
 
 - **The API authenticates.** Every gRPC method and every JSON endpoint requires a bearer token.
   Tokens are opaque, random, expire on a sliding window, and can be revoked.
-- **Per-device secrets.** Nothing meaningful is shared between two flashed devices, and the
-  access point refuses to broadcast on a PSK published in this repository.
+- **Per-device secrets, including the SSH login.** Nothing meaningful is shared between two
+  flashed devices, and the access point refuses to broadcast on a PSK published in this
+  repository. The image ships with **no usable account at all** -- every password is generated
+  on the device at first boot, and the image build refuses to publish an image in which any
+  account has a password. Set your own at flash time (Raspberry Pi Imager's "Set username and
+  password") and the device uses that; otherwise first boot writes a per-device password to
+  `p4wnp1-credentials.txt` on the boot partition, where you can read it by putting the card back
+  in your laptop. Log in, change it, delete the file -- the file says so itself.
 - **Path handling is allowlisted**, and reads are bounds-checked. The allowlist
   resolves symlinks rather than only cleaning the string, and the file opens use
   `O_NOFOLLOW`. Both are needed: before this, a local user could leave a symlink

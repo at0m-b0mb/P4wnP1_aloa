@@ -26,7 +26,9 @@
 # Things this script intentionally does NOT touch:
 #   - the WiFi access point PSK in the running service's DB
 #   - the Bluetooth pairing PIN
-#   - the web client (it has no auth at all -- that is a separate roadmap item)
+#   - the console's own password (it IS bootstrapped below, via p4wnp1-hashpw;
+#     this comment used to say the web client had no auth at all, which has
+#     been untrue since the auth layer landed)
 
 set -euo pipefail
 
@@ -97,6 +99,92 @@ echo "root:${NEW_ROOT_PW}" | chpasswd
 # script unattended logins immediately. The credentials file tells them what
 # was set; rotation policy is up to them.
 
+# --- issue a per-device operator password -----------------------------------
+#
+# The image ships this account LOCKED (image/lib/customize.sh). It used to ship
+# p4wnp1:p4wnp1 on every device, with NOPASSWD:ALL sudo and headless SSH
+# enabled, which meant anyone who could reach port 22 -- including the host the
+# appliance was plugged into -- could take root on it. `chage -d 0` did not
+# save it: forcing a password change at first login just means the attacker
+# picks the new password.
+#
+# A password generated here is per-device, because it is generated ON the
+# device. The problem that remains is purely one of delivery: a headless box
+# cannot show it to you. Two answers, in order of preference:
+#
+#   1. You set your own at flash time. Raspberry Pi Imager writes
+#      /boot/firmware/userconf.txt and Raspberry Pi OS's own service creates
+#      that account before we run. If ANY unlocked, non-system, sudo-capable
+#      account already exists, you have a way in and this leaves p4wnp1 locked.
+#   2. Otherwise we generate one and write it to the BOOT partition, which is
+#      FAT and readable from the machine you flashed the card with. Put the
+#      card back in your laptop and read it.
+#
+# Writing a credential to a FAT partition is not nothing -- anyone holding the
+# card can read it. That is a deliberate trade against the alternative, which
+# was the same password on every device in the world, and it is stated in the
+# file itself so nobody discovers it later.
+BOOT_DIR=/boot/firmware
+[ -d "$BOOT_DIR" ] || BOOT_DIR=/boot
+OPERATOR_USER="${P4WNP1_OPERATOR_USER:-p4wnp1}"
+OPERATOR_PW_SET=""
+
+# Is there already a human account that can log in and reach root?
+someone_can_log_in() {
+    local u
+    while IFS=: read -r u _ uid _ _ _ shell; do
+        [ "$uid" -ge 1000 ] 2>/dev/null || continue
+        [ "$u" = "$OPERATOR_USER" ] && continue
+        case "$shell" in */nologin|*/false) continue ;; esac
+        # A hash field of "!" or "*" (or "!..." ) means locked.
+        case "$(passwd -S "$u" 2>/dev/null | awk '{print $2}')" in
+            P) return 0 ;;
+        esac
+    done < /etc/passwd
+    return 1
+}
+
+if id -u "$OPERATOR_USER" >/dev/null 2>&1; then
+    if someone_can_log_in; then
+        log "another account can already log in; leaving '${OPERATOR_USER}' locked"
+    elif [ "$(passwd -S "$OPERATOR_USER" 2>/dev/null | awk '{print $2}')" = "P" ]; then
+        log "'${OPERATOR_USER}' already has a password; leaving it alone"
+    else
+        OPERATOR_PW_SET=$(gen_password 20)
+        echo "${OPERATOR_USER}:${OPERATOR_PW_SET}" | chpasswd
+        log "issued a per-device password for '${OPERATOR_USER}'"
+        if [ -d "$BOOT_DIR" ] && [ -w "$BOOT_DIR" ]; then
+            cat > "${BOOT_DIR}/p4wnp1-credentials.txt" <<CREDS
+P4wnP1 A.L.O.A. -- first-boot credentials for THIS device
+
+  ssh ${OPERATOR_USER}@172.16.0.1          (over the USB ethernet link)
+  password: ${OPERATOR_PW_SET}
+
+This password was generated on this device at first boot. It is not shared
+with any other device.
+
+It is written here because a headless appliance has no other way to show it to
+you: this is the FAT boot partition, readable from the machine you flashed the
+card with. ANYONE HOLDING THE CARD CAN READ IT. Log in, change the password,
+and delete this file:
+
+  passwd
+  sudo rm /boot/firmware/p4wnp1-credentials.txt
+
+The web console password and the WiFi PSK are NOT here. They are in
+/root/INITIAL_CREDENTIALS.txt, readable once you are on the device.
+
+To avoid this file entirely, set your own account at flash time -- Raspberry Pi
+Imager's "Set username and password" writes /boot/firmware/userconf.txt, and
+first boot then leaves this account locked.
+CREDS
+            log "wrote ${BOOT_DIR}/p4wnp1-credentials.txt -- read it, then delete it"
+        else
+            log "WARNING: ${BOOT_DIR} is not writable; the operator password is only in ${CREDS_FILE}"
+        fi
+    fi
+fi
+
 # --- regenerate SSH host keys -----------------------------------------------
 # Prebuilt images ship with identical host keys. Without regeneration, every
 # P4wnP1 in the world presents the same key, defeating the point of TOFU.
@@ -155,6 +243,12 @@ cat > "${CREDS_FILE}" <<EOF
 ==============================================================================
 
   SSH root password:    ${NEW_ROOT_PW}
+                          (root cannot log in over SSH: Raspberry Pi OS ships
+                           PermitRootLogin prohibit-password. Use the operator
+                           account below, or a console.)
+
+  SSH operator account: ${OPERATOR_USER}
+  Operator password:    ${OPERATOR_PW_SET:-(unchanged -- either you set one at flash time, or it is still locked)}
 
   SSH host fingerprints (verify these on first connection):
 ${SSH_FPS}
@@ -194,9 +288,10 @@ ${SSH_FPS}
                           -> web client -> Bluetooth -> Settings -> new PIN
                           -> or: systemctl disable --now bluetooth if unused
 
-  Web client:           NO AUTHENTICATION on the gRPC API.
-                          -> restrict reachability via iptables/nftables, or
-                          -> only enable the AP/BT when actively using P4wnP1.
+  Transport:            NO TLS. The API authenticates every request with a
+                        bearer token, but that token travels in cleartext.
+                          -> reach the device over the USB cable or its own
+                             WPA2 access point, not over a shared network.
 
   This file is mode 0600 and owned by root. After you have copied the
   credentials somewhere safe, shred it:

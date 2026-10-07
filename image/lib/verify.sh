@@ -118,6 +118,36 @@ else
     ok "no SSH host keys baked in (regenerated at first boot)"
 fi
 
+# No account in the image may be loginable.
+#
+# The image used to ship p4wnp1:p4wnp1 -- the same password on every device
+# flashed from it -- with NOPASSWD:ALL sudo and headless SSH enabled, so anyone
+# who could reach port 22 could take root. The USB cable alone is such a path:
+# the gadget hands the attached host an address on the same subnet. The comment
+# defending it argued that `chage -d 0` made it safe because a password change
+# is forced at first login, but that only stops the default PERSISTING, not
+# being USED once -- and the attacker is then the one who chooses the new one.
+#
+# A password hash field of "!" or "*" (or anything starting "!") is locked.
+# Anything else is a usable credential shared by every copy of this image, and
+# publishing that is worse than publishing nothing.
+LOGINABLE=""
+if [ -r "$MNT/etc/shadow" ]; then
+    while IFS=: read -r user hash _; do
+        case "$hash" in
+            ''|'!'*|'*') continue ;;       # no password, or locked
+        esac
+        LOGINABLE="${LOGINABLE} ${user}"
+    done < "$MNT/etc/shadow"
+fi
+if [ -n "$LOGINABLE" ]; then
+    printf '\033[1;31m[verify:FAIL]\033[0m these accounts ship with a usable password, identical on every flashed device:%s\n' "$LOGINABLE" >&2
+    printf '\033[1;31m[verify:FAIL]\033[0m first boot must issue per-device credentials; see image/lib/customize.sh\n' >&2
+    fail=1
+else
+    ok "no account ships with a password (first boot issues per-device credentials)"
+fi
+
 # The binaries must be the right architecture.
 ARCH_LINE=$(file -b "$MNT/usr/local/bin/P4wnP1_service" 2>/dev/null || echo unknown)
 ok "service binary: ${ARCH_LINE:0:60}"

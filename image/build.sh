@@ -26,7 +26,12 @@ GROW_MB=1536
 SHRINK=1
 COMPRESS=1
 SSH_USER=p4wnp1
-SSH_PASS=p4wnp1
+# No default. A password baked into the image is the SAME password on every
+# device built from it, and `chage -d 0` does not fix that: it forces a change
+# at first login, and whoever logs in first is the one who chooses the new one.
+# See image/lib/customize.sh. Empty means "create the account locked and let
+# first boot issue a per-device password".
+SSH_PASS=""
 WIFI_COUNTRY=US
 BUILDER_TAG=p4wnp1-imgbuilder:1
 
@@ -50,8 +55,9 @@ Options:
   --no-shrink         skip shrinking the finished image
   --no-compress       leave a raw .img instead of .img.xz
   --ssh-user NAME     operator account name        (default $SSH_USER)
-  --ssh-pass PASS     operator initial password    (default $SSH_PASS; a
-                      password change is forced at first login either way)
+  --ssh-pass PASS     operator initial password. NOT RECOMMENDED -- it is
+                      identical on every device built from the image. Omit it
+                      and first boot issues a random per-device password.
   --wifi-country CC   regulatory domain            (default $WIFI_COUNTRY)
   --pios-date DATE    Raspberry Pi OS release      (default $PIOS_DATE)
 EOF
