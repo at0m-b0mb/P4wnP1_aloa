@@ -106,6 +106,18 @@ check "a rebindable Host is refused even when Origin matches it" "403" \
 check "an IP-literal Host still works (an IP cannot be rebound)" "200" \
   "$(code -X POST $JSON -H "$AUTHH" -H 'Host: 127.0.0.1:8000' -d '{}' $B/api/v1/rpc/GetLEDSettings)"
 
+# The credential endpoints are the ones most worth attacking, and they were the
+# ones with no Host or Origin check at all: a foreign origin got 200 and a
+# fresh token. Guarding the RPC surface while leaving login open is not a fix.
+check "login refuses a foreign Origin"      "403" \
+  "$(code -X POST $JSON -H 'Origin: https://evil.example' -d "{\"username\":\"admin\",\"password\":\"$PW\"}" $B/api/auth/login)"
+check "login refuses a rebindable Host"     "403" \
+  "$(code -X POST $JSON -H 'Host: evil.example' -H 'Origin: http://evil.example' -d "{\"username\":\"admin\",\"password\":\"$PW\"}" $B/api/auth/login)"
+check "login still works for the CLI (no Origin)" "200" \
+  "$(code -X POST $JSON -d "{\"username\":\"admin\",\"password\":\"$PW\"}" $B/api/auth/login)"
+check "whoami refuses a foreign Origin"     "403" \
+  "$(code -H "$AUTHH" -H 'Origin: https://evil.example' $B/api/auth/whoami)"
+
 # OPTIONS is routed to the gRPC-web wrapper before any auth check, so confirm
 # it cannot be turned into a permissive preflight. If a CORS header ever shows
 # up here, the origin checks above stop being worth anything.

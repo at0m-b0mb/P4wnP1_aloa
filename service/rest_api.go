@@ -224,6 +224,33 @@ func knownHost(host string) bool {
 	return false
 }
 
+// GuardBrowserOrigin rejects requests a browser should never be able to make
+// to this device, BEFORE the wrapped handler sees them.
+//
+// It exists because the Host and Origin checks used to live only inside
+// authenticate(), which covers /api/v1/* and nothing else. /api/auth/login is
+// served by a different handler and had neither check: a foreign origin got
+// HTTP 200 and a freshly minted token. No CORS header is emitted, so a plain
+// cross-origin page cannot READ that response -- but a DNS-rebound page is
+// same-origin and can, which turns login into an unthrottled oracle reachable
+// from any victim's browser on the device's network. Guarding the RPC surface
+// while leaving the credential endpoint open is not a fix.
+func GuardBrowserOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !knownHost(r.Host) {
+			apiError(w, http.StatusForbidden,
+				"this device is reached by IP address (e.g. 172.16.0.1), not by the name '"+
+					r.Host+"'. If that name really is yours, list it in "+allowedHostEnv+".")
+			return
+		}
+		if !sameOrigin(r) {
+			apiError(w, http.StatusForbidden, "cross-origin requests are not permitted")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // sameOrigin reports whether the request is safe to serve.
 //
 // A missing Origin header is accepted: that is what non-browser clients (curl,

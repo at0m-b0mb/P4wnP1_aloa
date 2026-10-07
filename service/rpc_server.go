@@ -1331,10 +1331,16 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 	// The static file server is intentionally unauthenticated: the SPA
 	// needs to load BEFORE the user can log in. JS code in the SPA is
 	// responsible for redirecting to /login when /api/auth/whoami 401s.
+	// The auth endpoints mint and revoke credentials, so they get the same
+	// browser-origin guard as the RPC surface. Without it /api/auth/login was
+	// the one credential-handling endpoint on the device with no Host or
+	// Origin check at all.
+	guardedAuthHandler := GuardBrowserOrigin(authHTTPHandler)
+
 	fileServer := http.FileServer(http.Dir(absWebRoot))
 	http_handler := func(resp http.ResponseWriter, req *http.Request) {
 		if strings.HasPrefix(req.URL.Path, auth.HTTPPrefix) {
-			authHTTPHandler.ServeHTTP(resp, req)
+			guardedAuthHandler.ServeHTTP(resp, req)
 			return
 		}
 		if apiHandler != nil && strings.HasPrefix(req.URL.Path, APIPrefix) {
