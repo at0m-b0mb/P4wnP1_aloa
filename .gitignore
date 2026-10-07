@@ -25,3 +25,8 @@ vendor/
 # image build artifacts
 image/out/
 image/cache/
+
+# local preview scratch
+_readme_preview.html
+_markpreview.html
+_cardcheck.html
