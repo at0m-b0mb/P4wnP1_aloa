@@ -1,6 +1,6 @@
 # Known issues
 
-Last refreshed: 2026-10-07, for v0.3.0. Two audit passes (96 agents, then 57)
+Last refreshed: 2026-10-07, for v0.3.1. Two audit passes (96 agents, then 57)
 in which every high-severity finding was independently re-checked by a second
 reviewer before being accepted, plus a pass driving the console by hand against
 the real service, which is where the worst bug in this list was found.
@@ -99,6 +99,155 @@ dropped-argument format strings and three unreachable returns.
 
 Build tags gated the core service to 32-bit ARM. They were incidental, not a
 real dependency. Pi Zero 2 W / 3 / 4 / 5 now build.
+
+---
+
+## Fixed in v0.3.1 -- access control
+
+An audit of access control specifically: seven parallel reviewers over the
+routing, token, origin, path, dispatch, privilege and test-coverage surfaces,
+every finding adversarially re-checked by three reviewers with different
+lenses, and the survivors confirmed by ATTACKING A RUNNING SERVICE rather than
+by reading code. `make access-control` is the gate that came out of it; every
+check in it is an attack that must fail, and most were written by first
+demonstrating the attack succeeding.
+
+### Critical -- arbitrary root file write through the file-IO allowlist
+
+`safeJoinUnderBase` used `filepath.Clean`, which is purely lexical and does
+not resolve symlinks, while one of the three allowed folders is `/tmp`.
+Demonstrated end to end against the real binary: an unprivileged local user
+created
+
+```
+/tmp/sub/escalate -> /etc/cron.d/pwned
+```
+
+and `FSWriteFile(folder=TMP, filename="sub/escalate")` wrote a **root-owned
+cron job** through it. Writing a cron drop-in as root is root code execution.
+The same symlink served reads, leaking `/etc/p4wnp1/auth.json` (the bcrypt
+password hashes) and `/run/p4wnp1/local.token`.
+
+The kernel does not save you here, and the way it fails is the interesting
+part. `fs.protected_symlinks` refuses a foreign-owned symlink only when it
+sits **directly** in a sticky world-writable directory. The first attempt at
+this attack -- a symlink straight in `/tmp` -- was correctly blocked by it.
+Moving the symlink one level down, into an ordinary directory the attacker
+created, defeats the protection entirely, because `/tmp/sub` is not sticky.
+
+Fixed in two layers that cover each other's blind spot: `safeJoinUnderBase`
+resolves the deepest existing ancestor with `EvalSymlinks` and re-checks
+containment, and `common.WriteFile`/`ReadFile` open with `O_NOFOLLOW`. The
+containment check catches a symlinked *directory component*, which
+`O_NOFOLLOW` cannot see; `O_NOFOLLOW` catches a *dangling* symlink leaf, which
+`EvalSymlinks` cannot resolve.
+
+Preconditions: a local non-root shell on the device plus an API session. The
+`p4wnp1` SSH account is exactly such a shell, and it is deliberately non-root,
+so this crossed a boundary the design intends to hold.
+
+### High -- an out-of-band password reset left the OLD password working
+
+`p4wnp1-hashpw` runs as a separate process and rewrites
+`/etc/p4wnp1/auth.json` directly; that is how first boot seeds the account and
+how an operator resets a forgotten password. The running service read that
+file once at startup and never again, so after a reset the **new password was
+rejected, the old one kept working, and every pre-existing session survived**.
+A rotation that leaves the old credential live is worse than no rotation,
+because the operator believes it is done.
+
+`Store.Verify` now reloads when the file's modtime or size changes. A corrupt
+or half-written file is refused rather than emptying the user table, which
+would lock the operator out of their own device.
+
+### High -- `P4wnP1_cli auth changepw` could never work
+
+It posted with `httpClient.Post`, which attaches no headers, to an endpoint
+that requires a bearer token. HTTP 401, every time it was run. The smoke test
+asserts that a changepw *without* a token is refused -- a correct assertion
+that passed the entire time the CLI sent exactly that shape.
+
+### Medium -- the credential endpoints had no origin or host check
+
+The Host and Origin checks lived inside `authenticate()`, which covers
+`/api/v1/*` only. `/api/auth/*` is a different handler and had neither, so a
+foreign origin posting to `/api/auth/login` got HTTP 200 and a fresh token.
+No CORS header is emitted so an ordinary cross-origin page cannot read that
+response -- but a DNS-rebound one can. Now a single `GuardBrowserOrigin`
+middleware states the rule once for login, logout, whoami and changepw.
+
+### Medium -- DNS rebinding defeated the same-origin check
+
+`sameOrigin` compares `Origin` against `Host`, and an attacker who controls a
+domain controls both. Confirmed against a running service:
+
+```
+Host: evil.example + Origin: http://evil.example  -> 200, the RPC executed
+Origin: http://evil.example alone                 -> 403, correctly refused
+```
+
+Rebinding requires a *name*, because an IP literal resolves to itself. This
+device is reached at `172.16.0.1` over USB, `172.24.0.1` over its own access
+point, or `localhost` on the device itself, so the fix accepts IP literals,
+loopback and mDNS `.local` names and refuses other DNS names. An operator who
+genuinely reaches it by a name of their own lists it in
+`P4WNP1_ALLOWED_HOSTS`, and the 403 says so.
+
+### Medium -- changing the password locked the device out of itself
+
+`ChangePassword` calls `RevokeAll`, which destroys the machine-local
+credential along with every human session, and nothing re-issued it until
+`KeepLocalTokenFresh` next ticked -- up to twelve hours later. For that whole
+window any trigger action firing on the device would fail `Unauthenticated`,
+which is precisely the outage the local credential exists to prevent. It is
+now re-issued immediately.
+
+### Medium -- `FailedLoginDelay` throttled nothing
+
+The one-second delay ran in each request's own goroutine, so twenty parallel
+password guesses cost about one second in total rather than twenty. The delay
+exists specifically to deny brute-force throughput and was not denying any.
+Rejections now serialise on a mutex, capping the rate at one guess per delay
+however many connections an attacker opens. Successful logins do not take the
+lock, so the throttle cannot be turned into a denial of service against the
+operator -- asserted by its own test.
+
+### Medium -- missing hardware was reported as an internal server error
+
+Every USB, HID and Bluetooth RPC answered HTTP 500 on a board without that
+hardware. A 500 asserts that the *service* is broken; a Pi with no UDC bound
+or no Bluetooth controller is a normal, supported state. Fixed with one
+classifier on the JSON bridge rather than a wrap at each of the thirteen call
+sites, so RPCs added later are covered too. Only the three
+hardware-unavailable sentinels are reclassified; everything else passes
+through untouched, so a genuine bug still surfaces as one.
+
+### Low -- `localTokenState` was a package-level var
+
+Two Managers shared one slot: the second to provision took ownership of the
+first's entry, leaving the first's session unrevocable and its file orphaned,
+while each Manager called `Revoke` against its own session map for the other's
+token -- a no-op that looked like success. Now per-Manager.
+
+### Checked and found sound
+
+Stated because "we tested it" is worth nothing without saying what was tested.
+With evidence from a running service: unauthenticated callers are refused on
+every API route; foreign, `null` and lookalike origins are refused even with a
+valid token; `OPTIONS` cannot be turned into a permissive preflight, and no
+CORS header is emitted anywhere; lexical path traversal is refused on all
+three folders for both read and write, including encoded and doubled forms;
+logout revokes one session and only one; a password change revokes all; an
+oversized request body is refused; no token or password appears in the service
+log.
+
+### Known and accepted, recorded so it is not rediscovered
+
+Method names are matched **case-insensitively** by the JSON bridge, so
+`GetLEDSettings` is also reachable as `getledsettings`. That is not a hole
+today because nothing filters on the method name, but any future per-method
+allowlist, read-only mode or audit log must lowercase before comparing.
+`make access-control` prints this as a NOTE so it stays visible.
 
 ---
 

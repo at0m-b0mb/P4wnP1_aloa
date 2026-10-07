@@ -168,6 +168,7 @@ make test            # Go unit tests
 make verify          # every gate below, in order, cheapest failure first
 make smoke           # run the service in a container, end to end (28 checks)
 make feature-test    # call all 83 RPCs against the real binary (85 checks)
+make access-control  # attack the running service (45 checks, all must FAIL)
 make check-render    # render every console view in jsdom (11 checks)
 make check-rpc       # console RPC payloads vs the .proto
 make check-js        # parse the console JavaScript
@@ -206,7 +207,19 @@ This is a tool for attacking systems, which makes its own security worth stating
   Tokens are opaque, random, expire on a sliding window, and can be revoked.
 - **Per-device secrets.** Nothing meaningful is shared between two flashed devices, and the
   access point refuses to broadcast on a PSK published in this repository.
-- **Path handling is allowlisted**, and reads are bounds-checked.
+- **Path handling is allowlisted**, and reads are bounds-checked. The allowlist
+  resolves symlinks rather than only cleaning the string, and the file opens use
+  `O_NOFOLLOW`. Both are needed: before this, a local user could leave a symlink
+  in `/tmp` and have the root service write a cron job through it. The kernel's
+  `fs.protected_symlinks` does not cover that case -- it only guards symlinks
+  sitting directly in a sticky directory, not one level down.
+- **The device is reached by IP, and says so.** A `Host` naming this device by
+  a public DNS name is refused, because the origin check compares `Origin`
+  against `Host` and an attacker who controls a domain controls both. An IP
+  literal cannot be rebound, so the legitimate routes are unaffected.
+- **Brute force is rate-limited in a way that survives parallelism.** Rejected
+  logins serialise; the one-second delay used to run per-goroutine, so twenty
+  simultaneous guesses cost one second rather than twenty.
 - **The console is same-origin only.** It emits no CORS headers and rejects foreign origins,
   because this device is often reached from a browser that is simultaneously visiting untrusted
   pages.
@@ -253,6 +266,14 @@ PASS  unauthenticated API is refused                 PASS  P4wnP1_cli works with
                                                      PASS  service still alive after hostile input
                                                      PASS  clean shutdown on SIGTERM
 ```
+
+`make access-control` is the adversarial gate: **every check in it is an attack that must fail** --
+45 of them, covering unauthenticated reach, cross-origin and DNS rebinding, path traversal on all
+three folders, symlink escape, token revocation, and the machine-local credential. Most were
+written by first demonstrating the attack *succeeding* against the real binary, then fixing the
+code, then confirming the check flipped. That is how the symlink escape above was found: a
+non-root user planted `/tmp/sub/escalate -> /etc/cron.d/pwned` and the API wrote a root-owned
+cron job through it.
 
 `make feature-test` goes a layer deeper and **calls every one of the 83 RPCs** against that same
 binary, sorting the answers into passed, correctly-unavailable-without-hardware, and failed.
