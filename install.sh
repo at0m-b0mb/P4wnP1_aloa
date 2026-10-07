@@ -25,9 +25,10 @@
 #   7. Enables services so the next boot brings P4wnP1 up
 #
 # What it does NOT do:
-#   * Compile from source. You need build/P4wnP1_service, build/P4wnP1_cli,
-#     build/webapp.js, build/webapp.js.map present in the repo. Build them
-#     with build_support/build.sh on a Linux host first.
+#   * Compile from source. You need build/P4wnP1_service, build/P4wnP1_cli
+#     and build/p4wnp1-hashpw present in the repo. Build them with
+#     `make build-armv6` (Pi Zero/Zero W) or `make build-arm64`
+#     (Pi Zero 2 W / 3 / 4 / 5) -- both cross-compile fine from macOS.
 #   * Flash the Nexmon-patched WiFi firmware. KARMA + multi-SSID need a
 #     separately-built firmware blob from the Nexmon project.
 
@@ -37,6 +38,7 @@ set -euo pipefail
 # Defaults (override via CLI flags)
 # ---------------------------------------------------------------------------
 DEFAULT_SSID="HackProKP"
+WIFI_COUNTRY="${WIFI_COUNTRY:-US}"   # regulatory domain; hostapd needs one
 DEFAULT_PSK=""                       # empty -> generate random
 SKIP_REBOOT=0
 SKIP_APT=0
@@ -69,6 +71,7 @@ while [[ $# -gt 0 ]]; do
         --psk)         PSK="$2"; shift 2 ;;
         --skip-reboot) SKIP_REBOOT=1; shift ;;
         --skip-apt)    SKIP_APT=1; shift ;;
+        --wifi-country) WIFI_COUNTRY="$2"; shift 2 ;;
         -h|--help)     usage; exit 0 ;;
         *)             echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
@@ -116,7 +119,6 @@ required_files=(
     "${REPO_ROOT}/build/P4wnP1_service"
     "${REPO_ROOT}/build/P4wnP1_cli"
     "${REPO_ROOT}/build/p4wnp1-hashpw"
-    "${REPO_ROOT}/build/webapp.js"
     "${REPO_ROOT}/dist/P4wnP1.service"
     "${REPO_ROOT}/dist/p4wnp1-firstboot.service"
     "${REPO_ROOT}/dist/scripts/firstboot-secure-defaults.sh"
@@ -142,12 +144,42 @@ if (( SKIP_APT == 0 )); then
     echo "==> installing apt dependencies"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
-    apt-get install -y --no-install-recommends \
-        git screen hostapd autossh bluez bluez-tools bridge-utils \
-        policykit-1 genisoimage iodine haveged dnsmasq dhcpcd5 \
-        avahi-daemon dosfstools wpasupplicant tcpdump \
-        python3-pip python3-dev python3-configobj python3-requests \
-        i2c-tools openssh-server
+    # Packages are split in two on purpose. This script runs under `set -e`,
+    # so a SINGLE unavailable package in one apt-get invocation aborts the
+    # whole install -- and package names do get retired: `policykit-1` was
+    # dropped in Debian 12 (it is `polkitd` now), and current Raspberry Pi OS
+    # is Debian 13. Required packages are still fatal; optional ones are tried
+    # one at a time and only warn.
+    REQUIRED_PKGS=(
+        hostapd dnsmasq
+        iw rfkill wireless-tools
+        bluez bluez-tools
+        openssl haveged
+        usbutils kmod
+        python3 python3-pip
+        openssh-server ca-certificates
+    )
+    OPTIONAL_PKGS=(
+        polkitd policykit-1          # renamed in Debian 12; try both
+        bridge-utils genisoimage
+        git screen autossh iodine tcpdump
+        avahi-daemon dosfstools i2c-tools
+        wpasupplicant dhcpcd5
+        python3-dev python3-configobj python3-requests
+        net-tools nftables iptables
+    )
+
+    echo "==> installing required packages"
+    apt-get install -y --no-install-recommends "${REQUIRED_PKGS[@]}"
+
+    echo "==> installing optional packages (individually; failures only warn)"
+    for p in "${OPTIONAL_PKGS[@]}"; do
+        if apt-get install -y --no-install-recommends "${p}" >/dev/null 2>&1; then
+            echo "    + ${p}"
+        else
+            echo "    ! ${p} unavailable on this release -- skipped"
+        fi
+    done
     apt-get install -y --no-install-recommends pydispatcher 2>/dev/null || \
         pip3 install --break-system-packages pydispatcher || \
         echo "warning: pydispatcher unavailable; legacy HID backdoor scripts may not run"
@@ -217,6 +249,90 @@ umask 022
 echo "==> installing systemd units"
 install -m 0644 "${REPO_ROOT}/dist/P4wnP1.service"           /etc/systemd/system/
 install -m 0644 "${REPO_ROOT}/dist/p4wnp1-firstboot.service" /etc/systemd/system/
+
+# ---------------------------------------------------------------------------
+# 5b. Boot configuration: USB gadget mode and the WiFi regulatory domain
+#
+# This section is what makes the USB side of P4wnP1 work AT ALL, and earlier
+# versions of this installer omitted it entirely. Without `dtoverlay=dwc2` the
+# Pi's USB controller stays in host mode, there is no UDC for the gadget
+# subsystem to bind to, and every USB function -- HID keyboard and mouse,
+# ethernet, mass storage, serial -- silently does nothing. The service starts,
+# the web UI loads, and the whole point of the device is dead.
+#
+# The boot partition moved in Debian 12: /boot/firmware on bookworm and later,
+# /boot before that. Detect rather than assume, because writing to the wrong
+# one fails silently -- the file is created, nothing ever reads it.
+# ---------------------------------------------------------------------------
+echo "==> configuring boot for USB gadget mode"
+
+if [[ -f /boot/firmware/config.txt ]]; then
+    BOOT_DIR=/boot/firmware                 # bookworm (Debian 12) and later
+elif [[ -f /boot/config.txt ]]; then
+    BOOT_DIR=/boot                          # bullseye and earlier
+else
+    BOOT_DIR=""
+fi
+
+if [[ -z "${BOOT_DIR}" ]]; then
+    echo "    WARNING: no config.txt found in /boot/firmware or /boot."
+    echo "             This does not look like Raspberry Pi OS. USB gadget mode"
+    echo "             has NOT been configured and no USB function will work."
+    echo "             Add 'dtoverlay=dwc2' to your config.txt and"
+    echo "             'modules-load=dwc2' to your kernel command line by hand."
+else
+    echo "    boot partition: ${BOOT_DIR}"
+    CFG="${BOOT_DIR}/config.txt"
+    CMD="${BOOT_DIR}/cmdline.txt"
+
+    if grep -q '^# --- P4wnP1' "${CFG}" 2>/dev/null; then
+        echo "    config.txt already carries a P4wnP1 block; leaving it alone"
+    else
+        cp -a "${CFG}" "${CFG}.p4wnp1-backup.$(date +%s)" 2>/dev/null || true
+        cat >> "${CFG}" <<'BOOTCFG'
+
+# --- P4wnP1 A.L.O.A. -------------------------------------------------------
+# dwc2 in peripheral mode is what lets the Pi present itself to a host as a USB
+# device. Without it the USB gadget subsystem has no UDC to bind to.
+[all]
+dtoverlay=dwc2,dr_mode=peripheral
+enable_uart=1
+# --- end P4wnP1 ------------------------------------------------------------
+BOOTCFG
+        echo "    appended dwc2 overlay to config.txt (backup kept alongside)"
+    fi
+
+    if [[ -f "${CMD}" ]]; then
+        if grep -q 'modules-load=dwc2' "${CMD}"; then
+            echo "    cmdline.txt already loads dwc2"
+        else
+            cp -a "${CMD}" "${CMD}.p4wnp1-backup.$(date +%s)" 2>/dev/null || true
+            # cmdline.txt MUST remain a single line; appending a newline here
+            # makes the Pi ignore everything after it, including root=.
+            tr -d '\n' < "${CMD}" > "${CMD}.p4wnp1-new"
+            printf ' modules-load=dwc2\n' >> "${CMD}.p4wnp1-new"
+            mv "${CMD}.p4wnp1-new" "${CMD}"
+            echo "    added modules-load=dwc2 to the kernel command line"
+        fi
+    else
+        echo "    WARNING: ${CMD} not found; dwc2 will not be loaded at boot"
+    fi
+fi
+
+# The WiFi regulatory domain is not optional on current Pi OS: wlan0 stays
+# rfkill-soft-blocked until a country is set, and hostapd refuses to start
+# without one. "The access point never appears" is almost always this.
+echo "==> setting WiFi regulatory domain (${WIFI_COUNTRY})"
+if command -v raspi-config >/dev/null 2>&1; then
+    raspi-config nonint do_wifi_country "${WIFI_COUNTRY}" >/dev/null 2>&1 \
+        && echo "    country set to ${WIFI_COUNTRY}" \
+        || echo "    WARNING: raspi-config could not set the country code"
+else
+    echo "    WARNING: raspi-config not present; set the WiFi country yourself"
+    echo "             or hostapd may refuse to start."
+fi
+rfkill unblock wifi      2>/dev/null || true
+rfkill unblock bluetooth 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # 6. Disable conflicting network services

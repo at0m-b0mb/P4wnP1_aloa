@@ -1,7 +1,9 @@
 SHELL := /bin/bash
 PATH := /usr/local/go/bin:$(PATH)
 
-.PHONY: all help compile build-armv6 build-service-armv6 build-cli-armv6 build-hashpw-armv6 dep install installkali remove lint test
+.PHONY: all help compile build-armv6 build-service-armv6 build-cli-armv6 build-hashpw-armv6 \
+        build-arm64 build-service-arm64 build-cli-arm64 build-hashpw-arm64 \
+        image image-armhf image-arm64 contrast dep install installkali remove lint test
 
 all: compile
 
@@ -14,7 +16,11 @@ help:
 	@echo "  make compile       Cross-compile binaries + webapp.js into build/"
 	@echo "                     (legacy; use build_support/build.sh for the GopherJS web app)"
 	@echo "  make dep           Install Go toolchain helpers (gopherjs)"
-	@echo "  make test          Run unit tests for the service/auth package"
+	@echo "  make build-arm64   Same, for Pi Zero 2 W / 3 / 4 / 5 (linux/arm64)."
+	@echo "  make image         Build flashable .img.xz for BOTH architectures"
+	@echo "                     (see image/README.md). Needs Docker."
+	@echo "  make contrast      Check the web console palette against WCAG AA"
+	@echo "  make test          Run unit tests (auth + jsonbridge)"
 	@echo "  make lint          Run shellcheck + golangci-lint (require both installed)"
 	@echo "  make install       Install binaries + data into /usr/local on the current host"
 	@echo "  make installkali   Same as install, plus systemd enable + Kali-only steps"
@@ -36,13 +42,52 @@ build-cli-armv6:
 build-hashpw-armv6:
 	$(GO_ENV_ARMV6) go build $(GO_BUILD_FLAGS) -o build/p4wnp1-hashpw  ./cmd/p4wnp1-hashpw
 
+# arm64 targets. The service used to be gated to 32-bit ARM by build tags
+# (`+build linux,arm` on service.go and friends); that gate was incidental, not
+# a real dependency, and removing it made Pi Zero 2 W / 3 / 4 / 5 buildable.
+GO_ENV_ARM64 := GOOS=linux GOARCH=arm64
+
+build-service-arm64:
+	$(GO_ENV_ARM64) go build $(GO_BUILD_FLAGS) -o build/arm64/P4wnP1_service ./cmd/P4wnP1_service
+
+build-cli-arm64:
+	$(GO_ENV_ARM64) go build $(GO_BUILD_FLAGS) -o build/arm64/P4wnP1_cli     ./cmd/P4wnP1_cli
+
+build-hashpw-arm64:
+	$(GO_ENV_ARM64) go build $(GO_BUILD_FLAGS) -o build/arm64/p4wnp1-hashpw  ./cmd/p4wnp1-hashpw
+
+build-arm64: build-service-arm64 build-cli-arm64 build-hashpw-arm64
+	@echo
+	@echo "Built for Pi Zero 2 W / 3 / 4 / 5 (linux/arm64):"
+	@ls -la build/arm64/
+
+image:
+	./image/build.sh --arch all
+
+image-armhf:
+	./image/build.sh --arch armhf
+
+image-arm64:
+	./image/build.sh --arch arm64
+
+contrast:
+	python3 tools/check_contrast.py
+
 build-armv6: build-service-armv6 build-cli-armv6 build-hashpw-armv6
 	@echo
 	@echo "Built for Pi Zero W (linux/arm/6):"
 	@ls -la build/P4wnP1_service build/P4wnP1_cli build/p4wnp1-hashpw
 
+# The service package only builds for linux (USB gadget, netlink, HID), so its
+# tests run in a container. jsonbridge and auth are portable and run anywhere.
 test:
-	go test -count=1 ./service/auth/...
+	go test -count=1 ./service/auth/... ./service/jsonbridge/...
+
+test-linux:
+	docker run --rm --platform linux/arm64 \
+	  -v "$(CURDIR):/src" -v "$$(go env GOMODCACHE):/gomodcache" \
+	  -e GOMODCACHE=/gomodcache -e GOFLAGS=-mod=mod -e CGO_ENABLED=0 \
+	  -w /src golang:1.26-bookworm go test -count=1 ./service/...
 
 lint:
 	@command -v shellcheck >/dev/null || { echo "shellcheck not installed"; exit 1; }
