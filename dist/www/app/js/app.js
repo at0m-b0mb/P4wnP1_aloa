@@ -778,6 +778,18 @@ Views.keystrokes = async function () {
   main.append(jobsCard);
   refreshJobs();
 
+  /* A script finishes on the device with no event the console can see, so
+     without this the job list shows a job as running until you navigate away
+     and back -- and the Cancel button next to it does nothing because the job
+     is already gone. Poll while anything is running, and stop when it is not,
+     so an idle console is not making a request every three seconds forever. */
+  const poll = setInterval(() => {
+    if (State.view !== 'keystrokes') return;
+    if (!State.hidJobs.length) return;
+    refreshJobs();
+  }, 3000);
+  onViewTeardown(() => clearInterval(poll));
+
   main.append(renderHidReference());
 };
 
@@ -1318,8 +1330,20 @@ const NAV = [
   ['journal', 'Journal'],
 ];
 
+/* Anything a view starts -- a timer, an interval -- registers here and is torn
+   down when the view changes. Without this a poll started on Keystrokes keeps
+   firing on every other view for the life of the page, holding the old DOM
+   alive and making requests nobody asked for. */
+let viewCleanups = [];
+function onViewTeardown(fn) { viewCleanups.push(fn); }
+function runViewTeardown() {
+  for (const fn of viewCleanups) { try { fn(); } catch (_) { /* never block navigation */ } }
+  viewCleanups = [];
+}
+
 function go(view) {
   if (!Views[view]) view = 'overview';
+  runViewTeardown();
   State.view = view;
   try { location.hash = '#' + view; } catch (_) {}
   for (const b of document.querySelectorAll('.nav-item')) {
