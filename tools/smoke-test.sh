@@ -80,7 +80,13 @@ JSON='-H Content-Type:application/json'
 
 check "GET / redirects to the console"        "302" "$(code http://127.0.0.1:8000/)"
 check "the console is served"                 "200" "$(code http://127.0.0.1:8000/app/)"
-check "console JS is served"                  "200" "$(code http://127.0.0.1:8000/app/js/app.js)"
+# Every script the page loads, not just one: a missing file is a blank console,
+# and index.html referencing a file that was never installed is exactly the kind
+# of packaging mistake this test exists to catch.
+for js in ui api app; do
+  check "console JS is served ($js.js)"       "200" "$(code http://127.0.0.1:8000/app/js/$js.js)"
+done
+check "console CSS is served"                 "200" "$(code http://127.0.0.1:8000/app/css/app.css)"
 check "console favicon is served"             "200" "$(code http://127.0.0.1:8000/app/favicon.svg)"
 check "unauthenticated API is refused"        "401" "$(code http://127.0.0.1:8000/api/v1/rpc)"
 check "login without Content-Type is refused" "415" "$(code -X POST -d '{}' http://127.0.0.1:8000/api/auth/login)"
