@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="P4wnP1">
+  <rect width="64" height="64" rx="14" fill="#000000"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- one cable in -->
+    <path d="M7 32 H24" stroke="#F2EFE9" stroke-width="7"/>
+    <!-- three devices out -->
+    <path d="M24 32 C33 32 33 11 42 11" stroke="#E3B957" stroke-width="5"/>
+    <path d="M24 32 H42"                stroke="#E3B957" stroke-width="5"/>
+    <path d="M24 32 C33 32 33 53 42 53" stroke="#E3B957" stroke-width="5"/>
+  </g>
+  <circle cx="47" cy="11" r="6" fill="#E3B957"/>
+  <circle cx="47" cy="32" r="6" fill="#E3B957"/>
+  <circle cx="47" cy="53" r="6" fill="#E3B957"/>
+  <rect x="1" y="1" width="62" height="62" rx="13" fill="none" stroke="#2A2A2A" stroke-width="2"/>
+</svg>

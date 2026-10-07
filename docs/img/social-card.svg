@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-label="P4wnP1 A.L.O.A. -- a little offensive appliance">
+  <rect width="1280" height="640" fill="#F3F1EC"/>
+
+  <!-- mark -->
+  <g transform="translate(80,80) scale(2.0)">
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7 32 H24" stroke="#1A1815" stroke-width="7"/>
+      <path d="M24 32 C33 32 33 11 42 11" stroke="#AE851D" stroke-width="5"/>
+      <path d="M24 32 H42"                stroke="#AE851D" stroke-width="5"/>
+      <path d="M24 32 C33 32 33 53 42 53" stroke="#AE851D" stroke-width="5"/>
+    </g>
+    <circle cx="47" cy="11" r="6" fill="#AE851D"/>
+    <circle cx="47" cy="32" r="6" fill="#AE851D"/>
+    <circle cx="47" cy="53" r="6" fill="#AE851D"/>
+  </g>
+
+  <text x="80" y="330" font-family="Georgia,'Times New Roman',serif" font-size="104" font-weight="700" fill="#1A1815" letter-spacing="-2">P4wnP1</text>
+  <text x="86" y="372" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="600" fill="#7D7569" letter-spacing="9">A.L.O.A.</text>
+
+  <text x="80" y="436" font-family="Helvetica,Arial,sans-serif" font-size="30" fill="#575147">A Raspberry Pi that becomes whatever USB device the job needs.</text>
+  <text x="80" y="478" font-family="Helvetica,Arial,sans-serif" font-size="30" fill="#575147">One cable. Keyboard, network, storage - alone or all at once.</text>
+
+  <rect x="80" y="524" width="1120" height="2" fill="#D8D3C8"/>
+  <text x="80" y="550" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="20" fill="#7D7569">PI ZERO W · PI ZERO 2 W · PI 3 / 4 / 5</text>
+  <text x="1200" y="550" text-anchor="end" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="20" fill="#7D7569">GPL-3.0</text>
+</svg>

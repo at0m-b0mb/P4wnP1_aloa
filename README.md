@@ -11,44 +11,63 @@
   reconfigurable from a browser, scriptable, and able to act on its own once the cable is in.
 </p>
 
+<p align="center">
+  <a href="https://github.com/at0m-b0mb/P4wnP1_aloa/releases/latest"><strong>Download an image</strong></a>
+  &nbsp;·&nbsp;
+  <a href="#the-console">The console</a>
+  &nbsp;·&nbsp;
+  <a href="#building">Build it yourself</a>
+  &nbsp;·&nbsp;
+  <a href="#what-is-not-verified">What is not verified</a>
+</p>
+
 ---
 
 > **Authorized testing only.** This is a red-team tool. Point it only at systems you own or
 > have written permission to test. See [DISCLAIMER.md](DISCLAIMER.md).
 
-> **Hardware-verification status.** Everything here is built and tested in CI-equivalent
-> automation — the images are assembled from official Raspberry Pi OS releases, mounted and
-> checked before publishing. **None of it has been booted on a physical Pi.** Read
-> [What is not verified](#what-is-not-verified) before you rely on it for anything.
+> **Hardware-verification status.** The images below are built from official Raspberry Pi OS
+> releases and automatically verified before publishing — but **they have never been booted on
+> a physical Pi.** Read [What is not verified](#what-is-not-verified) before you rely on this.
 
 ---
 
-## Quick start
+## Download
 
-Flash an image, plug it into a target, and it comes up as a USB device you control from a browser.
+Built from `v0.2.0`, on **Raspberry Pi OS Lite (Debian 13 "trixie"), 2026-09-15**, kernel
+`6.18.50+rpt-rpi`.
 
-```bash
-# 1. Download a release image and verify it
-sha256sum -c P4wnP1-ALOA-<version>-armhf.img.xz.sha256
+| Image | Size | Boards |
+|---|---|---|
+| `P4wnP1-ALOA-v0.2.0-armhf.img.xz` | 656M | Pi Zero, **Pi Zero W**, Pi 1 |
+| `P4wnP1-ALOA-v0.2.0-arm64.img.xz` | 592M | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 |
 
-# 2. Flash it (or use Raspberry Pi Imager / balenaEtcher)
-xz -d P4wnP1-ALOA-<version>-armhf.img.xz
-sudo dd if=P4wnP1-ALOA-<version>-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
+```
+armhf  sha256  e87ef407db652e71b1d7b77112a627def080559ac7664b9c31728534a3591d93
+arm64  sha256  85b59a6c41f8786f6dca3f8e94c1fab5b90c07c12ee605b1b351e1967746cbc6
 ```
 
-Boot the Pi with the USB cable in the **data** port (the inner one on a Zero), then:
+Verify, flash, and boot with the cable in the **data** port (the inner one on a Zero):
 
 ```bash
-ssh p4wnp1@172.16.0.1          # over USB ethernet. You are forced to change the password.
-sudo cat /root/INITIAL_CREDENTIALS.txt   # the web console password and WiFi PSK for THIS device
+sha256sum -c P4wnP1-ALOA-v0.2.0-armhf.img.xz.sha256
+xz -d P4wnP1-ALOA-v0.2.0-armhf.img.xz
+sudo dd if=P4wnP1-ALOA-v0.2.0-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
-Then open **<http://172.16.0.1:8000>**.
+Then, over the USB ethernet link the device brings up:
 
-Nothing is shared between devices: the SSH password must be changed on first login, the host
-keys are generated per device, and the console password and WiFi PSK are random per device.
-That is why the first login has to come over USB or serial — the WiFi key is not knowable
-until you have read it off the device.
+```bash
+ssh p4wnp1@172.16.0.1                      # forced password change on first login
+sudo cat /root/INITIAL_CREDENTIALS.txt     # console password and WiFi PSK for THIS device
+```
+
+Open **<http://172.16.0.1:8000>**.
+
+Nothing is shared between devices: the SSH password must be changed at first login, host keys
+are generated per device, and the console password and WiFi PSK are random per device. That is
+why the first login has to come over USB or serial — the WiFi key is not knowable until you
+have read it off the device.
 
 ---
 
@@ -61,11 +80,9 @@ until you have read it off the device.
   </picture>
 </p>
 
-The first thing the console shows you is **what the cable presents** — a live picture of the USB
-functions the machine on the other end actually enumerates, each segment carrying its device path
-or host address, with the attach state driven by real gadget events.
-
-Six views, named for what the device does:
+The first thing it shows you is **what the cable presents** — a live picture of the USB functions
+the machine on the other end actually enumerates, each segment carrying its device path or host
+address, with the attach state driven by real gadget events.
 
 | View | What it is |
 |---|---|
@@ -81,37 +98,33 @@ Six views, named for what the device does:
   <img src="docs/img/console-journal-dark.jpg" alt="The Journal view, streaming device events live" width="49%">
 </p>
 
-It is plain HTML, CSS and JavaScript — no framework, no build step, 188KB including webfonts.
-The smallest supported target is a Pi Zero W with one 1GHz core and 512MB of RAM, and it is
-frequently driven from a phone joined to the device's own access point. Light and dark themes,
-and every colour pairing is checked against WCAG AA by `make contrast`.
+**196KB total, 9 files, no framework and no build step** — 120KB of that is two variable
+webfonts, served from the device because this appliance is routinely operated with no internet
+route at all. The smallest supported target is a Pi Zero W: one 1GHz ARM11 core and 512MB of
+RAM. Light and dark themes, and all 18 text and UI colour pairings are checked against WCAG AA
+in both by `make contrast`.
 
 ---
 
 ## What it does
 
-**USB.** Presents HID keyboard, HID mouse, raw HID, RNDIS and CDC ECM ethernet, mass storage
-(disk or CD-ROM) and serial — individually or as one composite device, reconfigurable at runtime
-without a reboot.
+| | |
+|---|---|
+| **USB functions** | HID keyboard, HID mouse, raw HID, RNDIS, CDC ECM, mass storage (disk or CD-ROM), serial — individually or as one composite device, reconfigurable at runtime |
+| **HIDScript** | 24 functions exposed into a JavaScript VM running on the device; 15 keyboard layouts; human-cadence typing; absolute mouse positioning; LED-state branching; up to 8 parallel jobs |
+| **DuckyScript** | Converts to HIDScript, 66 key names recognised |
+| **Triggers** | 9 event types — USB host attach/detach, AP started, joined WiFi, SSH login, DHCP lease, GPIO, group values |
+| **Control** | 82 RPCs over gRPC and JSON, plus a live event stream |
 
-**Keystroke injection.** HIDScript is real JavaScript running on the device: typing with
-human-like cadence, 15 keyboard layouts, mouse control including absolute positioning, LED-state
-feedback for branching, and up to 8 parallel jobs. Existing **DuckyScript** payloads convert
-straight across:
+Existing DuckyScript payloads run here:
 
 ```bash
-P4wnP1_cli ducky convert payload.txt -o payload.js
+P4wnP1_cli ducky convert payload.txt -o payload.js --layout gb --speed 80 --jitter 20
 ```
 
-**Networking.** WiFi access point or station with failover, Bluetooth NAP, per-interface DHCP
-server or client, and persistent templates for all of it.
-
-**Autonomy.** Trigger/action rules let the device act without an operator: when the USB host
-attaches, when an SSID appears, when a DHCP lease is granted, when a GPIO pin changes, when a
-script signals a group value — run a bash script, a HIDScript, or deploy a whole configuration.
-
-**Two control surfaces.** The browser console above, and `P4wnP1_cli` over gRPC, locally or
-remotely. Both authenticate.
+DuckyScript 1.0 converts in full. Later Hak5 dialects and Bash Bunny directives are reported as
+warnings **and** left in the output as `// UNCONVERTED:` comments — a payload that converts
+cleanly while silently losing a third of its logic is worse than one that refuses.
 
 ---
 
@@ -125,10 +138,9 @@ remotely. Both authenticate.
 | **Pi 3 / 4 / 5** | `arm64` | On a Pi 4/5 the USB-C port is the one that does peripheral mode. |
 
 > Upstream and earlier versions of this README said the Pi Zero 2 W was unsupported and blamed
-> the WiFi chipset. That was not the real reason. The core service was gated to 32-bit ARM by
-> build tags (`+build linux,arm`) that turned out to be incidental rather than a genuine
-> dependency — removing them builds arm64 with no code changes. The chipset only limits
-> KARMA, not the device.
+> the WiFi chipset. That was not the reason. The core service was gated to 32-bit ARM by build
+> tags (`+build linux,arm`) that turned out to be incidental rather than a genuine dependency —
+> removing them builds arm64 with no code changes. The chipset only limits KARMA, not the device.
 
 You also need a microSD card (8GB minimum), a USB cable or OTG adapter, and ideally an external
 5V supply so the Pi can stay powered while detached from the target.
@@ -147,12 +159,15 @@ make test            # unit tests
 make contrast        # WCAG check on the console palette
 ```
 
-Image building is documented in detail in **[image/README.md](image/README.md)** — it downloads
-an official Raspberry Pi OS Lite release, verifies its checksum, grows the root partition in
-place, chroots in (under QEMU for a foreign architecture), installs the payload, writes the boot
-configuration, shrinks and compresses. Every built image is then **mounted and verified** before
-it is published: partition geometry, the payload, enabled units, the dwc2 overlay, that
-`root=PARTUUID` still matches the disk identifier, and that no SSH host keys were baked in.
+Image building is documented in **[image/README.md](image/README.md)**. Every built image is
+**mounted and verified before it is published**: MBR signature, both partitions, that the
+partition table fits inside the file, that both filesystems mount, the payload and the console,
+that the units are enabled, that `config.txt` carries the dwc2 overlay and `cmdline.txt` loads it
+as a single line, that `root=PARTUUID` still matches the disk identifier, that no SSH host keys
+were baked in, and that the binaries are the right architecture. A failure refuses to publish.
+
+That check exists because a build once produced 2.6GB of zeros, compressed it to 410KB, wrote a
+checksum for it and reported success.
 
 Installing onto a Pi you already have:
 
@@ -167,13 +182,13 @@ sudo ./install.sh --ssid MyAP --wifi-country GB
 This is a tool for attacking systems, which makes its own security worth stating plainly.
 
 - **The API authenticates.** Every gRPC method and every JSON endpoint requires a bearer token.
-  Tokens are opaque, random, expire on a sliding window and can be revoked.
-- **Per-device secrets.** Nothing meaningful is shared between two flashed devices.
-- **Path handling is allowlisted.** The RPCs that take a filesystem path reject traversal and
-  anything outside the permitted directories.
-- **The console is same-origin only.** It emits no CORS headers and rejects foreign origins
-  outright, because this device is often reached from a browser that is simultaneously visiting
-  untrusted pages.
+  Tokens are opaque, random, expire on a sliding window, and can be revoked.
+- **Per-device secrets.** Nothing meaningful is shared between two flashed devices, and the
+  access point refuses to broadcast on a PSK published in this repository.
+- **Path handling is allowlisted**, and reads are bounds-checked.
+- **The console is same-origin only.** It emits no CORS headers and rejects foreign origins,
+  because this device is often reached from a browser that is simultaneously visiting untrusted
+  pages.
 - **Payload text cannot become code.** The DuckyScript converter escapes its output so a crafted
   payload cannot close the generated JavaScript literal and run as root.
 
@@ -188,14 +203,14 @@ directly, not one you expose.
 
 Being specific about this matters more than the feature list.
 
-**No physical Raspberry Pi was used at any point.** What that does and does not mean:
+**No physical Raspberry Pi was used at any point.**
 
-*Verified by automation:* the Go service and CLI cross-compile for both architectures; unit
-tests pass for the auth, JSON bridge and DuckyScript packages; `go vet` is clean for both
-targets; images build from official releases and pass a mount-and-inspect check covering
-partition geometry, payload, enabled units and boot configuration; the console was exercised
-against a mock implementing the real API shapes, in both themes and at phone width, with no
-console errors.
+*Verified by automation:* both architectures cross-compile and `go vet` is clean for both;
+81 test functions across the auth, JSON-bridge, PSK-guard and DuckyScript packages pass on
+linux/arm64; images build from official Raspberry Pi OS releases and pass the mount-and-inspect
+check above; the console was exercised in a browser against a mock implementing the real API
+shapes — sign-in, all six views, the live event stream, both themes and a phone viewport — with
+no console errors.
 
 *Not verified at all:* that an image boots. That USB gadget mode initialises on real silicon and
 a host enumerates the functions. That keystroke injection types correctly into a real machine.
@@ -203,8 +218,8 @@ That hostapd brings up the access point. That Bluetooth pairs. That the trigger 
 real events. That any of this survives having the cable pulled out mid-write.
 
 If you are evaluating this for real work, **boot it on a Pi first and check those yourself.**
-[KNOWN_ISSUES.md](KNOWN_ISSUES.md) tracks defects found by reading the code, several of which are
-reachable only on hardware.
+[KNOWN_ISSUES.md](KNOWN_ISSUES.md) tracks what is fixed and what is still open, including the
+cold-boot panic that made every freshly flashed device dead on arrival until this release.
 
 ---
 
@@ -218,10 +233,10 @@ buyer gets the complete corresponding source for the version on their device, un
 including your modifications, and that you do not add restrictions on their right to use, modify
 and redistribute it. You cannot keep changes to this codebase proprietary while shipping them.
 
-In practice that means the viable commercial shape is hardware, assembly, support, documentation,
-training and engagement services — not licence fees for the code. If you intend to build a
-business on this, get the licence position reviewed by someone qualified; the paragraph above is
-a description of what the licence says, not legal advice.
+In practice the viable commercial shape is hardware, assembly, support, documentation, training
+and engagement services — not licence fees for the code. If you intend to build a business on
+this, get the position reviewed by someone qualified; the paragraph above describes what the
+licence says, it is not legal advice.
 
 ---
 
@@ -241,4 +256,10 @@ gadget, HIDScript, and the trigger/action engine — is what this is. Maintained
 image for the Pi Zero W.
 
 This fork modernises the toolchain, adds authentication, a JSON API, arm64 support, a new
-console, DuckyScript conversion and a reproducible image pipeline.
+console, DuckyScript conversion and a verified image pipeline — and fixes the reason a flashed
+device never worked.
+
+<p align="center"><sub>
+Fraunces for identity and figures · Inter for interface text · system monospace for measured values<br>
+Warm paper with two golds; dark mode is true black
+</sub></p>

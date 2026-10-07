@@ -1,39 +1,49 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 340" width="1280" height="340" role="img" aria-label="P4wnP1 A.L.O.A. -- a little offensive appliance">
   <rect width="1280" height="340" fill="#F3F1EC"/>
 
-  <!-- wordmark -->
-  <text x="72" y="132" font-family="Georgia, 'Times New Roman', serif" font-size="76" font-weight="700" fill="#1A1815" letter-spacing="-1">P4wnP1</text>
-  <text x="76" y="166" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#7D7569" letter-spacing="7">A.L.O.A.</text>
-  <text x="76" y="212" font-family="Helvetica, Arial, sans-serif" font-size="19" fill="#575147">A little offensive appliance, on a Raspberry Pi.</text>
-  <text x="76" y="240" font-family="Helvetica, Arial, sans-serif" font-size="19" fill="#575147">One cable. Whatever device you need it to be.</text>
+  <!-- mark: one cable in, several devices out -->
+  <g transform="translate(66,52) scale(0.92)">
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7 32 H24" stroke="#1A1815" stroke-width="7"/>
+      <path d="M24 32 C33 32 33 11 42 11" stroke="#7A5C14" stroke-width="5"/>
+      <path d="M24 32 H42"                stroke="#7A5C14" stroke-width="5"/>
+      <path d="M24 32 C33 32 33 53 42 53" stroke="#7A5C14" stroke-width="5"/>
+    </g>
+    <circle cx="47" cy="11" r="6" fill="#7A5C14"/>
+    <circle cx="47" cy="32" r="6" fill="#7A5C14"/>
+    <circle cx="47" cy="53" r="6" fill="#7A5C14"/>
+  </g>
 
-  <!-- hairline -->
-  <rect x="72" y="276" width="1136" height="1" fill="#D8D3C8"/>
-  <text x="72" y="304" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13" fill="#7D7569">USB HID  ·  USB ETHERNET  ·  MASS STORAGE  ·  WIFI  ·  BLUETOOTH  ·  AUTOMATION</text>
+  <text x="140" y="104" font-family="Georgia,'Times New Roman',serif" font-size="68" font-weight="700" fill="#1A1815" letter-spacing="-1">P4wnP1</text>
+  <text x="144" y="132" font-family="Helvetica,Arial,sans-serif" font-size="14" font-weight="600" fill="#7D7569" letter-spacing="7">A.L.O.A.</text>
+  <text x="68" y="192" font-family="Helvetica,Arial,sans-serif" font-size="19" fill="#575147">A little offensive appliance, on a Raspberry Pi.</text>
+  <text x="68" y="220" font-family="Helvetica,Arial,sans-serif" font-size="19" fill="#575147">One cable. Whatever device you need it to be.</text>
 
-  <!-- the cable strip: the device's own signature display, as the banner -->
+  <rect x="68" y="266" width="1144" height="1" fill="#D8D3C8"/>
+  <text x="68" y="296" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="13" fill="#7D7569">USB HID  ·  USB ETHERNET  ·  MASS STORAGE  ·  WIFI  ·  BLUETOOTH  ·  AUTOMATION</text>
+
   <g transform="translate(676,74)">
     <rect x="0" y="0" width="74" height="72" rx="6" fill="#F6EEDC" stroke="#7A5C14" stroke-width="1.5"/>
-    <text x="37.0" y="34" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9.5" font-weight="700" fill="#1A1815" letter-spacing="0.6">KEYBOARD</text>
+    <text x="37.0" y="34" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="9.5" font-weight="700" fill="#1A1815" letter-spacing="0.6">KEYBOARD</text>
     <circle cx="37.0" cy="50" r="3.5" fill="#AE851D"/>
     <rect x="82" y="0" width="74" height="72" rx="6" fill="#F6EEDC" stroke="#7A5C14" stroke-width="1.5"/>
-    <text x="119.0" y="34" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9.5" font-weight="700" fill="#1A1815" letter-spacing="0.6">MOUSE</text>
+    <text x="119.0" y="34" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="9.5" font-weight="700" fill="#1A1815" letter-spacing="0.6">MOUSE</text>
     <circle cx="119.0" cy="50" r="3.5" fill="#AE851D"/>
     <rect x="164" y="0" width="74" height="72" rx="6" fill="#F6EEDC" stroke="#7A5C14" stroke-width="1.5"/>
-    <text x="201.0" y="34" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9.5" font-weight="700" fill="#1A1815" letter-spacing="0.6">RAW HID</text>
+    <text x="201.0" y="34" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="9.5" font-weight="700" fill="#1A1815" letter-spacing="0.6">RAW HID</text>
     <circle cx="201.0" cy="50" r="3.5" fill="#AE851D"/>
     <rect x="246" y="0" width="74" height="72" rx="6" fill="#F6EEDC" stroke="#7A5C14" stroke-width="1.5"/>
-    <text x="283.0" y="34" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9.5" font-weight="700" fill="#1A1815" letter-spacing="0.6">RNDIS</text>
+    <text x="283.0" y="34" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="9.5" font-weight="700" fill="#1A1815" letter-spacing="0.6">RNDIS</text>
     <circle cx="283.0" cy="50" r="3.5" fill="#AE851D"/>
     <rect x="328" y="0" width="74" height="72" rx="6" fill="#FFFFFF" stroke="#D8D3C8" stroke-width="1"/>
-    <text x="365.0" y="34" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9.5" font-weight="600" fill="#7D7569" letter-spacing="0.6">CDC ECM</text>
-    <text x="365.0" y="54" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="8" fill="#7D7569">off</text>
+    <text x="365.0" y="34" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="9.5" font-weight="600" fill="#7D7569" letter-spacing="0.6">CDC ECM</text>
+    <text x="365.0" y="54" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="8" fill="#7D7569">off</text>
     <rect x="410" y="0" width="74" height="72" rx="6" fill="#FFFFFF" stroke="#D8D3C8" stroke-width="1"/>
-    <text x="447.0" y="34" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9.5" font-weight="600" fill="#7D7569" letter-spacing="0.6">SERIAL</text>
-    <text x="447.0" y="54" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="8" fill="#7D7569">off</text>
+    <text x="447.0" y="34" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="9.5" font-weight="600" fill="#7D7569" letter-spacing="0.6">SERIAL</text>
+    <text x="447.0" y="54" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="8" fill="#7D7569">off</text>
     <rect x="492" y="0" width="74" height="72" rx="6" fill="#FFFFFF" stroke="#D8D3C8" stroke-width="1"/>
-    <text x="529.0" y="34" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="9.5" font-weight="600" fill="#7D7569" letter-spacing="0.6">STORAGE</text>
-    <text x="529.0" y="54" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="8" fill="#7D7569">off</text>
-    <text x="0" y="94" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#7D7569" letter-spacing="1.4">WHAT THE CABLE PRESENTS</text>
+    <text x="529.0" y="34" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="9.5" font-weight="600" fill="#7D7569" letter-spacing="0.6">STORAGE</text>
+    <text x="529.0" y="54" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="8" fill="#7D7569">off</text>
+    <text x="0" y="94" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="600" fill="#7D7569" letter-spacing="1.4">WHAT THE CABLE PRESENTS</text>
   </g>
 </svg>
