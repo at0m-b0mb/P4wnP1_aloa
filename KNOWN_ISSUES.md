@@ -222,6 +222,51 @@ sites, so RPCs added later are covered too. Only the three
 hardware-unavailable sentinels are reclassified; everything else passes
 through untouched, so a genuine bug still surfaces as one.
 
+### High -- an apostrophe in the WiFi passphrase bricked the device at first boot
+
+`install.sh` wrote the SSID and PSK into `/etc/p4wnp1/initial.conf` wrapped in
+single quotes with no escaping. The firstboot helper **sources that file as
+root**, under `set -euo pipefail`, and it is the script that creates the admin
+account. So an apostrophe -- an ordinary thing for a passphrase to contain --
+produced `P4WNP1_INITIAL_SSID='Bob's AP'`, which does not parse, which aborted
+firstboot, which meant **no admin account was created and the device rejected
+every console request**.
+
+A crafted value was worse: everything after the closing quote ran as root on
+first boot. Install commands get copied out of documentation and support
+threads, so that is not purely self-inflicted.
+
+Fixed at both ends: `install.sh` emits values with `printf %q`, and firstboot
+syntax-checks the file with `bash -n` before sourcing it, so a hand-edited
+typo is a warning and a fall back to defaults rather than a brick.
+
+### High -- the healthcheck leaked the admin password and a bearer token
+
+`p4wnp1-healthcheck.sh --login-test`, documented to be run with `sudo`:
+
+- passed the admin password to `curl` as a command-line argument, leaving it in
+  `/proc/<pid>/cmdline`, which is world-readable -- and this device ships an
+  unprivileged `p4wnp1` SSH account;
+- wrote the login response, which contains a **bearer token**, to
+  `/tmp/p4wnp1-login-$$`: a predictable path in a world-writable directory,
+  created 0644, and a symlink target a local user can pre-create so that root
+  writes through it (`curl -o` opens `O_CREAT|O_TRUNC` and follows symlinks);
+- only removed that file on the success path.
+
+Now stdin, `mktemp`, and a trap on `EXIT INT TERM`.
+
+### Medium -- a race could leave the device unable to authenticate to itself
+
+`ProvisionLocalToken` held its lock only around the state swap, leaving a
+window as wide as one file write. Two overlapping calls each wrote their own
+token and then each revoked what it believed was the previous one, so the
+loser's revocation could land on the token actually left in the file.
+Measured: with calls started within 100us of each other the file held a
+**revoked** token in 97-99% of 2000 trials, and the window closed at about
+250us. On a device the overlap is the twelve-hourly refresh colliding with a
+password change. Provisioning is now atomic, and `writeTokenFile` uses
+`os.CreateTemp` rather than a fixed `.new` suffix two writers would collide on.
+
 ### Low -- `localTokenState` was a package-level var
 
 Two Managers shared one slot: the second to provision took ownership of the
@@ -240,6 +285,21 @@ three folders for both read and write, including encoded and doubled forms;
 logout revokes one session and only one; a password change revokes all; an
 oversized request body is refused; no token or password appears in the service
 log.
+
+### Added: the console can answer "is anyone else signed in?"
+
+Not a bug fix but a gap this audit exposed. The README, this file and five
+code comments all asserted that the machine-local credential "appears in the
+session list". There was no session list -- no RPC, no endpoint, no view. A
+documented auditability property the device did not have.
+
+`GET /api/auth/sessions` now lists who is signed in and
+`POST /api/auth/sessions/revoke` ends one, with a "Who is signed in" dialog in
+the console. The list carries **no tokens**: it is rendered in a browser, so a
+list of live tokens would turn an audit view into a credential dump. An id is
+a truncated SHA-256 of the token -- enough to name a session, not enough to be
+one. Revoking the device's own credential re-issues it immediately rather than
+being refused.
 
 ### Known and accepted, recorded so it is not rediscovered
 
