@@ -194,7 +194,10 @@ func DHCPCreateConfigFile(s *pb.DHCPServerSettings, filename string) (err error)
 	if err != nil {
 		return
 	}
-	err = os.WriteFile(filename, []byte(file_content), os.ModePerm)
+	// 0644, not os.ModePerm (0777). There is no secret in a dnsmasq config, but
+	// world-WRITABLE means any local account can rewrite the DNS and DHCP the
+	// device hands out.
+	err = os.WriteFile(filename, []byte(file_content), 0644)
 	//ToDo: test config with `dnsmasq -C configfile --test`
 	return
 }
@@ -219,11 +222,11 @@ func DHCPCreateConfigFileString(s *pb.DHCPServerSettings) (config string, err er
 	for _, pRange := range s.Ranges {
 		//ToDo: regex check for leaseTime
 		/*
-				If the lease time is
-		              given, then leases will be given for that length of  time.  The
-		              lease  time is in seconds, or minutes (eg 45m) or hours (eg 1h)
-		              or "infinite". If not given, the  default  lease  time  is  one
-		              hour.  The  minimum lease time is two minutes
+					If the lease time is
+			              given, then leases will be given for that length of  time.  The
+			              lease  time is in seconds, or minutes (eg 45m) or hours (eg 1h)
+			              or "infinite". If not given, the  default  lease  time  is  one
+			              hour.  The  minimum lease time is two minutes
 		*/
 		//ToDo: check rangeLower + rangeUpper to be valid IP addresses
 		if len(pRange.LeaseTime) > 0 {

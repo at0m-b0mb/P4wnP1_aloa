@@ -729,7 +729,13 @@ func resolveAccessibleFolder(folder pb.AccessibleFolder, filename string) (strin
 	var perm os.FileMode
 	switch folder {
 	case pb.AccessibleFolder_TMP:
-		base, perm = "/tmp", os.ModePerm
+		// 0600, not os.ModePerm (0777). /tmp is world-writable and shared, and
+		// this is the folder the web console writes a HIDScript into before
+		// asking the service to RUN it as root -- so 0777 gave any local
+		// account a window to rewrite a pending script between the write and
+		// the execution. The contents are sensitive too: a script frequently
+		// contains whatever it is about to type into the host.
+		base, perm = "/tmp", 0600
 	case pb.AccessibleFolder_BASH_SCRIPTS:
 		base, perm = common.PATH_BASH_SCRIPTS, 0700
 	case pb.AccessibleFolder_HID_SCRIPTS:

@@ -10,7 +10,10 @@ if [ "$hidraw" = "" ]; then
 fi
 
 echo "Kill old hidstager processes ..."
-ps -aux | grep hidstager.py | grep -v grep | awk {'system("kill "$2)'}
+# The braces belong INSIDE the quotes. As written the shell passed them through
+# literally and awk happened to parse it, but nothing guaranteed that.
+# pkill does the same job without parsing ps output at all.
+pkill -f hidstager.py 2>/dev/null || true
 
 echo "Starting HID stager for WiFi covert channel payload"
 

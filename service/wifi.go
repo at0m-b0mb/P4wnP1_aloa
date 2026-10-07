@@ -300,7 +300,11 @@ func (wSvc *WiFiService) runStaMode(newWifiSettings *pb.WiFiSettings) (err error
 	}
 	// store config to file
 	log.Printf("Creating wpa_supplicant configuration file at '%s'\n", wSvc.PathWpaSupplicantConf)
-	err = os.WriteFile(wSvc.PathWpaSupplicantConf, []byte(confstr), os.ModePerm)
+	// 0600, not os.ModePerm (0777). This file contains the pre-shared key in
+	// cleartext; world-readable gives it to any local account, and
+	// world-WRITABLE lets one rewrite the network the device joins.
+	// wpa_supplicant runs as root, so it loses nothing.
+	err = os.WriteFile(wSvc.PathWpaSupplicantConf, []byte(confstr), 0600)
 	if err != nil {
 		return err
 	}
@@ -679,7 +683,11 @@ func wifiCreateWpaSupplicantConfStringList(bsslist []*pb.WiFiBSSCfg) (config str
 			cres, err := proc.CombinedOutput()
 
 			if err != nil {
-				return "", errors.New(fmt.Sprintf("Error craeting wpa_supplicant.conf for SSID '%s' with PSK '%s': %s", ssid, psk, string(cres)))
+				// The PSK used to be interpolated into this error, which then
+				// reached the journal and the operator's browser. Never put a
+				// secret in an error string: errors get logged, forwarded and
+				// pasted into bug reports.
+				return "", fmt.Errorf("could not create wpa_supplicant.conf for SSID '%s': %s", ssid, string(cres))
 			}
 			config += string(cres)
 		} else {
@@ -748,7 +756,9 @@ func hostapdCreateConfigFile2(s *pb.WiFiSettings, filename string) (err error) {
 	if err != nil {
 		return
 	}
-	err = os.WriteFile(filename, []byte(fileContent), os.ModePerm)
+	// 0600: this carries wpa_passphrase in cleartext. See the note on the
+	// wpa_supplicant config above.
+	err = os.WriteFile(filename, []byte(fileContent), 0600)
 	return
 }
 

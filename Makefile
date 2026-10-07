@@ -129,6 +129,7 @@ lint:
 	shellcheck --severity=warning install.sh \
 	          dist/scripts/firstboot-secure-defaults.sh \
 	          dist/scripts/p4wnp1-healthcheck.sh \
+	          dist/scripts/wifi_covert_channel.sh dist/scripts/trigger-aware.sh \
 	          build_support/build.sh \
 	          image/build.sh image/lib/stage.sh image/lib/customize.sh image/lib/verify.sh \
 	          tools/smoke-test.sh tools/check-js.sh

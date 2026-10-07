@@ -123,8 +123,11 @@ func guardAccessPointPSK(settings *WiFiSettingsPSKView) bool {
 		return false
 	}
 
-	log.Printf("WiFi: REFUSING to broadcast on PSK %q -- that value is published in this "+
-		"project's source and is not a secret.", settings.PSK())
+	// Deliberately NOT printing the value, even though this particular one is
+	// public: a log line that sometimes contains a PSK trains everyone reading
+	// it to expect PSKs in logs.
+	log.Printf("WiFi: REFUSING to broadcast on the configured PSK -- it is a value " +
+		"published in this project's source and is not a secret.")
 
 	psk, err := devicePSK()
 	if err != nil {
