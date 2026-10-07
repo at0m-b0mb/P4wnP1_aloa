@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 
@@ -301,4 +302,88 @@ func TestMarshalMessageNil(t *testing.T) {
 	if string(out) != "{}" {
 		t.Errorf("MarshalMessage(nil) = %s, want {}", out)
 	}
+}
+
+// TestEmitsProtoFieldNames is the regression guard for the single worst bug the
+// JSON API has had.
+//
+// Without UseProtoNames, protojson emits the lowerCamelCase JSON name:
+// use_HID_KEYBOARD went out as useHIDKEYBOARD, rndis_settings as rndisSettings.
+// The web console reads the proto names -- the ones in grpc.proto, the ones any
+// protobuf tooling shows you -- so every single key it needed from
+// GadgetSettings was missing from the response. The USB view rendered every
+// function as off regardless of what was deployed, and toggling one produced a
+// duplicate-field error because both spellings went back.
+//
+// It was invisible for two reasons worth remembering: the development mock
+// emitted the proto names (so the console worked against it), and nothing in
+// the test suite ever marshalled a message whose proto name and JSON name
+// differ. GadgetSettings is exactly that message, so it is the one used here.
+func TestEmitsProtoFieldNames(t *testing.T) {
+	gs := &pb.GadgetSettings{
+		Enabled: true, Vid: "0x1d6b", Pid: "0x0137",
+		Use_HID_KEYBOARD: true, Use_RNDIS: true,
+		RndisSettings:      &pb.GadgetSettingsEthernet{HostAddr: "aa:bb"},
+		DevPathHidKeyboard: "/dev/hidg0",
+	}
+	out, err := MarshalMessage(gs)
+	if err != nil {
+		t.Fatalf("MarshalMessage: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(out, &m); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+
+	// Exactly the keys dist/www/app/js/app.js reads off this message.
+	for _, k := range []string{
+		"use_HID_KEYBOARD", "use_HID_MOUSE", "use_HID_RAW",
+		"use_RNDIS", "use_CDC_ECM", "use_SERIAL", "use_UMS",
+		"rndis_settings", "cdc_ecm_settings", "ums_settings",
+		"dev_path_hid_keyboard", "dev_path_hid_mouse", "dev_path_hid_raw",
+	} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("response is missing %q -- the console reads this key", k)
+		}
+	}
+	// And the camelCase spellings must NOT appear, or a client reading either
+	// one would keep working by accident and the mismatch would resurface.
+	for _, k := range []string{"useHIDKEYBOARD", "useRNDIS", "rndisSettings", "devPathHidKeyboard"} {
+		if _, ok := m[k]; ok {
+			t.Errorf("response contains %q; UseProtoNames should have suppressed it", k)
+		}
+	}
+
+	// Nested messages must follow the same rule.
+	nested, ok := m["rndis_settings"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("rndis_settings is not an object: %T", m["rndis_settings"])
+	}
+	if _, ok := nested["host_addr"]; !ok {
+		t.Errorf("nested message used the JSON name; want host_addr, got keys %v", keysOf(nested))
+	}
+}
+
+// TestAcceptsBothSpellingsOnInput documents that the fix is emit-only: a client
+// sending either spelling still works, so this was not a breaking change for
+// anything that was posting camelCase.
+func TestAcceptsBothSpellingsOnInput(t *testing.T) {
+	b, _ := newTestBridge(t)
+	for _, body := range []string{
+		`{"groupReceive":{"groupName":"g","value":1}}`,
+		`{"group_receive":{"group_name":"g","value":1}}`,
+	} {
+		if _, err := b.Call(context.Background(), "EchoTriggerAction", []byte(body)); err != nil {
+			t.Errorf("input %s was rejected: %v", body, err)
+		}
+	}
+}
+
+func keysOf(m map[string]interface{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

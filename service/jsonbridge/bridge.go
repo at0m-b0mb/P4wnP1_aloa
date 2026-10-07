@@ -47,10 +47,27 @@ var (
 	protoType = reflect.TypeOf((*proto.Message)(nil)).Elem()
 )
 
-// marshalOpts keeps zero values in the output. A frontend rendering a form
-// needs to know a boolean is false, not have the field vanish; EmitUnpopulated
-// makes the JSON shape stable and lets the UI bind directly to it.
-var marshalOpts = protojson.MarshalOptions{EmitUnpopulated: true}
+// marshalOpts keeps zero values in the output and emits the PROTO field names.
+//
+// EmitUnpopulated: a frontend rendering a form needs to know a boolean is
+// false, not have the field vanish; this makes the JSON shape stable and lets
+// the UI bind directly to it.
+//
+// UseProtoNames is load-bearing and was missing. Without it protojson emits the
+// lowerCamelCase JSON name, so `use_HID_KEYBOARD` went out as `useHIDKEYBOARD`
+// and `rndis_settings` as `rndisSettings`. The console reads the proto names --
+// the ones written in grpc.proto and shown by every protobuf tool -- so ALL
+// ELEVEN keys it needs from GadgetSettings were absent from the response. Every
+// USB checkbox rendered unchecked whatever was deployed, the cable strip showed
+// every function off, and toggling one sent both spellings at once, which
+// protojson rejects as a duplicate field.
+//
+// Unmarshalling is unaffected: protojson accepts either spelling on input, so
+// this only changes what we emit, and it changes it to match the .proto.
+var marshalOpts = protojson.MarshalOptions{
+	EmitUnpopulated: true,
+	UseProtoNames:   true,
+}
 
 // unmarshalOpts tolerates fields the server does not know. Without this a
 // frontend echoing back a response body it had augmented (or one built against

@@ -109,6 +109,39 @@ def console_calls():
     return calls
 
 
+def check_response_reads(messages):
+    """Check the keys the console reads off a RESPONSE, not just what it sends.
+
+    Requests were covered; responses were not, and that is where the worst bug
+    lived: the bridge emitted protojson's lowerCamelCase JSON names, so every
+    key the console read off GadgetSettings was absent and the USB view showed
+    every function as off regardless of what was deployed.
+
+    USB_FUNCTIONS in app.js is a declared list of keys, so it can be checked
+    directly against the message. Arbitrary property reads elsewhere cannot be,
+    which is why service/jsonbridge also has a test pinning the emitted names.
+    """
+    problems = []
+    app = (ROOT / "dist/www/app/js/app.js").read_text()
+
+    m = re.search(r"const USB_FUNCTIONS = \[(.*?)\n\];", app, re.S)
+    if not m:
+        return ["app.js: could not find USB_FUNCTIONS -- update this checker"]
+    keys = re.findall(r"key:\s*'([^']+)'", m.group(1))
+    fields = messages.get("GadgetSettings", {})
+    for k in keys:
+        if k not in fields:
+            problems.append(
+                f"app.js: USB_FUNCTIONS reads '{k}' but GadgetSettings has no such field")
+
+    # The detail accessors read nested/extra fields by name too.
+    for k in re.findall(r"s\.([a-z][A-Za-z0-9_]*)", m.group(1)):
+        if k not in fields:
+            problems.append(
+                f"app.js: USB_FUNCTIONS reads 's.{k}' but GadgetSettings has no such field")
+    return problems
+
+
 def main():
     messages, rpcs = parse_proto()
     print(f"proto: {len(messages)} messages, {len(rpcs)} rpcs")
@@ -133,7 +166,10 @@ def main():
                     f"{fname}: {method} sends '{k}' but {req} has no such field.\n"
                     f"        {req} fields: {near}")
 
-    print(f"checked {checked} call sites with literal payloads")
+    resp_problems = check_response_reads(messages)
+    problems.extend(resp_problems)
+    print(f"checked {checked} call sites with literal payloads, "
+          f"plus the keys the console reads off GadgetSettings")
     if problems:
         print(f"\nFAIL -- {len(problems)} problem(s):")
         for p in problems:

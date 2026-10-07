@@ -109,6 +109,25 @@ check "an unimplemented RPC returns 501, not a corpse" "501" \
 check "a hostile read length is rejected" "400" \
   "$(code -X POST $JSON -H "Authorization: Bearer $TOK" -d '{"filename":"x","folder":0,"start":0,"len":9999999999}' http://127.0.0.1:8000/api/v1/rpc/FSReadFile)"
 
+# The API must speak the field names the console reads. Without UseProtoNames
+# protojson emits use_HID_KEYBOARD as useHIDKEYBOARD, and every USB key the
+# console needs disappears from the response -- the Cable view renders every
+# function as off whatever is deployed. Nothing here exercised a USB round-trip
+# before, which is exactly why that shipped.
+USB_JSON=$(curl -s -X POST -H "Authorization: Bearer $TOK" http://127.0.0.1:8000/api/v1/rpc/GetDeployedGadgetSetting)
+case "$USB_JSON" in
+    *use_HID_KEYBOARD*) ok "USB settings use proto field names" ;;
+    *useHIDKEYBOARD*)   bad "USB settings use proto field names" "got camelCase; the console cannot read this" ;;
+    *)
+        # No UDC in a container, so an error here is expected and fine -- what
+        # must never happen is a SUCCESSFUL response in the wrong spelling.
+        case "$USB_JSON" in
+            *'"error"'*) ok "USB settings RPC answered (no UDC in a container, as expected)" ;;
+            *) bad "USB settings use proto field names" "unrecognised response: ${USB_JSON:0:120}" ;;
+        esac
+        ;;
+esac
+
 # After every malformed request above, it must still be serving.
 kill -0 "$SVC" 2>/dev/null && ok "service still alive after hostile input" \
                            || bad "service still alive after hostile input" "it died"
