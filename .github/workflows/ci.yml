@@ -1,0 +1,122 @@
+# Every push and pull request: the gates that are quick.
+#
+# Deliberately NOT the image build. That needs loop devices, a chroot under
+# QEMU emulation and about 10GB of scratch per image, so it belongs in
+# release.yml where it runs on demand rather than on every commit.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: Tests and static gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Install the tools the gates need
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          # check-render.sh needs a JS runtime with jsdom; the runner has node.
+          node --version
+
+      - name: Shell scripts
+        run: |
+          shellcheck --severity=warning install.sh \
+            dist/scripts/firstboot-secure-defaults.sh \
+            dist/scripts/p4wnp1-healthcheck.sh \
+            dist/scripts/wifi_covert_channel.sh dist/scripts/trigger-aware.sh \
+            build_support/build.sh \
+            image/build.sh image/lib/stage.sh image/lib/customize.sh image/lib/verify.sh \
+            tools/smoke-test.sh tools/check-js.sh tools/check-render.sh \
+            tools/feature-test.sh tools/access-control-test.sh tools/live-console.sh \
+            tools/check-shell-quoting.sh
+
+      - name: Console JavaScript parses
+        run: ./tools/check-js.sh
+
+      - name: Console views render
+        run: ./tools/check-render.sh
+
+      - name: Console RPC payloads match the proto
+        run: python3 tools/check-rpc-shapes.py
+
+      - name: Palette meets WCAG AA
+        run: python3 tools/check_contrast.py
+
+      - name: install.sh writes values that survive being sourced
+        run: ./tools/check-shell-quoting.sh
+
+      - name: Unit tests
+        run: go test -count=1 ./service/auth/... ./service/jsonbridge/... ./oled/...
+
+      - name: Unit tests under the race detector
+        run: go test -count=1 -race ./oled/...
+
+      - name: go vet, both target architectures
+        run: |
+          GOOS=linux GOARCH=arm GOARM=6 go vet ./service/... ./cli_client/... ./oled/... ./cmd/...
+          GOOS=linux GOARCH=arm64 go vet ./service/... ./cli_client/... ./oled/... ./cmd/...
+
+      - name: Everything cross-compiles for both boards
+        run: |
+          for arch in arm arm64; do
+            for pkg in P4wnP1_service P4wnP1_cli p4wnp1-hashpw p4wnp1-oled; do
+              CGO_ENABLED=0 GOOS=linux GOARCH=$arch \
+                go build -o /dev/null ./cmd/$pkg
+            done
+          done
+
+      - name: gofmt
+        run: |
+          # The upstream tree has pre-existing unformatted files, so this
+          # checks only what this fork has written rather than failing
+          # forever on inherited whitespace.
+          ours="oled cmd/p4wnp1-oled cmd/p4wnp1-oled-sim service/auth service/jsonbridge"
+          bad=$(gofmt -l $ours)
+          if [ -n "$bad" ]; then
+            echo "these files are not gofmt'd:"; echo "$bad"; exit 1
+          fi
+
+  service:
+    name: Service tests, smoke and attack suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      # These run the real binary in an arm64 container, so the runner needs
+      # the QEMU handlers that make a foreign-arch image executable.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Linux-only service tests
+        run: make test-linux
+
+      - name: Smoke test
+        run: make smoke
+
+      - name: Every RPC against the real binary
+        run: make feature-test
+
+      - name: Access control -- every check is an attack that must fail
+        run: make access-control

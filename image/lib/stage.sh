@@ -130,7 +130,14 @@ mkdir -p "$PAYLOAD"
 rsync -a --exclude '.git' \
       "$REPO/dist"    "$PAYLOAD/" 2>/dev/null || die "rsync dist failed"
 mkdir -p "$PAYLOAD/bin"
-for b in P4wnP1_service P4wnP1_cli p4wnp1-hashpw p4wnp1-oled; do
+# The OLED console only ships in the oled variant. Leaving it out of the
+# payload entirely, rather than installing it and not enabling it, is what
+# makes "this image has no OLED support" checkable rather than asserted.
+BINARIES="P4wnP1_service P4wnP1_cli p4wnp1-hashpw"
+if [ "${P4_OLED:-0}" = "1" ]; then
+    BINARIES="$BINARIES p4wnp1-oled"
+fi
+for b in $BINARIES; do
     src="$REPO/image/out/bin/$ARCH/$b"
     [ -f "$src" ] || die "missing built binary $src (run image/build.sh, which cross-compiles first)"
     install -m 0755 "$src" "$PAYLOAD/bin/$b"
@@ -143,7 +150,7 @@ install -m 0755 "$REPO/image/lib/customize.sh" "$PAYLOAD/customize.sh"
 # 4. run the in-chroot customisation
 # --------------------------------------------------------------------------
 log "entering chroot to customise ($ARCH)"
-chroot "$MNT" /bin/bash -c "P4_ARCH='$ARCH' /tmp/p4wnp1-payload/customize.sh" \
+chroot "$MNT" /bin/bash -c "P4_ARCH='$ARCH' P4_OLED='${P4_OLED:-0}' /tmp/p4wnp1-payload/customize.sh" \
     || die "in-chroot customisation failed"
 
 # --------------------------------------------------------------------------

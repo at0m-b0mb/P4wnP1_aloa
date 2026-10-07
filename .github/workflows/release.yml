@@ -1,0 +1,170 @@
+# Build the flashable images on GitHub's machines and publish a release.
+#
+# Manual only. Four images take a while and nobody wants them on every
+# commit; CI (ci.yml) covers each push.
+#
+# The four builds run as a MATRIX rather than in sequence. Partly for
+# wall-clock -- each one decompresses a 2.7GB base image, grows it, runs apt
+# inside a chroot under QEMU emulation and then xz-compresses the result --
+# and partly for disk: a hosted runner has about 14GB free, and one build
+# needs most of it. Four in one job would not fit.
+name: Release images
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag, e.g. v0.4.0'
+        required: true
+        type: string
+      draft:
+        description: 'Create the release as a draft'
+        required: false
+        default: true
+        type: boolean
+      prerelease:
+        description: 'Mark as a pre-release'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.arch }} / ${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [armhf, arm64]
+        variant: [plain, oled]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # A hosted runner ships with Android SDKs, .NET, GHC and a large Docker
+      # cache that together occupy tens of gigabytes. The build needs the
+      # space far more than this job needs any of them.
+      - name: Free up disk
+        run: |
+          echo "before:"; df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune -af || true
+          sudo apt-get clean
+          echo "after:"; df -h / | tail -1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,arm
+
+      - name: Build and verify the image
+        env:
+          P4_VERSION: ${{ inputs.version }}
+        run: |
+          ./image/build.sh \
+            --arch "${{ matrix.arch }}" \
+            --variant "${{ matrix.variant }}"
+
+      # Named per matrix cell so the collecting job can pick them all up.
+      - name: Upload the image
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.arch }}-${{ matrix.variant }}
+          path: |
+            image/out/*.img.xz
+            image/out/*.img.xz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect every image
+        uses: actions/download-artifact@v4
+        with:
+          pattern: image-*
+          merge-multiple: true
+          path: dist-images
+
+      # A release that silently shipped three of four images would be worse
+      # than a failed one, and a checksum that does not match its file is
+      # worse still. Both are cheap to check and neither is obvious by eye.
+      - name: Check the set is complete and the checksums match
+        run: |
+          cd dist-images
+          ls -la
+          missing=0
+          for arch in armhf arm64; do
+            for suffix in "" "-oled"; do
+              f="P4wnP1-ALOA-${{ inputs.version }}${suffix}-${arch}.img.xz"
+              if [ ! -f "$f" ]; then
+                echo "MISSING: $f"; missing=1
+              fi
+            done
+          done
+          [ "$missing" -eq 0 ] || { echo "the image set is incomplete"; exit 1; }
+          # Recompute rather than trust the .sha256 that travelled with it.
+          for f in *.img.xz; do
+            want=$(cut -d' ' -f1 < "$f.sha256")
+            got=$(sha256sum "$f" | cut -d' ' -f1)
+            if [ "$want" != "$got" ]; then
+              echo "CHECKSUM MISMATCH for $f"; echo "  recorded: $want"; echo "  actual:   $got"
+              exit 1
+            fi
+            echo "ok  $f  $got"
+          done
+
+      - name: Write the release notes
+        run: |
+          {
+            echo "Flashable images for both architectures, in two variants."
+            echo
+            echo "| Image | Boards | OLED |"
+            echo "|---|---|---|"
+            echo "| \`P4wnP1-ALOA-${{ inputs.version }}-armhf.img.xz\` | Pi Zero, **Pi Zero W**, Pi 1 | no |"
+            echo "| \`P4wnP1-ALOA-${{ inputs.version }}-arm64.img.xz\` | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 | no |"
+            echo "| \`P4wnP1-ALOA-${{ inputs.version }}-oled-armhf.img.xz\` | Pi Zero, **Pi Zero W**, Pi 1 | yes |"
+            echo "| \`P4wnP1-ALOA-${{ inputs.version }}-oled-arm64.img.xz\` | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 | yes |"
+            echo
+            echo "The \`-oled\` images carry the on-device console for the Waveshare 1.3inch"
+            echo "OLED HAT and enable SPI. The plain images are verified to contain **no**"
+            echo "OLED binary, unit or SPI line, so the difference is a property of the"
+            echo "artifact rather than of its filename."
+            echo
+            echo '```'
+            cd dist-images && sha256sum *.img.xz
+            echo '```'
+            echo
+            echo "Built by GitHub Actions from \`${GITHUB_SHA}\`. Every image was mounted and"
+            echo "inspected before upload, and the checksums above were recomputed from the"
+            echo "uploaded files rather than copied from the build."
+            echo
+            echo "**Before you flash**, set a username and password in Raspberry Pi Imager:"
+            echo "the image ships no usable account."
+          } > NOTES.md
+          cat NOTES.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.version }}" \
+            --title "${{ inputs.version }}" \
+            --notes-file NOTES.md \
+            ${{ inputs.draft && '--draft' || '' }} \
+            ${{ inputs.prerelease && '--prerelease' || '' }} \
+            dist-images/*.img.xz dist-images/*.img.xz.sha256

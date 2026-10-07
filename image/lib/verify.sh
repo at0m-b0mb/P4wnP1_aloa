@@ -73,7 +73,6 @@ check() {
 check /usr/local/bin/P4wnP1_service
 check /usr/local/bin/P4wnP1_cli
 check /usr/local/bin/p4wnp1-hashpw
-check /usr/local/bin/p4wnp1-oled
 check /usr/local/P4wnP1/keymaps
 check /usr/local/P4wnP1/HIDScripts
 check /usr/local/P4wnP1/www/app/index.html
@@ -85,16 +84,41 @@ check /etc/systemd/system/P4wnP1.service
 check /etc/systemd/system/p4wnp1-firstboot.service
 check /etc/systemd/system/multi-user.target.wants/P4wnP1.service
 check /etc/systemd/system/multi-user.target.wants/p4wnp1-firstboot.service
-check /etc/systemd/system/p4wnp1-oled.service
-check /etc/systemd/system/multi-user.target.wants/p4wnp1-oled.service
 
-# SPI, without which a correctly wired OLED HAT stays dark. Checked here
-# rather than trusted, because the symptom is a blank panel and the first
-# thing anyone blames is their soldering.
-if grep -q '^dtparam=spi=on' "$MNT/boot/firmware/config.txt"; then
-    ok "config.txt enables SPI for the OLED HAT"
+# The two variants must be genuinely different artifacts, not one image with
+# a different filename. So each is checked for what it should have AND for
+# what it should not: the plain image is verified to contain no OLED binary,
+# no unit and no SPI line, which is what makes "this build has no OLED
+# support" a fact about the file rather than a claim in its description.
+absent() {
+    if [ -e "$MNT$1" ] || [ -L "$MNT$1" ]; then
+        printf '\033[1;31m[verify:FAIL]\033[0m should NOT be in this variant: %s\n' "$1" >&2; fail=1
+    else
+        ok "absent, as this variant requires: $1"
+    fi
+}
+
+if [ "${P4_OLED:-0}" = "1" ]; then
+    check /usr/local/bin/p4wnp1-oled
+    check /etc/systemd/system/p4wnp1-oled.service
+    check /etc/systemd/system/multi-user.target.wants/p4wnp1-oled.service
+    # SPI, without which a correctly wired OLED HAT stays dark. Checked here
+    # rather than trusted, because the symptom is a blank panel and the first
+    # thing anyone blames is their soldering.
+    if grep -q '^dtparam=spi=on' "$MNT/boot/firmware/config.txt"; then
+        ok "config.txt enables SPI for the OLED HAT"
+    else
+        printf '\033[1;31m[verify:FAIL]\033[0m config.txt does not enable SPI; an OLED HAT will not light\n' >&2; fail=1
+    fi
 else
-    printf '\033[1;31m[verify:FAIL]\033[0m config.txt does not enable SPI; an OLED HAT will not light\n' >&2; fail=1
+    absent /usr/local/bin/p4wnp1-oled
+    absent /etc/systemd/system/p4wnp1-oled.service
+    absent /etc/systemd/system/multi-user.target.wants/p4wnp1-oled.service
+    if grep -q '^dtparam=spi=on' "$MNT/boot/firmware/config.txt"; then
+        printf '\033[1;31m[verify:FAIL]\033[0m the plain variant enables SPI; that belongs to the oled build\n' >&2; fail=1
+    else
+        ok "SPI left off, as the plain variant requires"
+    fi
 fi
 
 # Boot configuration -- without these the entire USB feature set is dead.

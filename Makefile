@@ -3,7 +3,7 @@ PATH := /usr/local/go/bin:$(PATH)
 
 .PHONY: all help compile build-armv6 build-service-armv6 build-cli-armv6 build-hashpw-armv6 \
         build-arm64 build-service-arm64 build-cli-arm64 build-hashpw-arm64 \
-        image image-armhf image-arm64 contrast smoke feature-test access-control check-quoting oled-sim oled-shots verify check-js check-rpc check-render mock dep install installkali remove lint test
+        image image-plain image-oled image-armhf image-arm64 contrast smoke feature-test access-control check-quoting oled-sim oled-shots verify check-js check-rpc check-render mock dep install installkali remove lint test
 
 all: compile
 
@@ -17,8 +17,10 @@ help:
 	@echo "                     (legacy; use build_support/build.sh for the GopherJS web app)"
 	@echo "  make dep           Install Go toolchain helpers (gopherjs)"
 	@echo "  make build-arm64   Same, for Pi Zero 2 W / 3 / 4 / 5 (linux/arm64)."
-	@echo "  make image         Build flashable .img.xz for BOTH architectures"
-	@echo "                     (see image/README.md). Needs Docker."
+	@echo "  make image         Build flashable .img.xz: both architectures x both"
+	@echo "                     variants (plain and oled). Needs Docker."
+	@echo "  make image-plain   Only the images without OLED support"
+	@echo "  make image-oled    Only the images with the OLED console"
 	@echo "  make contrast      Check the web console palette against WCAG AA"
 	@echo "  make smoke         Run the service in a container and verify it works"
 	@echo "  make feature-test  Exercise all 83 RPCs against the real binary and"
@@ -77,7 +79,16 @@ build-arm64: build-service-arm64 build-cli-arm64 build-hashpw-arm64
 	@ls -la build/arm64/
 
 image:
-	./image/build.sh --arch all
+	./image/build.sh --arch all --variant both
+
+# The two product variants, separately. The plain build is verified to contain
+# NO OLED binary, unit or SPI line, so the difference is a property of the
+# artifact rather than of its filename.
+image-plain:
+	./image/build.sh --arch all --variant plain
+
+image-oled:
+	./image/build.sh --arch all --variant oled
 
 image-armhf:
 	./image/build.sh --arch armhf

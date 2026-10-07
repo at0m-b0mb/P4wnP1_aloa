@@ -224,7 +224,9 @@ Everything cross-compiles from macOS or Linux. No Pi required to build.
 ```bash
 make build-armv6     # binaries for Pi Zero / Zero W
 make build-arm64     # binaries for Pi Zero 2 W / 3 / 4 / 5
-make image           # flashable .img.xz for both, via Docker
+make image           # flashable .img.xz: both architectures x both variants
+make image-plain     # only the images WITHOUT OLED support
+make image-oled      # only the images WITH the OLED console
 make test            # Go unit tests
 make verify          # every gate below, in order, cheapest failure first
 make smoke           # run the service in a container, end to end (28 checks)

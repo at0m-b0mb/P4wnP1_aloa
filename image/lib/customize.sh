@@ -73,12 +73,15 @@ done
 # 2. P4wnP1 payload
 # ---------------------------------------------------------------------------
 log "installing binaries -> /usr/local/bin"
-# Keep this list in step with image/build.sh and image/lib/stage.sh. It was
-# the one of the three that did not get p4wnp1-oled, so the binary was built,
-# staged, and then never installed -- and nothing noticed, because the image
-# verifier did not look for it either.
-for b in P4wnP1_service P4wnP1_cli p4wnp1-hashpw p4wnp1-oled; do
-    install -m 0755 "$PAYLOAD/bin/$b" "/usr/local/bin/$b"
+# Install whatever stage.sh put in the payload, rather than naming the
+# binaries again here. This file kept its own list and was the one of three
+# that did not get p4wnp1-oled, so the binary was built, staged, and then
+# dropped on the floor -- and nothing noticed, because the verifier did not
+# look for it either. One list, in one place, cannot drift from itself.
+for src in "$PAYLOAD"/bin/*; do
+    [ -f "$src" ] || continue
+    install -m 0755 "$src" "/usr/local/bin/$(basename "$src")"
+    log "  $(basename "$src")"
 done
 
 log "installing data -> $P4ROOT"
@@ -115,12 +118,10 @@ fi
 log "installing systemd units"
 install -m 0644 "$PAYLOAD/dist/P4wnP1.service"           /etc/systemd/system/P4wnP1.service
 install -m 0644 "$PAYLOAD/dist/p4wnp1-firstboot.service" /etc/systemd/system/p4wnp1-firstboot.service
-# The OLED console. Unconditional, like the other two: a guarded install that
-# silently does nothing when the path is wrong is how this shipped missing the
-# first time. On a board with no HAT the daemon exits 0 after one journal
-# line, so enabling it always costs nothing and means fitting a HAT later
-# needs no reconfiguration.
-install -m 0644 "$PAYLOAD/dist/p4wnp1-oled.service"      /etc/systemd/system/p4wnp1-oled.service
+# The OLED console, in the oled variant only.
+if [ "${P4_OLED:-0}" = "1" ]; then
+    install -m 0644 "$PAYLOAD/dist/p4wnp1-oled.service"  /etc/systemd/system/p4wnp1-oled.service
+fi
 
 enable_unit() {
     local unit="$1" target="${2:-multi-user.target}"
@@ -134,7 +135,9 @@ enable_unit() {
 }
 enable_unit P4wnP1.service
 enable_unit p4wnp1-firstboot.service
-enable_unit p4wnp1-oled.service
+if [ "${P4_OLED:-0}" = "1" ]; then
+    enable_unit p4wnp1-oled.service
+fi
 
 for u in ssh.service haveged.service; do
     SYSTEMD_OFFLINE=1 systemctl enable "$u" >/dev/null 2>&1 && log "  enabled $u" || warn "  could not enable $u"
@@ -226,7 +229,7 @@ chmod 0440 "/etc/sudoers.d/010_${SSH_USER}-nopasswd"
 # ---------------------------------------------------------------------------
 BOOTCFG=/boot/firmware/config.txt
 [ -f "$BOOTCFG" ] || BOOTCFG=/boot/config.txt
-if [ -f "$BOOTCFG" ] && ! grep -q '^dtparam=spi=on' "$BOOTCFG"; then
+if [ "${P4_OLED:-0}" = "1" ] && [ -f "$BOOTCFG" ] && ! grep -q '^dtparam=spi=on' "$BOOTCFG"; then
     log "enabling SPI for the OLED HAT"
     printf '\n# P4wnP1: SPI for the Waveshare 1.3inch OLED HAT\ndtparam=spi=on\n' >> "$BOOTCFG"
 fi

@@ -33,6 +33,12 @@ SSH_USER=p4wnp1
 # first boot issue a per-device password".
 SSH_PASS=""
 WIFI_COUNTRY=US
+# Which image variants to build. "oled" ships the OLED console and enables
+# SPI; "plain" ships neither. They are separate images rather than one that
+# detects a HAT, because they are sold as different products -- and the plain
+# build is verified to contain NO OLED support, so the distinction is a fact
+# about the artifact rather than a line in its description.
+VARIANTS="plain oled"
 BUILDER_TAG=p4wnp1-imgbuilder:1
 
 # These live inside the repo on purpose: the builder container bind-mounts the
@@ -60,6 +66,9 @@ Options:
                       and first boot issues a random per-device password.
   --wifi-country CC   regulatory domain            (default $WIFI_COUNTRY)
   --pios-date DATE    Raspberry Pi OS release      (default $PIOS_DATE)
+  --variant V         which images to build: plain, oled, or both
+                      (default: both). "oled" adds the OLED console and
+                      enables SPI; "plain" contains neither.
 EOF
 }
 
@@ -73,6 +82,13 @@ while [ $# -gt 0 ]; do
         --ssh-pass)      SSH_PASS="$2"; shift 2 ;;
         --wifi-country)  WIFI_COUNTRY="$2"; shift 2 ;;
         --pios-date)     PIOS_DATE="$2"; shift 2 ;;
+        --variant)
+            case "$2" in
+                plain|oled) VARIANTS="$2" ;;
+                both)       VARIANTS="plain oled" ;;
+                *) die "unknown --variant '$2' (want plain, oled or both)" ;;
+            esac
+            shift 2 ;;
         -h|--help)       usage; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -151,9 +167,13 @@ for ARCH in $ARCHES; do
     fi
     info "base image: $RAW ($(du -h "$RAW" | cut -f1))"
 
-    OUT_IMG="$WORK/P4wnP1-ALOA-${VERSION}-${ARCH}.img"
+  for VARIANT in $VARIANTS; do
+    SUFFIX=""
+    P4_OLED=0
+    if [ "$VARIANT" = oled ]; then SUFFIX="-oled"; P4_OLED=1; fi
+    OUT_IMG="$WORK/P4wnP1-ALOA-${VERSION}${SUFFIX}-${ARCH}.img"
 
-    c "[$ARCH] Building image (privileged container)"
+    c "[$ARCH/$VARIANT] Building image (privileged container)"
     docker run --rm --privileged \
         -v /dev:/dev \
         -v "$REPO_ROOT:/repo" \
@@ -166,8 +186,9 @@ for ARCH in $ARCHES; do
         -e P4_SSH_USER="$SSH_USER" \
         -e P4_SSH_PASS="$SSH_PASS" \
         -e P4_WIFI_COUNTRY="$WIFI_COUNTRY" \
+        -e P4_OLED="$P4_OLED" \
         "$BUILDER_TAG" /repo/image/lib/stage.sh \
-        || die "image build failed for $ARCH"
+        || die "image build failed for $ARCH/$VARIANT"
 
     [ -f "$OUT_IMG" ] || die "stage.sh reported success but $OUT_IMG is missing"
 
@@ -182,16 +203,17 @@ for ARCH in $ARCHES; do
     # `sync` on the host first, then mount the image in a container and check
     # it really contains what it should.
     sync 2>/dev/null || true
-    c "[$ARCH] Verifying the built image"
+    c "[$ARCH/$VARIANT] Verifying the built image"
     docker run --rm --privileged \
         -v /dev:/dev \
         -v "$REPO_ROOT:/repo" \
         -e P4_ARCH="$ARCH" \
+        -e P4_OLED="$P4_OLED" \
         "$BUILDER_TAG" /repo/image/lib/verify.sh "/repo/image/out/$(basename "$OUT_IMG")" \
         || die "the built image failed verification; not publishing it"
 
     if [ "$COMPRESS" = "1" ]; then
-        c "[$ARCH] Compressing"
+        c "[$ARCH/$VARIANT] Compressing"
         rm -f "$OUT_IMG.xz"
         xz -T0 -6 "$OUT_IMG" || die "xz failed"
         OUT_FINAL="$OUT_IMG.xz"
@@ -203,9 +225,10 @@ for ARCH in $ARCHES; do
       { sha256sum "$(basename "$OUT_FINAL")" 2>/dev/null || shasum -a 256 "$(basename "$OUT_FINAL")"; } \
       > "$(basename "$OUT_FINAL").sha256" )
 
-    c "[$ARCH] DONE"
+    c "[$ARCH/$VARIANT] DONE"
     info "$OUT_FINAL ($(du -h "$OUT_FINAL" | cut -f1))"
     info "$(cat "$OUT_FINAL.sha256")"
+  done
 done
 
 c "All builds complete"
