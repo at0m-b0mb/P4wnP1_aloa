@@ -1,8 +1,9 @@
 # Known issues
 
-Last refreshed: 2026-10-06, after a 96-agent audit of the codebase in which
-every high-severity finding was independently re-checked by a second reviewer
-before being accepted.
+Last refreshed: 2026-10-07, for v0.3.0. Two audit passes (96 agents, then 57)
+in which every high-severity finding was independently re-checked by a second
+reviewer before being accepted, plus a pass driving the console by hand against
+the real service, which is where the worst bug in this list was found.
 
 Severity: **Critical** — boot-blocking or exploitable. **High** — blocks a
 common workflow. **Medium** — confusing or stale. **Low** — cosmetic.
@@ -98,6 +99,84 @@ dropped-argument format strings and three unreachable returns.
 
 Build tags gated the core service to 32-bit ARM. They were incidental, not a
 real dependency. Pi Zero 2 W / 3 / 4 / 5 now build.
+
+---
+
+## Fixed in v0.3.0
+
+### Critical — the device could not authenticate to itself
+
+P4wnP1 drives itself through `P4wnP1_cli`. `servicestart.sh` — the fallback that
+brings up the USB gadget, the DHCP servers and the WiFi access point when a
+startup master template fails — is a shell script full of CLI calls, and so is
+every user-written trigger action. When the API began requiring a bearer token
+in v0.2.0, every one of them started failing:
+
+```
+servicestart.sh error: Error setting LED blink count 2:
+  rpc error: code = Unauthenticated desc = missing authorization metadata
+```
+
+So a device whose startup template failed came up with **no network at all**,
+and the fallback meant to rescue it was itself the broken part. There is no
+password on disk for a script to log in with, and adding one would have been
+worse.
+
+Fixed by having the service log in as itself: it mints an **ordinary** session,
+the same kind `auth login` returns, and writes that token to
+`/run/p4wnp1/local.token` (mode `0600`, tmpfs). No bypass in the token
+validator, no second credential type — a local script is an authenticated
+client like any other, revocable and expiring like any other.
+`KeepLocalTokenFresh` re-provisions at half the session TTL, because a trigger
+can fire days after the last CLI call and because a password change revokes
+every session including this one. `Store.SetPassword` now refuses the reserved
+username so the session list cannot be made to lie about who called.
+
+This escaped every gate because the console authenticates normally and looked
+perfect throughout, and because nothing in the suite had ever read the
+service's own log. Three smoke checks now do, all negative-tested by
+reintroducing the bug.
+
+### Medium — `StoreDeployedWifiSettings` marshalled a nil message
+
+On any board without WiFi it answered `proto: Marshal called with nil`, because
+the current-settings helper returns nil there and the result went straight into
+`StoreWifiSettings`. It now reports `codes.Unavailable` with the reason. Found
+by `make feature-test`, which was written for exactly this class of bug.
+
+### Medium — USB unavailability was reported as an internal server error
+
+Every USB RPC answered HTTP 500 on a board with no UDC bound, claiming a server
+fault for an ordinary "this hardware is not here" condition — while the
+equivalent WiFi condition correctly answered 503. `ParseGadgetState` now wraps
+the `ErrUsbNotUsable` sentinel and the RPC layer maps it to `codes.Unavailable`.
+Genuine bad requests still answer 400.
+
+### Medium — the console could not name two of its own shipped reflexes
+
+Two of the four trigger actions the device deploys at boot use the
+`deploySettingsTemplate` action, which was missing from the console's action
+list, so the Reflexes table described them as **"unrecognised"**. An operator
+could see that something was armed at boot but not what it would do. The
+builder can now create them too.
+
+### Low — error toasts outlived the page that raised them
+
+Error toasts live 12–20 seconds so there is time to read the hint and press the
+action button. That is right while you stay put and wrong the moment you
+navigate: "This device has no usable WiFi" from Radio sat on top of the
+Keystrokes editor, covering the Run button. Toasts now clear on navigation, and
+identical ones collapse instead of stacking.
+
+### Low — the sign-in screen carried a typography colophon
+
+A paragraph about typeface and palette choices, on the sign-in screen of a
+red-team device. Removed.
+
+### Low — the deployed-reflex table was headed with a Go type name
+
+It read `DEPLOYED -- DEPLOYEDTRIGGERACTIONS`. That suffix is the set's internal
+identifier.
 
 ---
 

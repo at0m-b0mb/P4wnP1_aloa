@@ -34,25 +34,25 @@
 
 ## Download
 
-Built from `v0.2.1`, on **Raspberry Pi OS Lite (Debian 13 "trixie"), 2026-09-15**, kernel
+Built from `v0.3.0`, on **Raspberry Pi OS Lite (Debian 13 "trixie"), 2026-09-15**, kernel
 `6.18.50+rpt-rpi`.
 
 | Image | Size | Boards |
 |---|---|---|
-| `P4wnP1-ALOA-v0.2.1-armhf.img.xz` | 640M | Pi Zero, **Pi Zero W**, Pi 1 |
-| `P4wnP1-ALOA-v0.2.1-arm64.img.xz` | 592M | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 |
+| `P4wnP1-ALOA-v0.3.0-armhf.img.xz` | 640M | Pi Zero, **Pi Zero W**, Pi 1 |
+| `P4wnP1-ALOA-v0.3.0-arm64.img.xz` | 592M | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 |
 
 ```
-armhf  sha256  08723035d161d6b50e5db30b1272b859784d9589aaa5e576c9b0f140157dd426
-arm64  sha256  72865a77fa0fa9f392f107a308451c4da80010dc78b18af77547377ab1d35d82
+armhf  sha256  ebeeab79b044b7a6ecb36f43b0293f1aea2a9434020aa1e2bb926bef6053edfd
+arm64  sha256  70b0bd84b000e8aa77399ab4e3553b0abb614a8ef8e0c21fe6ee95a934f03fa0
 ```
 
 Verify, flash, and boot with the cable in the **data** port (the inner one on a Zero):
 
 ```bash
-sha256sum -c P4wnP1-ALOA-v0.2.1-armhf.img.xz.sha256
-xz -d P4wnP1-ALOA-v0.2.1-armhf.img.xz
-sudo dd if=P4wnP1-ALOA-v0.2.1-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
+sha256sum -c P4wnP1-ALOA-v0.3.0-armhf.img.xz.sha256
+xz -d P4wnP1-ALOA-v0.3.0-armhf.img.xz
+sudo dd if=P4wnP1-ALOA-v0.3.0-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
 Then, over the USB ethernet link the device brings up:
@@ -165,13 +165,20 @@ make build-armv6     # binaries for Pi Zero / Zero W
 make build-arm64     # binaries for Pi Zero 2 W / 3 / 4 / 5
 make image           # flashable .img.xz for both, via Docker
 make test            # Go unit tests
-make smoke           # run the service in a container, end to end (24 checks)
+make verify          # every gate below, in order, cheapest failure first
+make smoke           # run the service in a container, end to end (28 checks)
+make feature-test    # call all 83 RPCs against the real binary (85 checks)
 make check-render    # render every console view in jsdom (11 checks)
 make check-rpc       # console RPC payloads vs the .proto
 make check-js        # parse the console JavaScript
-make contrast        # WCAG check on the console palette (21 pairings)
+make contrast        # WCAG check on the console palette (21 pairings x 2 themes)
 make mock            # serve the console against a mock device, no Pi needed
 ```
+
+To use the console yourself without a Pi, `./tools/live-console.sh` serves it from the **real
+service binary** in a container on `http://127.0.0.1:8000/app/`. Hardware-backed features report
+that they are unavailable, which is correct there; everything else is live. Prefer it to
+`make mock`: the mock has twice disagreed with the service and hidden a bug until it shipped.
 
 Image building is documented in **[image/README.md](image/README.md)**. Every built image is
 **mounted and verified before it is published**: MBR signature, both partitions, that the
@@ -205,6 +212,14 @@ This is a tool for attacking systems, which makes its own security worth stating
   pages.
 - **Payload text cannot become code.** The DuckyScript converter escapes its output so a crafted
   payload cannot close the generated JavaScript literal and run as root.
+- **The device's own scripts hold an ordinary credential, not a back door.** `servicestart.sh`
+  and your trigger actions drive the box through `P4wnP1_cli`, so they need to authenticate. At
+  startup the service logs in as itself and writes that session token to
+  `/run/p4wnp1/local.token` — mode `0600`, on a tmpfs, gone at power-off. It is the same kind of
+  token `auth login` returns: it appears in the session list, expires on the normal schedule, and
+  revoking all sessions revokes it too. There is no bypass in the token validator and no second
+  credential type. Root on the device can already read the password hashes and every stored WiFi
+  key, so a root-only file grants root nothing it could not already take.
 
 **Still open:** there is no TLS. The console is served over plain HTTP, so a bearer token rides
 in cleartext over whatever link you reach it on. On the device's own WPA2 access point or a USB
@@ -220,7 +235,7 @@ Being specific about this matters more than the feature list.
 **No physical Raspberry Pi was used at any point.**
 
 *Verified by automation.* `make smoke` runs the **real service binary against the real data
-tree in a container** and checks 24 things end to end — all passing:
+tree in a container** and checks 28 things end to end — all passing:
 
 ```
 PASS  firstboot bootstrap writes auth.json 0600      PASS  login returns a token (43 chars)
@@ -231,10 +246,21 @@ PASS  HTTP listener up                               PASS  changepw without a to
 PASS  no panic in the log                            PASS  cross-origin is refused even with a token
 PASS  GET / redirects to the console                 PASS  unimplemented RPC returns 501, not a corpse
 PASS  the console is served                          PASS  a hostile read length is rejected
-PASS  console JS is served                           PASS  service still alive after hostile input
-PASS  console favicon is served                      PASS  clean shutdown on SIGTERM
-PASS  unauthenticated API is refused
+PASS  console JS is served (3 files)                 PASS  USB settings use proto field names
+PASS  console CSS is served                          PASS  the device's own scripts can authenticate
+PASS  console favicon is served                      PASS  the local script credential exists, root-only
+PASS  unauthenticated API is refused                 PASS  P4wnP1_cli works with no interactive login
+                                                     PASS  service still alive after hostile input
+                                                     PASS  clean shutdown on SIGTERM
 ```
+
+`make feature-test` goes a layer deeper and **calls every one of the 83 RPCs** against that same
+binary, sorting the answers into passed, correctly-unavailable-without-hardware, and failed.
+On a machine with no USB gadget and no WiFi: **47 passed, 32 correctly unavailable, 6 skipped,
+0 failed.** The middle class is the point — it matches each failure against the exact error text
+that condition should produce, so an RPC that starts failing for a *new* reason is a failure, not
+a shrug. It found `StoreDeployedWifiSettings` answering `proto: Marshal called with nil` on every
+board without WiFi.
 
 That test exists because "it compiles" and "the unit tests pass" were both true the whole time
 the service was panicking on every cold boot. The panic was on a success path, inside a
@@ -248,11 +274,21 @@ that produced five real bugs, one of which erased the boot configuration);
 `make check-render` renders all seven views in jsdom (`node --check` only parses, and
 happily accepted a helper that called itself and removed every table in the console).
 
-Also verified: both architectures cross-compile and `go vet` is clean for both; 81 test
+Also verified: both architectures cross-compile and `go vet` is clean for both; 93 test
 functions across the auth, JSON-bridge, PSK-guard and DuckyScript packages pass on linux/arm64;
 images build from official Raspberry Pi OS releases and pass the mount-and-inspect check above;
-the console was exercised in a browser against a mock implementing the real API shapes — sign-in,
-all six views, the live event stream, both themes and a phone viewport — with no console errors.
+and the console was driven **in a real browser against the real service binary** — sign-in, all
+seven views, the live event stream, adding a reflex and reading it back off the API, both themes,
+and a 375px phone viewport with no sideways page scroll.
+
+That last one is not a formality. Driving it by hand is what found that the device could not
+authenticate to *itself*: `servicestart.sh` — the fallback that brings up the USB gadget, the
+DHCP servers and the access point when a startup template fails — is a shell script full of
+`P4wnP1_cli` calls, and every one of them had been failing `Unauthenticated` since the API
+started requiring a token. A device whose template failed came up with no network at all, and the
+fallback meant to rescue it was the broken part. The console looked perfect throughout, because
+the console authenticates normally. Nothing in the test suite had ever read the service's own
+log; three checks now do.
 
 *Not verified at all:* that an image boots. That USB gadget mode initialises on real silicon and
 a host enumerates the functions. That keystroke injection types correctly into a real machine.

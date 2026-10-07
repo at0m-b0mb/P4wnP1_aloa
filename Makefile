@@ -160,8 +160,14 @@ lint:
 	          image/build.sh image/lib/stage.sh image/lib/customize.sh image/lib/verify.sh \
 	          tools/smoke-test.sh tools/check-js.sh tools/check-render.sh \
 	          tools/feature-test.sh
-	@command -v golangci-lint >/dev/null || { echo "golangci-lint not installed; skipping go lint"; exit 0; }
-	golangci-lint run ./...
+	@# One shell, not two: each recipe line gets its own shell, so an `exit 0`
+	@# on the guard line ended only that shell and golangci-lint ran anyway --
+	@# which made `make lint` fail on every machine that does not have it.
+	@if command -v golangci-lint >/dev/null; then \
+	    golangci-lint run ./...; \
+	else \
+	    echo "golangci-lint not installed; skipping go lint"; \
+	fi
 	./tools/check-js.sh
 	python3 tools/check-rpc-shapes.py
 	./tools/check-render.sh
