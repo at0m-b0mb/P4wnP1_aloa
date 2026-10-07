@@ -66,13 +66,13 @@ func (a *DefaultAgent) RequestAuthorization(device dbus.ObjectPath) *dbus.Error 
 }
 
 func (a *DefaultAgent) AuthorizeService(device dbus.ObjectPath, uuid string) *dbus.Error {
-	devStr,_ := dbusHelper.DBusDevPathToHwAddr(device) // ignore error
+	devStr, _ := dbusHelper.DBusDevPathToHwAddr(device) // ignore error
 	/*
-	// alternate way to retrieve the device address (and call functions of the device)
-	if d,e := toolz.Device(device); e == nil {
-		addr,_ := d.GetAddress()
-		fmt.Println(addr)
-	}
+		// alternate way to retrieve the device address (and call functions of the device)
+		if d,e := toolz.Device(device); e == nil {
+			addr,_ := d.GetAddress()
+			fmt.Println(addr)
+		}
 	*/
 
 	fmt.Printf("DefaultAgent authorize service called for UUID: %s from %s\n", uuid, devStr)
@@ -84,13 +84,13 @@ func (a *DefaultAgent) AuthorizeService(device dbus.ObjectPath, uuid string) *db
 		fmt.Println("... rejecting")
 		return toolz.ErrRejected
 	}
-	return toolz.ErrRejected
 }
 
 func (a *DefaultAgent) Cancel() *dbus.Error {
 	fmt.Println("DefaultAgent cancel called")
 	return nil
 }
+
 // ------------ END OF AGENT INTERFACE IMPLEMENTATION ------------
 
 func (a *DefaultAgent) Start(cap toolz.AgentCapability) (err error) {
@@ -102,12 +102,11 @@ func (a *DefaultAgent) Stop() (err error) {
 	return toolz.UnregisterAgent(a.RegistrationPath())
 }
 
-
-func (a *DefaultAgent) SetPIN(pin string)  {
+func (a *DefaultAgent) SetPIN(pin string) {
 	a.pincode = pin
 }
 
-func (a *DefaultAgent) GetPIN() (pin string)  {
+func (a *DefaultAgent) GetPIN() (pin string) {
 	return a.pincode
 }
 
