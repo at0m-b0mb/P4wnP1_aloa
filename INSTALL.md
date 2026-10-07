@@ -1,519 +1,216 @@
 # Installing P4wnP1 A.L.O.A.
 
-Three install paths for a Raspberry Pi Zero W. Pick the one that matches what you have and what you trust.
+Three routes, easiest first:
 
-|  | Path | Best for | Effort |
-|---|---|---|---|
-| 🟢 | **[Path A — Raspberry Pi OS Lite + `install.sh`](#path-a--raspberry-pi-os-lite--installsh-recommended)** | New installs in 2026; modern kernel; layered Kali tools optional. | ~15 min |
-| 🟡 | [Path B — Official Kali prebuilt image](#path-b--official-kali-prebuilt-image) | Want Kali tools out-of-the-box, accept older P4wnP1 baseline. | ~10 min |
-| ⚪ | [Path C — Manual install on existing OS](#path-c--manual-install-on-existing-os) | You already have a Pi running something else. | ~25 min |
+1. **[Flash a release image](#1-flash-a-release-image)** — nothing to build.
+2. **[Install onto an existing Raspberry Pi OS](#2-install-onto-an-existing-raspberry-pi-os)** — keep your current system.
+3. **[Build an image yourself](#3-build-an-image-yourself)** — from source, reproducibly.
 
-> 📌 **What changed.** Kali still ships a P4wnP1 image (`kali-linux-2026.1-raspberry-pi-zero-w-p4wnp1-aloa-armel.img.xz`), but the P4wnP1 service binary inside it has not been updated since the upstream `v0.1.1-beta` release in 2020 and the default WiFi SSID in that image (`💥🖥💥 Ⓟ➃ⓌⓃ🅟❶`) is known to crash NetworkManager on Linux clients (upstream [#365](https://github.com/RoganDawes/P4wnP1_aloa/issues/365)). **For a fresh build today, Path A — Raspberry Pi OS Lite (Bookworm armhf) + this repo's `install.sh` — is the cleanest option**, with current kernel/firmware, ASCII-only SSID by default, and the [security hardening fixes](KNOWN_ISSUES.md) applied at install time.
-
----
-
-## Hardware checklist
-
-- [ ] **Raspberry Pi Zero W (BCM43430A1)**. The Pi Zero **2** W is *not* supported — different WiFi chip, no Nexmon firmware patches.
-- [ ] **microSD card**, 8 GB minimum, class 10 or better, 16 GB+ recommended.
-- [ ] **microSD card reader** on your host machine.
-- [ ] **USB-A male to micro-USB cable** (data-capable, not charge-only) for the target connection.
-- [ ] *(Recommended)* A second micro-USB cable + 5 V supply so the Pi stays powered when detached from a target — required for the connect/disconnect HID workflows.
-- [ ] A laptop / phone with WiFi for the first-boot connection.
+> **None of this has been tested on physical hardware.** See *What is not verified* in the
+> [README](README.md#what-is-not-verified).
 
 ---
 
-## Path A — Raspberry Pi OS Lite + `install.sh` (recommended)
+## 1. Flash a release image
 
-This is the simplest, most modern setup. You flash a clean Raspberry Pi OS Lite image, SSH in, and run a one-line installer that handles everything (apt deps, binaries, systemd units, branding, first-boot credential rotation).
+Download from [Releases](https://github.com/at0m-b0mb/P4wnP1_aloa/releases/latest):
 
-### A.1 Flash Raspberry Pi OS Lite (32-bit / armhf)
+| Image | Boards |
+|---|---|
+| `…-armhf.img.xz` | Pi Zero, Pi Zero W, Pi 1 |
+| `…-arm64.img.xz` | Pi Zero 2 W, Pi 3, Pi 4, Pi 5 |
 
-1. Download **Raspberry Pi OS Lite (32-bit)** from <https://www.raspberrypi.com/software/operating-systems/>.
-
-   The current Bookworm Lite armhf image (verified May 2026) is `2025-05-13-raspios-bookworm-armhf-lite.img.xz` — direct link via <https://downloads.raspberrypi.com/raspios_lite_armhf/images/>.
-
-   > Pick **32-bit Lite**, not 64-bit (the Pi Zero W's ARMv6 CPU doesn't support 64-bit Linux). "Lite" means headless / no desktop. Bookworm is preferred over Trixie for the Pi Zero W today — its kernel 6.1 LTS is supported until December 2026 and is well-tested on the 512 MB Zero W.
-
-2. Flash it with [Raspberry Pi Imager](https://www.raspberrypi.com/software/). In the **gear / advanced settings** before flashing:
-   - **Enable SSH** with a strong password (don't reuse a password you care about — you'll rotate it shortly anyway).
-   - **Set username**: `kp` (or whatever you want — not `pi`).
-   - **Set hostname**: `hackprokp` (or whatever).
-   - **WiFi credentials**: your home network — the Pi needs internet on first boot to apt-install dependencies.
-   - **Locale & timezone**: yours.
-
-3. Boot the Pi. Wait ~30 seconds. Find it on your network:
-   ```sh
-   ping hackprokp.local           # if your network supports mDNS (most do)
-   # or use your router's DHCP lease list to find its IP
-   ```
-
-### A.2 Get the build artefacts onto the Pi
-
-You need the compiled binaries + the repo tree. Two options:
-
-**Option 1 — clone + pre-built binaries (fastest).** If you have a release tarball with `P4wnP1_service`, `P4wnP1_cli`, `webapp.js`, `webapp.js.map`:
-
-```sh
-ssh kp@hackprokp.local
-git clone https://github.com/at0m-b0mb/P4wnP1_aloa ~/P4wnP1_aloa
-# copy your pre-built binaries into ~/P4wnP1_aloa/build/
+```bash
+sha256sum -c P4wnP1-ALOA-<version>-armhf.img.xz.sha256    # verify FIRST
+xz -d P4wnP1-ALOA-<version>-armhf.img.xz
+sudo dd if=P4wnP1-ALOA-<version>-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
-**Option 2 — build from source on a Linux/macOS host first, scp to the Pi.** See [Building from source](#building-from-source) below.
+Raspberry Pi Imager and balenaEtcher both work too, and read `.img.xz` directly.
 
-### A.3 Run the installer
-
-```sh
-ssh kp@hackprokp.local
-cd ~/P4wnP1_aloa
-sudo ./install.sh
-```
-
-The installer will:
-- Install all apt dependencies (`hostapd`, `dnsmasq`, `bluez`, `haveged`, ...).
-- Copy binaries + data into `/usr/local/`.
-- Install both systemd units (`P4wnP1.service` + `p4wnp1-firstboot.service`).
-- Disable conflicting network services.
-- Write your chosen SSID + PSK to `/etc/p4wnp1/initial.conf`.
-- Reboot.
-
-To customise the branding at install time:
-
-```sh
-sudo ./install.sh --ssid 'HackProKP-pentest' --psk 'mystrongPSK_2026!'
-sudo ./install.sh --skip-reboot              # if you want to inspect before rebooting
-```
-
-Defaults: SSID `HackProKP`, PSK randomly generated and saved in the credentials file.
-
-### A.4 First boot
-
-On the next boot, `p4wnp1-firstboot.service` does three things:
-
-1. Rotates the **SSH root password** to a random 20-char secret and regenerates SSH host keys.
-2. **Bootstraps the web UI admin account** — generates a random 20-char password, runs it through `p4wnp1-hashpw` to produce a bcrypt hash, and writes it to `/etc/p4wnp1/auth.json` (mode 0600). Without this file the P4wnP1 service rejects every gRPC/HTTP request with HTTP 401, so this step is mandatory.
-3. Writes both plaintext passwords to `/root/INITIAL_CREDENTIALS.txt` (mode 0600) alongside the SSH host fingerprints and the WiFi SSID/PSK chosen at install time.
-
-Connect to your new AP and read the credentials:
-
-```sh
-# Connect to WiFi SSID "HackProKP" (or whatever you chose) with the PSK
-ssh root@172.24.0.1     # use the random root password just generated
-cat /root/INITIAL_CREDENTIALS.txt
-```
-
-`INITIAL_CREDENTIALS.txt` contains, in order:
-
-- SSH root password + SSH host fingerprints
-- Web client admin username (`admin`) + password
-- WiFi SSID + PSK
-- Bluetooth PIN (still on shared default — change in the web UI)
-
-Once you've stored everything in a password manager, shred the file:
-
-```sh
-shred -u /root/INITIAL_CREDENTIALS.txt
-```
-
-Continue to [First boot](#first-boot) for what to do next.
-
-### A.5 Smoke-test after first boot
-
-The repo ships a post-install health-check script. SSH in (using the rotated root password from `INITIAL_CREDENTIALS.txt`) and run:
-
-```sh
-sudo /usr/local/P4wnP1/scripts/p4wnp1-healthcheck.sh
-```
-
-Expected output (abridged):
-
-```
-== 1. Binaries ==
-  ✓ /usr/local/bin/P4wnP1_service (executable)
-  ✓ /usr/local/bin/P4wnP1_cli (executable)
-  ✓ /usr/local/bin/p4wnp1-hashpw (executable)
-
-== 3. systemd units ==
-  ✓ P4wnP1.service (installed)
-  ✓ P4wnP1.service (enabled)
-  ✓ p4wnp1-firstboot.service (installed)
-  ✓ p4wnp1-firstboot.service (enabled)
-  ✓ P4wnP1.service (running)
-
-== 5. Auth store ==
-  ✓ /etc/p4wnp1/auth.json (mode 0600)
-  ✓ /etc/p4wnp1/auth.json contains at least one user
-  ✓ password_hash looks like bcrypt ($2a$/$2b$/$2y$)
-
-== 6. Network listeners ==
-  ✓ gRPC API (tcp/50051 listening)
-  ✓ gRPC-web + HTTP (tcp/8000 listening)
-  ✓ SSH (tcp/22 listening)
-
-== 7. HTTP auth endpoint smoke test ==
-  ✓ GET /api/auth/health -> 200
-  ✓ /api/auth/health body looks healthy
-
-Summary: 17 pass / 0 warn / 0 fail
-```
-
-For a deeper test that actually performs a login round-trip against `/api/auth/login` using the admin password from `INITIAL_CREDENTIALS.txt`:
-
-```sh
-sudo /usr/local/P4wnP1/scripts/p4wnp1-healthcheck.sh --login-test
-```
-
-If any check fails, the script exits 1 and prints `journalctl -u P4wnP1.service -n 100 --no-pager` as the next-step suggestion.
+Then go to [First boot](#first-boot).
 
 ---
 
-## Path B — Official Kali prebuilt image
+## 2. Install onto an existing Raspberry Pi OS
 
-1. Download the current image from <https://www.kali.org/get-kali/#kali-arm>. The file is named like:
-   ```
-   kali-linux-2026.1-raspberry-pi-zero-w-p4wnp1-aloa-armel.img.xz
-   ```
-2. Verify the SHA256 against the value on the Kali downloads page:
-   ```sh
-   sha256sum kali-linux-2026.1-raspberry-pi-zero-w-p4wnp1-aloa-armel.img.xz
-   ```
-3. Decompress and flash in one pipe (saves disk space):
-   ```sh
-   xzcat kali-linux-*-raspberry-pi-zero-w-p4wnp1-aloa-armel.img.xz | sudo dd of=/dev/diskN bs=4M status=progress conv=fsync
-   ```
-4. Find your microSD device first:
-   ```sh
-   diskutil list                       # macOS  — e.g. /dev/disk4
-   # OR
-   lsblk                                # Linux — e.g. /dev/sdb
-   ```
-   Replace `/dev/diskN` in step 3 with the correct device. **Get this wrong and you will overwrite the wrong disk.** Double-check.
+Start from **Raspberry Pi OS Lite**. The installer targets current releases (Debian 12
+"bookworm" and 13 "trixie") and detects the boot partition rather than assuming it.
 
-   **Cross-platform GUI alternative:** [Raspberry Pi Imager](https://www.raspberrypi.com/software/) → "Use custom" → select the `.img.xz` file directly.
+```bash
+git clone https://github.com/at0m-b0mb/P4wnP1_aloa.git
+cd P4wnP1_aloa
 
-5. Eject the card, insert it into the Pi Zero W, and power it on.
-6. Wait ~30 seconds for first boot. Jump to [First boot](#first-boot).
+# Build the three binaries for your board (works from macOS or Linux too):
+make build-armv6        # Pi Zero / Zero W
+#   or
+make build-arm64        # Pi Zero 2 W / 3 / 4 / 5
 
-> ⚠️ **Hardware restriction**: this image works **only** on the original Raspberry Pi Zero W (BCM43430A1 WiFi). It does **not** boot on the Pi Zero **2** W. The Nexmon firmware patches are specific to the original chip; the v2 board uses a different WiFi chip not yet supported.
+sudo ./install.sh --ssid MyAP --wifi-country GB
+```
 
-> ⚠️ **Default credentials on the official image** (you will rotate these — see [Security checklist](README.md#security-checklist)):
->   - SSH: `root` / `toor`, or `kali` / `kali`
->   - WiFi SSID: `💥🖥💥 Ⓟ➃ⓌⓃ🅟❶` (unicode/emoji) — note: this exact SSID is known to trigger NetworkManager/Netplan crashes on some Linux clients ([upstream #365](https://github.com/RoganDawes/P4wnP1_aloa/issues/365)). If you connect from a Linux laptop with NetworkManager, save the network with a renamed connection or change the SSID via the web client on first login.
->   - WiFi PSK: `MaMe82-P4wnP1`
->
-> ⚠️ The upstream code release tag is `v0.1.1-beta` (2020) — Kali rebuilds the image with newer kernel/userland but the P4wnP1 service binary itself has not been updated since.
+### What install.sh does
+
+1. Installs dependencies. Required packages are fatal; optional ones are installed
+   individually and only warn — so one retired package name cannot abort the whole install.
+   (`policykit-1` became `polkitd` in Debian 12, and it used to take the install down with it.)
+2. Copies the binaries to `/usr/local/bin` and the data tree to `/usr/local/P4wnP1`.
+3. Installs and enables the systemd units.
+4. **Writes the boot configuration** — `dtoverlay=dwc2` in `config.txt` and `modules-load=dwc2`
+   on the kernel command line. Without these the Pi's USB controller stays in host mode, the
+   gadget subsystem has no UDC to bind to, and **every USB function silently does nothing**.
+   Both files are backed up first, and `cmdline.txt` is kept as a single line (a stray newline
+   there makes the Pi ignore everything after it, `root=` included).
+5. Sets the WiFi regulatory domain and unblocks rfkill. On current Pi OS `wlan0` stays
+   soft-blocked until a country is set and hostapd refuses to start without one — this is
+   almost always why "the access point never appears".
+6. Marks `wlan0` / `usb0` unmanaged in NetworkManager, without disabling NM entirely, so
+   `eth0` keeps working as a recovery path.
+
+### Options
+
+```
+--ssid NAME           AP name. Avoid emoji -- it crash-loops NetworkManager on Linux clients.
+--psk PASSPHRASE      WiFi PSK (8-63 chars). Omitted: a random one is generated.
+--wifi-country CC     Regulatory domain. Default US. Required, or hostapd will not start.
+--skip-reboot         Do not reboot at the end.
+--skip-apt            Assume dependencies are already present.
+```
+
+It is idempotent: re-running re-applies missing pieces without duplicating units or
+overwriting an existing credentials file.
 
 ---
 
-## Path B.alt — Build your own Kali RPi Zero W image (advanced, rarely needed)
+## 3. Build an image yourself
 
-This is the path the original `build_support/rpi0w-nexmon-p4wnp1-aloa.sh` was written for. It runs `debootstrap` inside a Linux host to produce a flashable image with Kali + Nexmon firmware + P4wnP1 pre-installed.
-
-**Status:** the script targets `armel` Kali and assumes Python 2 / Go 1.10 are available in the repo. Current Kali sources have moved on. Until the script is updated (PRs welcome — track issue *TODO: file issue*), expect to manually fix:
-
-- Replace `architecture="armel"` with `armhf` and adjust the `--arch` flag passed to `debootstrap`.
-- Replace `python-dev`, `python-pip`, `python-configobj`, `python-requests` with their `python3-*` equivalents.
-- Bump the bundled Go to 1.21+ and migrate the build steps off `go get` to `go install` with module-aware paths.
-- Resolve `kali-arm` mirror differences for `kali-rolling` vs the snapshot used in 2020.
-- The Nexmon firmware build for `BCM43430A1` may need a refreshed patchset.
-
-Once those edits are made, the high-level flow is:
-
-```sh
-# On a Debian / Kali / Ubuntu host (NOT macOS — needs debootstrap, loop devices, qemu-user-static)
-sudo apt install -y debootstrap qemu-user-static kpartx parted xz-utils \
-                    kali-archive-keyring binfmt-support
-
-cd build_support
-sudo ./rpi0w-nexmon-p4wnp1-aloa.sh 0.1.1   # version tag, becomes part of the filename
+```bash
+./image/build.sh --arch all
 ```
 
-Output: an `.img` in `build_support/rpi0w-nexmon-p4wnp1-aloa-<ver>/`. Flash it the same way as Path A.
-
-If you get the script working against current Kali, please open a PR with the diff.
-
----
-
-## Path C — Manual install on existing OS
-
-For when you already have a Pi running Raspberry Pi OS / Kali / Debian and don't want to re-flash. This is what `install.sh` does, but by hand.
-
-If you already have a working Pi Zero W running **Raspberry Pi OS Lite (32-bit, Bookworm/Bullseye armhf)** or a hand-built Kali, you can install P4wnP1 onto it.
-
-### 1. Prepare the base OS
-
-Flash Raspberry Pi OS Lite (32-bit) using Raspberry Pi Imager. In the Imager's advanced settings (gear icon):
-
-- Enable **SSH** (set a strong password, **don't use `raspberry` or `toor`**).
-- Set the **WiFi country + SSID** so the Pi can reach the internet on first boot for package installs.
-- Set the **hostname** (e.g. `p4wnp1`).
-
-Boot the Pi, SSH in, and update:
-
-```sh
-sudo apt update && sudo apt full-upgrade -y
-sudo apt install -y git screen hostapd autossh bluez bluez-tools bridge-utils \
-                    policykit-1 genisoimage iodine haveged dnsmasq dhcpcd5 \
-                    avahi-daemon dosfstools wpasupplicant tcpdump \
-                    python3-pip python3-dev
-```
-
-### 2. Get the prebuilt P4wnP1 binaries
-
-From a Linux/macOS workstation, download the latest release tarball (or build from source — see [Building from source](#building-from-source)). You need:
-
-- `P4wnP1_service` (ARM6 binary)
-- `P4wnP1_cli` (ARM6 binary)
-- `webapp.js` and `webapp.js.map`
-- the `dist/` tree from this repository
-
-Copy them onto the Pi:
-
-```sh
-scp P4wnP1_service P4wnP1_cli webapp.js webapp.js.map root@<pi-ip>:/tmp/
-scp -r dist root@<pi-ip>:/tmp/
-```
-
-### 3. Install on the Pi
-
-SSH into the Pi and run:
-
-```sh
-sudo install -m 755 /tmp/P4wnP1_service /usr/local/bin/
-sudo install -m 755 /tmp/P4wnP1_cli /usr/local/bin/
-sudo mkdir -p /usr/local/P4wnP1
-sudo cp -R /tmp/dist/{keymaps,scripts,HIDScripts,www,db,helper,ums,legacy} /usr/local/P4wnP1/
-sudo cp /tmp/webapp.js /tmp/webapp.js.map /usr/local/P4wnP1/www/
-sudo cp /tmp/dist/P4wnP1.service /etc/systemd/system/
-
-# Python dep for one of the legacy backdoor scripts (optional)
-sudo pip3 install pydispatcher --break-system-packages
-
-# Disable the stock network manager so P4wnP1 can own the interfaces
-sudo systemctl disable networking.service || true
-
-# Enable + start P4wnP1
-sudo systemctl daemon-reload
-sudo systemctl enable haveged avahi-daemon P4wnP1
-sudo systemctl start P4wnP1
-```
-
-Verify:
-
-```sh
-systemctl status P4wnP1
-journalctl -u P4wnP1 -n 50 --no-pager
-```
-
-If the service is active, jump to [First boot](#first-boot).
-
-> ⚠️ The Nexmon-patched WiFi firmware that ships with the prebuilt Kali image is **not** installed by this path. Without it, KARMA and the WiFi covert-channel features are unavailable; standard AP / station mode still work.
-
----
-
-## Building from source
-
-The three Go binaries you need for `install.sh` are `P4wnP1_service`, `P4wnP1_cli`, and `p4wnp1-hashpw`. The web client (`webapp.js`) is a separate GopherJS build.
-
-### Option 0 — Use the pre-built binaries in this repo (easiest)
-
-This repo ships pre-built `linux/arm/6` binaries under [`build/`](build/) so a fresh clone is install-ready on a Pi Zero W without any local toolchain. Just `git clone` and run `install.sh`. The binaries in this branch are built from the current source, so they include the auth gate, the path-traversal fixes, and the new `auth` subcommand on the CLI.
-
-### Option 1 — `make build-armv6` (cross-compile on any host with Go 1.24+)
-
-```sh
-make build-armv6
-# -> Produces build/P4wnP1_service, build/P4wnP1_cli, build/p4wnp1-hashpw
-```
-
-Works on macOS, Linux, and Windows since Go's cross-compiler is in the stdlib. The webapp.js (web client) is **not** rebuilt by this target — see Option 3 if you've changed `web_client/`. The committed `build/webapp.js` is fine to use as-is otherwise.
-
-### Option 2 — Docker (rebuild the GopherJS web client too)
-
-```sh
-cd build_support
-docker build -t p4wnp1-builder .
-docker run --rm -v "$PWD/../build:/out" p4wnp1-builder \
-       bash -c 'cp /root/P4wnP1_aloa/build/{P4wnP1_service,P4wnP1_cli,webapp.js,webapp.js.map} /out/'
-```
-
-The `Dockerfile` pins Go 1.12.16 for the **GopherJS step only**. The service binaries it produces are now too old (no auth), so use this image *just* for `webapp.js` and use Option 1 for everything else.
-
-### Option 3 — Native build (Linux + Go 1.24 + GopherJS pinned to 1.12)
-
-```sh
-make build-armv6                         # service / CLI / hashpw (modern Go)
-cd build_support && ./build.sh           # adds webapp.js via GopherJS (needs Go 1.12)
-```
-
-Outputs land in `../build/`.
+Runs on macOS or Linux; everything privileged happens inside a container, and every image is
+mounted and verified before it is published. Fully documented in
+**[image/README.md](image/README.md)**.
 
 ---
 
 ## First boot
 
-After flashing and powering the Pi on, give it ~30 seconds. You should see:
+Plug the Pi into a host with the cable in the **data** port — on a Zero that is the **inner**
+micro-USB; the outer one is power only. The device comes up as a USB ethernet adapter at
+`172.16.0.1`.
 
-- A **WiFi access point** named `P4wnP1` (PSK `MaMe82-P4wnP1`).
-- A **USB ethernet device** when the Pi is plugged into a host via the inner micro-USB port.
-- A **Bluetooth device** named `P4wnP1` advertising NAP.
+```bash
+ssh p4wnp1@172.16.0.1
+```
 
-### Connecting
+You will be **forced to change the password** immediately — the image ships a documented
+default precisely so it cannot survive as a real credential.
 
-| Channel | Connect to | P4wnP1 IP | Notes |
-|---|---|---|---|
-| WiFi AP | SSID `P4wnP1`, PSK `MaMe82-P4wnP1` | `172.24.0.1` | Fastest path. |
-| USB ethernet | Plug Pi into target host via **inner** micro-USB port | `172.16.0.1` | Both RNDIS (Windows) and CDC ECM (macOS / Linux) advertised. |
-| Bluetooth NAP | Pair to `P4wnP1`, PIN `1337` | `172.26.0.1` | Slow without high-speed mode. |
+Then read this device's generated secrets:
 
-### Access
+```bash
+sudo cat /root/INITIAL_CREDENTIALS.txt
+```
 
-- **Web client:** `http://<P4wnP1-IP>:8000` in any modern browser. Log in with `admin` + the password from `INITIAL_CREDENTIALS.txt`. All gRPC and HTTP calls require a valid bearer token — there is no anonymous access.
-- **CLI over SSH:** `ssh root@<P4wnP1-IP>` — password from `INITIAL_CREDENTIALS.txt`. The CLI also needs a token to talk to the gRPC API; see *CLI authentication* below.
+That file holds the **web console password** and the **WiFi PSK**, both generated on this
+device at first boot. Nothing is shared between two flashed devices: SSH host keys are
+regenerated per device too.
 
-### CLI authentication
+This is why the first login has to come over USB or serial — the WiFi key is not knowable
+until you have read it off the device. The alternative would be a PSK identical on every unit
+and public the moment the image is.
 
-`P4wnP1_cli` now has a built-in `auth` subcommand. On first use:
+Finally, open the console:
 
-```sh
-# Look up the admin password generated at first boot:
-sudo cat /root/INITIAL_CREDENTIALS.txt | grep "admin"
+```
+http://172.16.0.1:8000
+```
 
-# Log in. The CLI caches a bearer token at ~/.p4wnp1/token (mode 0600)
-# and auto-attaches it to every subsequent RPC call.
-P4wnP1_cli auth login --user admin --password '<the-admin-password>'
+### If USB ethernet does not appear
 
-# Confirm:
+Use the serial console: connect a 3.3V USB-TTL adapter to GPIO14/15 (pins 8 and 10) and ground,
+at 115200 baud. `enable_uart=1` is set in the image. Or put the card in another machine and
+check that `config.txt` contains `dtoverlay=dwc2` and `cmdline.txt` contains
+`modules-load=dwc2`.
+
+---
+
+## CLI authentication
+
+The API requires a bearer token, so the CLI logs in once and caches it:
+
+```bash
+P4wnP1_cli auth login --username admin
 P4wnP1_cli auth whoami
-#   user:       admin
-#   host:       localhost
-#   expires_in: 23h59m54s
-#   expires_at: 2026-05-27T09:14:33Z
-
-# Any normal CLI command now works -- the token is attached automatically.
-P4wnP1_cli usb get device
-P4wnP1_cli hid run -c 'type("hello")'
+P4wnP1_cli usb get settings
 ```
 
-Other useful subcommands:
+The token lives at `~/.p4wnp1/token` (mode 0600) and is attached to every subsequent call.
+Tokens last 24 hours on a sliding window.
 
-```sh
-# Read the password from stdin instead of the flag (safer; no shell history):
-read -s pw && echo "$pw" | P4wnP1_cli auth login --user admin
-
-# Talk to a remote Pi (e.g. from your laptop instead of via SSH):
-P4wnP1_cli --host 172.24.0.1 auth login --user admin --password '...'
-
-# Rotate the admin password (revokes every existing session, including yours):
-P4wnP1_cli auth changepw --user admin --old 'OldPw1234567' --new 'NewPw1234567!'
-
-# Wipe the local token + tell the server to revoke it:
-P4wnP1_cli auth logout
+```bash
+P4wnP1_cli auth changepw        # change the console password
+P4wnP1_cli auth logout          # revoke the token
 ```
 
-If the cached token expires or is revoked, every CLI call will fail with `Unauthenticated`. Just `P4wnP1_cli auth login` again.
+For a remote device, add `--host`/`--port`.
 
-For raw HTTP integration (e.g. a shell script that needs a token):
+---
 
-```sh
-TOKEN=$(curl -s -X POST http://172.24.0.1:8000/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"<your-password>"}' | jq -r .token)
-curl -s http://172.24.0.1:8000/api/auth/whoami -H "Authorization: Bearer $TOKEN"
+## Health check
+
+```bash
+sudo /usr/local/P4wnP1/scripts/p4wnp1-healthcheck.sh
 ```
 
-### Change default credentials immediately
+Verifies binaries, data files, systemd units, firstboot completion, the auth file's shape, the
+port listeners, and the HTTP health endpoint. Add `--login-test` for a real login round trip.
 
-On a fresh install, the `p4wnp1-firstboot.service` oneshot unit runs automatically and replaces the dangerous shared defaults for **SSH only**:
+---
 
-- Root password rotated to a random 20-char secret.
-- SSH host keys regenerated per device.
-- Credentials written to `/root/INITIAL_CREDENTIALS.txt` (mode 0600) and visible via:
-  ```sh
-  journalctl -t p4wnp1-firstboot
-  ```
+## Updating an existing install
 
-> **You must connect via USB ethernet or the WiFi AP and `cat /root/INITIAL_CREDENTIALS.txt` on the very first session.** SSH login with the old `toor` password no longer works after first boot.
-
-The WiFi PSK and Bluetooth PIN still need manual rotation — the firstboot helper does not touch the P4wnP1 service's badger DB. Do this immediately:
-
-```sh
-# On the Pi, via SSH:
-
-# 1. Change the WiFi PSK — easiest from the web client:
-#    WiFi tab → Settings → set new password → Save as template → Deploy
-
-# 2. Change the Bluetooth PIN, or disable BT entirely if you don't need it:
-P4wnP1_cli template deploy bluetooth <your-locked-down-template>
-# or
-systemctl disable --now bluetooth
-
-# 3. Once you've stored the SSH password somewhere safe, shred the credentials file:
-shred -u /root/INITIAL_CREDENTIALS.txt
+```bash
+git pull
+make build-armv6                 # or build-arm64
+sudo ./install.sh --skip-apt
+sudo systemctl restart P4wnP1
 ```
 
-To force the firstboot helper to re-run (e.g. after rebuilding the image):
+`install.sh` will not overwrite `/root/INITIAL_CREDENTIALS.txt` or re-randomise your secrets.
 
-```sh
-sudo rm /var/lib/p4wnp1/firstboot.done
-sudo systemctl restart p4wnp1-firstboot.service
+---
+
+## Uninstalling
+
+```bash
+sudo make remove
 ```
 
-See the [Security checklist in README.md](README.md#security-checklist) for the full hardening list.
+Stops and disables the units and removes the binaries. It leaves `/usr/local/P4wnP1` and
+`/etc/p4wnp1` in place so your templates and credentials survive; delete them by hand if you
+want them gone. The `dwc2` lines added to `config.txt` and `cmdline.txt` are also left alone —
+remove them manually if you want the USB port back in host mode.
 
 ---
 
 ## Troubleshooting
 
-**No WiFi AP appears after boot.**
-- Wait the full 30 seconds — first boot does additional setup.
-- Check the green LED. Solid + slow blink = booting. Off = SD card / power problem.
-- Re-flash. Most issues at this stage are bad `dd` writes or undersized cards.
+**The access point never appears.** Almost always the regulatory domain. Check
+`raspi-config nonint get_wifi_country` and `rfkill list`. The service degrades to running
+without WiFi rather than failing to start, so the rest of the device will still work.
 
-**WiFi AP is visible but I can't connect.**
-- Confirm PSK is exactly `MaMe82-P4wnP1` (case-sensitive, hyphen, capital MM).
-- Some Android versions hide 2.4 GHz-only APs when "WiFi 6 / 6E only" is forced. Disable that.
+**No USB functions.** Check `config.txt` for `dtoverlay=dwc2` and `cmdline.txt` for
+`modules-load=dwc2`, then `lsmod | grep libcomposite` and `ls /sys/class/udc` — an empty
+`/sys/class/udc` means no USB device controller is bound and nothing gadget-related can work.
 
-**Web client loads, but the gRPC connection fails (`Failed to fetch` in console).**
-- Service may not be running: `ssh root@172.24.0.1 'systemctl status P4wnP1'`.
-- Browser may be caching an old `webapp.js` — hard-reload (Cmd/Ctrl+Shift+R).
-- If you installed via Path C and forgot `webapp.js.map`, the page works but you'll see source-map errors — these are cosmetic.
+**The service is not running.** `systemctl status P4wnP1` and `journalctl -u P4wnP1 -b`.
+The unit restarts on failure, rate-limited to five attempts a minute; after that it stays in
+`failed` state deliberately, so a genuinely broken device reports as broken rather than
+flapping.
 
-**`P4wnP1_cli` returns "connection refused".**
-- The service isn't up. Check `journalctl -u P4wnP1 -n 100 --no-pager`.
-- If running remotely, pass `--host <IP> --port 50051`.
+**Every command returns Unauthenticated.** Your token expired, or firstboot has not run.
+`P4wnP1_cli auth login` again, and check `/etc/p4wnp1/auth.json` exists.
 
-**Pi reboots when I plug it into the target USB port.**
-- Power supply problem. The Pi pulls more current than some USB 2.0 hub ports can deliver under WiFi load. Use the external supply on the outer USB port, and connect to the target via the inner port.
-
-**Keystrokes are typed in the wrong language.**
-- Set the HIDScript layout: `P4wnP1_cli hid run -c 'layout("de"); type("ümlaut")'`. Supported layouts: `us`, `gb`, `de`, `fr`, `es`, `it`, `ru`, `br`, `be`, `ch`, `fi`, `sv`. Full list: `ls /usr/local/P4wnP1/keymaps/`.
-
-**SSH fails with host key warnings on a fresh image.**
-- Expected. Prebuilt images share host keys. After your first login, run `dpkg-reconfigure openssh-server` on the Pi to regenerate.
-
----
-
-## Uninstall
-
-On the Pi:
-
-```sh
-sudo systemctl stop P4wnP1
-sudo systemctl disable P4wnP1
-sudo rm /usr/local/bin/P4wnP1_service /usr/local/bin/P4wnP1_cli
-sudo rm /etc/systemd/system/P4wnP1.service
-sudo rm -rf /usr/local/P4wnP1
-sudo systemctl daemon-reload
-```
-
-This leaves Kali / the base OS untouched.
-
----
-
-## Next steps
-
-- Read [docs/TUTORIAL.md](docs/TUTORIAL.md) for the HIDScript walkthrough, CLI reference, and TriggerActions overview.
-- Read the [Security checklist](README.md#security-checklist) and apply it before deploying.
-- If you'd like to contribute fixes (especially to Path B), open an issue first describing what you're tackling so we can coordinate.
+More, including what is still broken, in [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
