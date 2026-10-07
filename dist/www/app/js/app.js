@@ -662,7 +662,13 @@ Views.keystrokes = async function () {
     'HIDScript runs on the device and drives the emulated keyboard and mouse against whatever host the cable is plugged into.'));
 
   /* Running a script with no HID function enabled fails with a message from
-     deep in the HID layer. Say it here instead, where it is fixable. */
+     deep in the HID layer. Say it here instead, where it is fixable.
+     State.usb is only populated by Overview and Cable, so deep-linking or
+     reloading straight onto this view used to skip the warning entirely --
+     exactly the case where a newcomer most needs it. Fetch it if absent. */
+  if (!State.usb) {
+    State.usb = await Api.rpc('GetDeployedGadgetSetting').catch(() => null);
+  }
   if (State.usb && !State.usb.use_HID_KEYBOARD && !State.usb.use_HID_MOUSE) {
     main.append(h('div.banner.banner-danger',
       h('p.banner-title', 'No keyboard or mouse is being presented'),
