@@ -1,5 +1,74 @@
 # changelog
 
+## v0.2.0 -- 2026-10-06
+
+The project did not work. This release makes it boot, adds a usable interface,
+and ships flashable images.
+
+### The reason it was broken
+
+`CheckLibComposite` ended in an unconditional `log.Panic(err)` that fired even
+on its own success path. On a stock Raspberry Pi OS cold boot it was reached
+every time, inside `NewService()`, with no `recover()` anywhere in the path. No
+gRPC, no web console, no access point. Because the `modprobe` succeeded just
+before the panic, a manual restart made the device look healthy -- only cold
+boots failed, which is why it presented as intermittent.
+
+Four more showstoppers sat behind it: an exposed RPC whose body was
+`panic("implement me")` (any authenticated request ended the process), a WiFi
+constructor that panicked on an ordinary udev race, 20 of 21 CLI call sites
+dialling without the bearer token so nearly every command failed
+`Unauthenticated`, and an access point broadcasting a PSK published in this
+repository.
+
+### Added
+
+- **A working web console** (`dist/www/app/`). Plain HTML/CSS/JS, no framework,
+  no build step, 188KB with webfonts. Six views named for what the device does.
+  The signature view shows, live, which USB functions a host enumerates.
+- **A JSON API** (`/api/v1/`). All 82 unary RPCs exposed by reflection, plus
+  the event stream as SSE. Encoding is protojson, because the service
+  definition uses oneofs that `encoding/json` cannot round-trip.
+- **A flashable image pipeline** (`image/`). Builds from an official Raspberry
+  Pi OS Lite release for armhf and arm64, on macOS or Linux, everything
+  privileged inside a container. Every image is mounted and verified before
+  publishing.
+- **arm64 support.** Pi Zero 2 W / 3 / 4 / 5. The build tags that blocked it
+  were incidental, not a real dependency.
+- **DuckyScript conversion** (`duckyscript/`, `P4wnP1_cli ducky convert`).
+- **A WCAG contrast test** for the console palette (`make contrast`).
+
+### Fixed
+
+- The cold-boot panic, and `CheckBnep`'s `log.Fatal`.
+- `ListenWiFiStateChanges` panicking; added gRPC panic-recovery interceptors.
+- `/api/auth/changepw` requiring no bearer token -- a CSRF-able full takeover.
+- `FSReadFile` allocating an attacker-supplied length.
+- Reboot and shutdown never reaching their syscalls.
+- The WiFi constructor panicking on a cold-boot race with udev.
+- 20 of 21 CLI dial sites missing the bearer token.
+- The access point using a PSK published in this repo.
+- `install.sh` never configuring `dwc2`, so USB silently did nothing; and
+  `policykit-1` aborting the whole install on Debian 13.
+- A wrong-oneof type assertion that panicked on every group-receive trigger.
+- Six vet defects and an unbounded-restart hazard in the systemd unit.
+- Mobile layout overflow in the console.
+
+### Changed
+
+- The systemd unit gained `Restart=on-failure` with bounded rate limiting.
+- The GopherJS client is retired; `/` redirects to the new console.
+- `build_support/rpi0w-nexmon-p4wnp1-aloa.sh` removed -- it could no longer
+  produce a working image, and a silently-broken image builder is worse than
+  none.
+
+### Not verified
+
+No physical Raspberry Pi was used. Builds, unit tests, vet, image assembly and
+the console (against a mock) are all verified by automation. Nothing about
+real-hardware behaviour is.
+
+
 ## unreleased
 
 - **Removed `.github/workflows/ci.yml`.** GitHub's anti-abuse layer kept

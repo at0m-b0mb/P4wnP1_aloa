@@ -1,144 +1,161 @@
-# Known issues & verified bugs
+# Known issues
 
-Compiled from a review of the local code, upstream GitHub issues at [RoganDawes/P4wnP1_aloa](https://github.com/RoganDawes/P4wnP1_aloa), the official Kali downloads, and dependency vulnerability databases. Last refreshed: 2026-05-23.
+Last refreshed: 2026-10-06, after a 96-agent audit of the codebase in which
+every high-severity finding was independently re-checked by a second reviewer
+before being accepted.
 
-Severity legend:
-
-- 🔴 **Critical** — exploitable security issue or boot-blocking bug.
-- 🟠 **High** — blocks common workflows or risks user data.
-- 🟡 **Medium** — confusing UX, intermittent breakage, or stale tooling.
-- 🟢 **Low** — cosmetic, future-proofing.
+Severity: **Critical** — boot-blocking or exploitable. **High** — blocks a
+common workflow. **Medium** — confusing or stale. **Low** — cosmetic.
 
 ---
 
-## 🔴 Code-level security bugs (found by local review)
+## Fixed in this pass
 
-### ✅ 1. Unauthenticated arbitrary file read via `HIDRunScript` / `HIDRunScriptJob` — **fixed**
+### Critical — the service panicked on every cold boot
 
-- **Where:** [service/rpc_server.go:795](service/rpc_server.go#L795), [service/rpc_server.go:824](service/rpc_server.go#L824)
-- **Was:** Both RPCs accepted a `ScriptPath` field from the gRPC request and passed it unmodified to `ioutil.ReadFile` as root, reachable over the no-auth gRPC API.
-- **Fix applied:** Both call sites now route `ScriptPath` through `safePathInAllowlist` (in [service/common.go](service/common.go)) which rejects anything outside `/usr/local/P4wnP1/HIDScripts` or `/tmp`. Untested on hardware; verify by trying `P4wnP1_cli hid run -r /etc/shadow` and confirming you get "path is outside the allowed directories".
-- **Residual risk:** The gRPC API itself is still unauthenticated, so the auth slice is still required to close the broader attack surface.
+`CheckLibComposite` ended in an unconditional `log.Panic(err)` that ran even
+when `err` was nil, i.e. on the success path. On a stock Raspberry Pi OS cold
+boot, libcomposite is a loadable module that is not yet loaded and the
+preceding `rmmod` probe could never report "builtin", so execution reached that
+line every time. The panic was inside `NewService()`, before `Start()`, with no
+`recover()` in the path: no gRPC, no web console, no access point.
 
-### ✅ 2. Self-acknowledged path traversal in `FSReadFile` / `FSWriteFile` — **fixed**
+Deceptively, the `modprobe` succeeded *before* the panic, so a manual
+`systemctl restart` found the module loaded and the device looked healthy —
+only cold boots failed. This is the most likely cause of upstream
+[#363](https://github.com/RoganDawes/P4wnP1_aloa/issues/363).
 
-- **Where:** Both RPCs in [service/rpc_server.go](service/rpc_server.go), plus a new shared helper `resolveAccessibleFolder` to keep the two call sites in sync.
-- **Was:** `req.Filename` was concatenated onto a base path without traversal checks; the maintainer's own `//ToDo:` comment acknowledged it.
-- **Fix applied:** Both RPCs now go through `safeJoinUnderBase(base, filename)` which rejects absolute filenames, `..` traversal, and any path that resolves outside the chosen base.
-- **Residual risk:** Same as #1 — the API is still unauthenticated.
+### Critical — a password change needed no token
 
-### 🟠 3. Hard-coded WiFi PSK in source defaults — **partial fix**
+`/api/auth/changepw` required only the old password, and checked no
+Content-Type, making it a CORS-simple request deliverable from any site the
+operator was visiting. `ChangePassword` calls `RevokeAll()`, so a correct guess
+changed the admin password and logged the operator out. Now requires a valid
+bearer token, and both login and changepw require `application/json`.
 
-- **Where:** [service/defaults.go:193](service/defaults.go#L193)
-- **Was:** `PSK: "MaMe82-P4wnP1"` — every device shipped with the same WiFi password.
-- **Fix applied:** Source default is now `HackProKP-changeme` (still bad, but at least different from the well-known one). The new [`install.sh`](install.sh) captures a per-device PSK at install time (random by default, or `--psk` to set explicitly) and writes it to `/etc/p4wnp1/initial.conf` + the credentials file.
-- **Residual:** The install-time PSK is not pushed into the running service's badger DB automatically. The operator has to apply it once via the web client on first login. Documented in INSTALL.md.
+### Critical — an exposed RPC whose body was `panic("implement me")`
 
-### ✅ 4. Arbitrary `os.Stat` over unauthenticated API — **fixed**
+`ListenWiFiStateChanges`. grpc-go does not recover handler panics, so any
+authenticated caller could end the process with one request. Returns
+`Unimplemented` now, and a panic-recovery interceptor was added as a backstop.
 
-- **Where:** `FSGetFileInfo` in [service/rpc_server.go](service/rpc_server.go).
-- **Was:** Direct `os.Stat(req.Path)` with no allowlist — full filesystem enumeration.
-- **Fix applied:** Path now restricted to `common.PATH_ROOT` (`/usr/local/P4wnP1/...`) or `/tmp` via `safePathInAllowlist`. Same residual risk as #1.
+### Critical — the access point used a PSK published in this repo
 
-### 🟠 5. No TLS on web client; tokens in cleartext
+`dist/db` still carries the upstream default `MaMe82-P4wnP1`, and the deployed
+template beats the compile-time default, so that is what a flashed device
+actually broadcast. A guard in the access-point start path now substitutes a
+per-device random PSK, generated once and persisted at
+`/etc/p4wnp1/generated-ap.psk`.
 
-- **Where:** [service/rpc_server.go](service/rpc_server.go) HTTP listener at `:8000`.
-- **What:** The web client is served over plain HTTP. With auth now in place, bearer tokens ride in cleartext over the (WPA2-PSK-protected, or fully open Bluetooth) network.
-- **Mitigation today:** WPA2 PSK is the only confidentiality barrier; only trust this on a network you control.
-- **Fix:** Generate a self-signed cert on first boot and serve gRPC-web over HTTPS. Trade-off: cert pinning + manual fingerprint verification on first connect, since CA-signed certs aren't realistic on a device with no DNS name. Tracked for a later milestone.
+### High — nearly the whole CLI failed `Unauthenticated`
 
-### ✅ 6. gRPC API was completely unauthenticated — **fixed**
+Of 21 `grpc.Dial` sites, exactly one attached the bearer token. Every other
+command — including the trigger-action helpers boot scripts call — failed once
+auth was enforced. All 21 now route through one authenticated dialer.
 
-- **Was:** anyone reaching the AP, USB ethernet bridge, or Bluetooth NAP could control the device via gRPC without credentials.
-- **Fix applied (Milestone 1):** new `service/auth/` package with bcrypt password store, opaque tokens, in-memory session map, unary + stream gRPC interceptors. Every RPC requires `Authorization: bearer <token>` metadata; everything else returns `codes.Unauthenticated`. HTTP routes under `/api/auth/` are the only public surface. First-boot helper bootstraps an `admin` account with a random 20-char password.
-- **Residual work:** CLI client doesn't yet have a `login` subcommand (Milestone 3); Vue 3 SPA with login screen still to come (Milestones 4-8). Until then, CLI users obtain a token by curling `/api/auth/login`.
+### High — reboot and shutdown did nothing
 
----
+`Service.Stop()` tears subsystems down before the reboot syscall, and two
+teardowns nil-dereferenced on ordinary hardware (no Bluetooth adapter; stock
+kernel without the dwc2 netlink family). Each teardown is now individually
+recovered, so the syscalls are reached.
 
-## 🟠 Upstream bugs verified via GitHub
+### High — the WiFi constructor panicked on a boot race
 
-### 🟠 [#365] Emoji SSID crashes NetworkManager on Linux clients
+The unit starts before `sysinit.target` and is not ordered against udev, while
+brcmfmac loads firmware asynchronously — so `wlan0` often does not exist yet.
+`NewWifiService` panicked, killing the whole device for that boot. It now waits
+briefly, then degrades with WiFi disabled.
 
-- **Link:** <https://github.com/RoganDawes/P4wnP1_aloa/issues/365> (filed 2026-03-29)
-- **What:** The Kali prebuilt image ships with WiFi SSID `💥🖥💥 Ⓟ➃ⓌⓃ🅟❶` (configured in Kali's build script, not the P4wnP1 code itself — the code defaults to plain `P4wnP1`). When a Linux client using NetworkManager + Netplan saves the connection, the URL-encoded filename overflows the 255-char filesystem limit, triggering an assertion in the keyfile writer and causing a crash loop.
-- **Workaround:** Manually remove the malformed file from `/etc/netplan/` and `/run/NetworkManager/system-connections/`, then restart NetworkManager. Or: connect from a non-NetworkManager client (Android, iOS, macOS, Windows) for first login and rename the SSID via the web UI.
-- **Fix:** Lobby Kali to change the default SSID in [their build script](https://gitlab.com/kalilinux/build-scripts/kali-arm/-/blob/main/raspberry-pi-zero-w-p4wnp1-aloa.sh) to ASCII-only.
+### High — `install.sh` never configured USB gadget mode
 
-### 🟠 [#363] WiFi AP fails to start after fresh boot
+It never wrote `dtoverlay=dwc2` or `modules-load=dwc2`, so on a manual install
+the entire USB feature set silently did nothing. It also used `/boot`, which
+Debian 12 moved to `/boot/firmware`. Both fixed, with the boot partition
+detected rather than assumed.
 
-- **Link:** <https://github.com/RoganDawes/P4wnP1_aloa/issues/363> (filed 2025-12-18)
-- **What:** AP does not come up on some Pis after first boot; the reporter asks how to restart it without re-flashing.
-- **Workaround:** `P4wnP1_cli wifi deploy <ap-template>` after SSHing in via USB ethernet. Or: `systemctl restart P4wnP1`.
+### High — one retired package aborted the whole install
 
-### 🟠 [#354] P4wnP1 disables HID at runtime
+`policykit-1` (renamed `polkitd` in Debian 12) was in a single `apt-get install`
+under `set -e`. Packages are now split into required and optional.
 
-- **Link:** <https://github.com/RoganDawes/P4wnP1_aloa/issues/354> (filed 2024-11-22)
-- **What:** USB HID becomes unusable after some sequence of USB function changes. No reproducer documented.
-- **Fix:** Needs runtime trace on hardware — possibly related to libcomposite reload at [service/SubSysUSB.go:326](service/SubSysUSB.go#L326).
+### High — the web UI was dead
 
-### 🟡 [#355] Default SSH credentials reported as incorrect
+Auth was added to every RPC without updating the GopherJS client, which has no
+auth code. Replaced by a new console; see the README.
 
-- **Link:** <https://github.com/RoganDawes/P4wnP1_aloa/issues/355> (filed 2024-11-24)
-- **What:** Bare report of `root` / `toor` not working. No further detail. Likely cause: user tried `root`/`toor` against a Kali build where the default user is `kali`/`kali` (Kali changed the default in 2020.1+).
-- **Fix:** Documentation — both credential pairs are now listed in [INSTALL.md](INSTALL.md).
+### Medium — `FSReadFile` allocated an attacker-supplied length
 
-### 🟡 [#362] Pi Zero 2 W support
+`make([]byte, req.Len)` on an unvalidated int64. Now bounds-checked.
 
-- **Link:** <https://github.com/RoganDawes/P4wnP1_aloa/issues/362> (filed 2025-12-14)
-- **What:** Image does not boot on the Pi Zero 2 W. Confirmed by Kali docs as expected behavior.
-- **Fix:** Genuinely hard — the Zero 2 W uses a different WiFi chip (BCM43436) that doesn't have a Nexmon firmware patch comparable to the BCM43430A1. Removing the KARMA + multi-SSID features would let it work, but that loses the project's distinguishing capabilities.
+### Medium — six vet defects, including a guaranteed panic
 
----
+The `triggerTypeGroupReceive` branch type-asserted to the *wrong* oneof
+variant, so every group-receive trigger firing panicked the daemon. Plus two
+dropped-argument format strings and three unreachable returns.
 
-## 🟡 Stale dependencies (no live CVE in this version, but old)
+### Medium — arm64 was impossible
 
-### ✅ `golang.org/x/net` (CVE-2023-44487) — **fixed**
-
-- **Was:** `v0.0.0-20211112202133-69e39bad7dc2` -- predated the **CVE-2023-44487** (HTTP/2 Rapid Reset DoS) fix shipped in `v0.17.0`.
-- **Fix applied:** Bumped to `v0.49.0` via `go mod tidy` during the unit-test pass. CVE long since closed in this version.
-
-### 🟡 `google.golang.org/grpc v1.38.0`
-
-- Same HTTP/2 Rapid Reset family of issues was mitigated in grpc-go v1.56.3 / v1.58.3 / v1.59.0.
-- **Partial:** The HTTP/2 stack underneath grpc-go is `golang.org/x/net/http2`, which was bumped above and now contains the fix. The grpc-go pin itself is still v1.38.0; a full grpc-go bump is out of scope for this pass (touches the entire RPC layer and may need proto regeneration).
-
-### 🟢 `github.com/dgraph-io/badger v1.5.5-0.20181020...`
-
-- 2018 version of badger; no known CVEs against v1.x, but multiple bug fixes since (concurrent-iterator safety, value-log corruption on crash).
-- **Impact:** Low — used as a small embedded KV for templates. Power loss during write could lose recent template changes.
-- **Fix:** Migration to badger v3/v4 is non-trivial (API changes); not worth the churn for this use case.
-
-### 🟢 `github.com/robertkrimen/otto`
-
-- The JavaScript interpreter that runs HIDScript. Pre-ES6 only, and the HIDScript sandbox boundary depends on otto's strictness. No CVEs filed.
-- **Impact:** HIDScript already runs as root and is fed by the (no-auth) gRPC API, so the sandbox is moot today. Once auth exists this becomes a real consideration.
-
-### 🟡 `gopherjs v1.18.0-beta2` + the whole GopherJS toolchain
-
-- GopherJS development has slowed and it requires Go 1.12 specifically. This is the single biggest blocker to modernizing the Go toolchain.
-- **Fix:** Replace with a Vue 3 / TypeScript SPA over gRPC-web. ~40+ hours, tracked under the Go-build modernization slice.
+Build tags gated the core service to 32-bit ARM. They were incidental, not a
+real dependency. Pi Zero 2 W / 3 / 4 / 5 now build.
 
 ---
 
-## 🟡 Tooling / build issues
+## Open
 
-### 🟡 The in-repo `build_support/rpi0w-nexmon-p4wnp1-aloa.sh` is stale
+### High — no TLS
 
-- It targets the older Kali armel pipeline and assumes Python 2. Kali now maintains their own copy at [gitlab.com/kalilinux/build-scripts/kali-arm](https://gitlab.com/kalilinux/build-scripts/kali-arm/-/blob/main/raspberry-pi-zero-w-p4wnp1-aloa.sh) with Python 3.
-- **Fix:** Either (a) delete the in-repo script and link to the Kali one, or (b) sync the in-repo script with Kali's current version. Recommendation: (a) — there's no value in maintaining a divergent copy.
+The console is served over plain HTTP, so bearer tokens ride in cleartext.
+Acceptable over USB or the device's own WPA2 AP; not acceptable anywhere else.
+A self-signed cert generated at first boot, with fingerprint verification on
+first connect, is the intended fix.
 
-### 🟡 `go.mod` pins `go 1.13`; GopherJS pins Go 1.12
+### High — badger is not crash-safe as configured
 
-- This means the codebase doesn't compile on any modern Go install without `gvm` or a Docker pin.
-- **Fix:** Two-step — first bump just `go.mod` to a modern Go for the service/CLI binaries (they don't need GopherJS), then plan the GopherJS migration separately.
+`dist/db` uses badger v1.5.5 (2018) with default open options. This device is
+normally powered off by being pulled out of a USB port, so an unclean shutdown
+mid-write is the *normal* case, not an edge case. A truncated value log can
+lose recent template changes or fail to open. Needs `Truncate: true` and a
+sync-on-write policy at minimum.
 
-### 🟢 Hand-rolled trailing-newline `\n` in shell scripts via `echo`
+### Medium — the shipped template database still contains the old defaults
 
-- Pre-existing `dist/scripts/trigger-aware.sh` uses `echo "\t..."` which isn't portable (shellcheck SC2028).
-- **Fix:** One-line `printf` replacements. Low value; left alone in this pass.
+The runtime guard above stops the bad PSK being broadcast, but `dist/db` itself
+still carries the upstream SSID and PSK. The database should be regenerated.
+
+### Medium — the emoji SSID crashes NetworkManager clients
+
+Kali's build script (not this code) sets an emoji SSID; the URL-encoded
+filename overflows the 255-char limit and crash-loops NetworkManager.
+Upstream [#365](https://github.com/RoganDawes/P4wnP1_aloa/issues/365).
+This fork defaults to ASCII.
+
+### Medium — HIDScript runs unsandboxed
+
+`otto` exposes a bridge into a VM that runs as root and is reachable from the
+authenticated API. The sandbox boundary is not meaningful today; treat
+HIDScript authorship as equivalent to root access.
+
+### Medium — grpc-go is pinned to v1.38.0
+
+The HTTP/2 stack underneath it (`golang.org/x/net`) has been bumped and carries
+the Rapid Reset fix, but the grpc-go pin itself is old. A bump touches the whole
+RPC layer.
+
+### Medium — upstream [#354](https://github.com/RoganDawes/P4wnP1_aloa/issues/354): HID disabled at runtime
+
+No reproducer documented. Needs a runtime trace on hardware.
+
+### Low — KARMA and multi-SSID need Nexmon
+
+Only the Pi Zero W's BCM43430A1 has a comparable firmware patch. Everything
+else degrades to a normal access point.
 
 ---
 
-## How to use this file
+## Not verified at all
 
-This file is a **prioritized backlog**, not a TODO list. If you're about to make a fix, file an issue and link this section so the conversation has context. The Critical-tagged items in particular are not theoretical — anyone on the AP today can extract `/etc/shadow` from a default-install P4wnP1.
+**No physical Raspberry Pi was used.** Nothing above about runtime behaviour on
+real hardware — boot, USB enumeration, keystroke injection, hostapd, Bluetooth
+pairing, the trigger engine — has been observed. The fixes are derived from
+reading the code and the kernel's documented behaviour. Boot one and check.
