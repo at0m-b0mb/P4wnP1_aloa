@@ -32,6 +32,9 @@ const HTTPPrefix = "/api/auth/"
 func HTTPHandler(m *Manager) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && !requireJSONContentType(w, r) {
+			return
+		}
 		handleLogin(m, w, r)
 	})
 	mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
@@ -154,9 +157,47 @@ type changePasswordRequest struct {
 	NewPassword string `json:"new_password"`
 }
 
+// requireJSONContentType rejects a request that does not declare a JSON body.
+//
+// This is a CSRF control, not a parsing nicety. A POST with a form or plain
+// content type is a CORS "simple request": a browser sends it cross-origin
+// with no preflight, so any page the operator happens to be visiting can
+// deliver it. Demanding application/json forces a preflight, and because these
+// routes emit no Access-Control-Allow-Origin the preflight fails and the
+// request never arrives.
+//
+// Applied to login and changepw only, deliberately -- NOT mux-wide. The CLI
+// builds its logout POST without a Content-Type (cli_client/auth_client.go),
+// and breaking logout to harden it would be a poor trade.
+func requireJSONContentType(w http.ResponseWriter, r *http.Request) bool {
+	ct := r.Header.Get("Content-Type")
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = ct[:i]
+	}
+	if !strings.EqualFold(strings.TrimSpace(ct), "application/json") {
+		writeError(w, http.StatusUnsupportedMediaType, "Content-Type: application/json required")
+		return false
+	}
+	return true
+}
+
 func handleChangePassword(m *Manager, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+	// A password change used to require only the OLD password and no bearer
+	// token at all. Combined with the lack of a Content-Type check that made it
+	// a CORS-simple request any website the operator visited could deliver, and
+	// ChangePassword calls RevokeAll() on success -- so a correct guess changed
+	// the admin password and silently logged the operator out of their own
+	// device. Proving possession of a live session is the minimum bar for the
+	// one endpoint that rewrites credentials.
+	if _, err := m.ValidateToken(extractBearer(r)); err != nil {
+		writeError(w, http.StatusUnauthorized, "a valid bearer token is required to change a password")
+		return
+	}
+	if !requireJSONContentType(w, r) {
 		return
 	}
 	var req changePasswordRequest

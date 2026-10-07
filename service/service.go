@@ -261,13 +261,53 @@ func (s *Service) Shutdown() {
 	s.Cancel()
 }
 
+// safeStop runs one subsystem teardown, converting a panic into a log line.
+//
+// Each teardown is wrapped INDIVIDUALLY and deliberately. A single
+// `defer recover()` at the top of Stop() would not do: by the time it ran, the
+// frame would already have unwound past the reboot and poweroff syscalls
+// below, so the panic would be caught, logged -- and the device still would
+// not reboot. That is the bug this is here to prevent, not a hypothetical.
+func safeStop(name string, stop func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("WARNING: panic while stopping %s: %v (continuing shutdown)", name, r)
+		}
+	}()
+	if stop != nil {
+		stop()
+	}
+}
+
 func (s *Service) Stop() {
-	s.SubSysTriggerActions.Stop()
-	s.SubSysLed.Stop()
-	s.SubSysGpio.Stop()
-	s.SubSysBluetooth.Stop()
-	s.SubSysDwc2ConnectWatcher.Stop()
-	s.SubSysEvent.Stop()
+	// Reaching the syscalls below matters more than any individual teardown
+	// succeeding. Before this, a nil Bluetooth controller (every board with no
+	// adapter) or a nil netlink family (every stock kernel) panicked here, and
+	// `P4wnP1_cli system reboot`, the console's power buttons and
+	// `systemctl stop P4wnP1` all silently did nothing.
+	if s.SubSysTriggerActions != nil {
+		safeStop("trigger actions", s.SubSysTriggerActions.Stop)
+	}
+	if s.SubSysLed != nil {
+		safeStop("LED", s.SubSysLed.Stop)
+	}
+	if s.SubSysGpio != nil {
+		safeStop("GPIO", s.SubSysGpio.Stop)
+	}
+	if s.SubSysBluetooth != nil {
+		safeStop("Bluetooth", s.SubSysBluetooth.Stop)
+	}
+	if s.SubSysDwc2ConnectWatcher != nil {
+		safeStop("dwc2 connect watcher", func() { _ = s.SubSysDwc2ConnectWatcher.Stop() })
+	}
+	if s.SubSysEvent != nil {
+		safeStop("event manager", s.SubSysEvent.Stop)
+	}
+	// The datastore was never closed. badger needs a clean close to flush its
+	// value log; skipping it is how template edits get lost on a reboot.
+	if s.SubSysDataStore != nil {
+		safeStop("datastore", func() { s.SubSysDataStore.Close() })
+	}
 
 	if s.rebootOnStop {
 		fmt.Println("Rebooting...")

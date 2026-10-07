@@ -1,10 +1,13 @@
+//go:build linux
 // +build linux
 
 package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	pb "github.com/mame82/P4wnP1_aloa/proto"
 	"github.com/mame82/P4wnP1_aloa/service/pgpio"
 	"periph.io/x/periph"
 	"periph.io/x/periph/conn/gpio"
@@ -14,8 +17,6 @@ import (
 	"periph.io/x/periph/host/rpi"
 	"sync"
 	"time"
-	"errors"
-	pb "github.com/mame82/P4wnP1_aloa/proto"
 )
 
 var (
@@ -24,9 +25,9 @@ var (
 )
 
 type GpioManager struct {
-	availableGpioPins  []*pgpio.P4wnp1PinIO
-	availableGpioPinsMap  map[string]*pgpio.P4wnp1PinIO
-	availableGpioNames []string
+	availableGpioPins    []*pgpio.P4wnp1PinIO
+	availableGpioPinsMap map[string]*pgpio.P4wnp1PinIO
+	availableGpioNames   []string
 
 	rootSvc *Service
 
@@ -69,7 +70,6 @@ func NewGpioManager(rootSvc *Service) (res *GpioManager) {
 		}
 	}
 
-
 	gm.edgeDetecting = make(map[gpio.PinIO]bool)
 	gm.edgeDetectingMutex = &sync.Mutex{}
 
@@ -90,14 +90,12 @@ func (gm *GpioManager) GetAvailableGpioNames() (res []string, err error) {
 	return res, EGpioNotAvailable
 }
 
-
-
 func (gm *GpioManager) DeployGpioTrigger(in *pb.TriggerGPIOIn) (err error) {
 	if !gm.IsUsable {
 		return EGpioNotAvailable
 	}
 
-	p,present := gm.availableGpioPinsMap[in.GpioName]
+	p, present := gm.availableGpioPinsMap[in.GpioName]
 	if !present {
 		return EGpioPinInvalid
 	}
@@ -129,21 +127,21 @@ func (gm *GpioManager) DeployGpioTrigger(in *pb.TriggerGPIOIn) (err error) {
 		detectErr := error(nil)
 		for detectErr == nil {
 			var detectedLevel gpio.Level
-			detectedLevel,detectErr = p.ExtWaitForEdge(context.Background(), debounceDelay)
+			detectedLevel, detectErr = p.ExtWaitForEdge(context.Background(), debounceDelay)
 
 			fmt.Printf("... done wait for edge %s level: %v\n", p.Name(), detectedLevel)
 
 			//Edge detected, check if still edge detecting before consuming
 
 			switch detectedLevel {
-				case gpio.High:
-					fmt.Println("Gpio " + p.Name() + " changed to high")
-					gm.rootSvc.SubSysEvent.Emit(ConstructEventTriggerGpioIn(p.Name(), bool(gpio.High)))
+			case gpio.High:
+				fmt.Println("Gpio " + p.Name() + " changed to high")
+				gm.rootSvc.SubSysEvent.Emit(ConstructEventTriggerGpioIn(p.Name(), bool(gpio.High)))
 
-				case gpio.Low:
-					fmt.Println("Gpio " + p.Name() + " changed to low")
-					gm.rootSvc.SubSysEvent.Emit(ConstructEventTriggerGpioIn(p.Name(), bool(gpio.Low)))
-				}
+			case gpio.Low:
+				fmt.Println("Gpio " + p.Name() + " changed to low")
+				gm.rootSvc.SubSysEvent.Emit(ConstructEventTriggerGpioIn(p.Name(), bool(gpio.Low)))
+			}
 		}
 		fmt.Println("!!!! STOPPED edge loop for pin " + p.Name())
 	}()
@@ -157,7 +155,7 @@ func (gm *GpioManager) FireGpioAction(out *pb.ActionGPIOOut) (err error) {
 		return EGpioNotAvailable
 	}
 
-	p,present := gm.availableGpioPinsMap[out.GpioName]
+	p, present := gm.availableGpioPinsMap[out.GpioName]
 	if !present {
 		return EGpioPinInvalid
 	}

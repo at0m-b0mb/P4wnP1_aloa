@@ -126,7 +126,18 @@ func (bt *BtService) ReplaceDefaultSettings(s *pb.BluetoothSettings) {
 }
 
 func (bt *BtService) Stop() {
-	bt.Agent.Stop() // unregister the agent again
+	// Both of these are nil on any board where no Bluetooth adapter was found,
+	// which is every Pi Zero (non-W) and any board whose controller failed to
+	// come up. This runs from Service.Stop(), ahead of the reboot syscall, so a
+	// nil dereference here used to mean the device never actually rebooted.
+	if bt.Agent != nil {
+		bt.Agent.Stop() // unregister the agent again
+	}
+	if bt.Controller == nil {
+		log.Println("Bluetooth: no controller to tear down")
+		bt.DisableBridge()
+		return
+	}
 	if ci, err := bt.Controller.ReadControllerInformation(); err == nil {
 		if ci.ServiceNetworkServerNap {
 			bt.UnregisterNetworkServer(toolz.UUID_NETWORK_SERVER_NAP)

@@ -11,26 +11,26 @@ const (
 	DEFAULT_RNDIS_DEV_ADDR    = "42:63:65:56:34:12"
 	USB_ETHERNET_BRIDGE_MAC   = "24:22:26:12:14:16"
 	USB_ETHERNET_BRIDGE_NAME  = "usbeth"
-	BT_ETHERNET_BRIDGE_MAC   = "44:22:26:12:14:16"
-	BT_ETHERNET_BRIDGE_NAME  = "bteth"
-	WIFI_ETHERNET_IFACE_NAME = "wlan0"
+	BT_ETHERNET_BRIDGE_MAC    = "44:22:26:12:14:16"
+	BT_ETHERNET_BRIDGE_NAME   = "bteth"
+	WIFI_ETHERNET_IFACE_NAME  = "wlan0"
 )
 
-func GetDefaultBluetoothSettings() (*pb.BluetoothSettings) {
+func GetDefaultBluetoothSettings() *pb.BluetoothSettings {
 	return &pb.BluetoothSettings{
 		Ci: &pb.BluetoothControllerInformation{
 			ServiceNetworkServerPanu: false,
-			ServiceNetworkServerGn: false,
-			ServiceNetworkServerNap: true,
-			Name: "P4wnP1",
+			ServiceNetworkServerGn:   false,
+			ServiceNetworkServerNap:  true,
+			Name:                     "P4wnP1",
 			CurrentSettings: &pb.BluetoothControllerSettings{
-				Powered: true,
-				Connectable: true,
-				Bondable: true,
-				Discoverable: true,
-				LowEnergy: false,
+				Powered:             true,
+				Connectable:         true,
+				Bondable:            true,
+				Discoverable:        true,
+				LowEnergy:           false,
 				SecureSimplePairing: false, //we start with PIN based auth
-				HighSpeed: false, // not possible with SSP off
+				HighSpeed:           false, // not possible with SSP off
 			},
 		},
 		As: &pb.BluetoothAgentSettings{
@@ -39,21 +39,21 @@ func GetDefaultBluetoothSettings() (*pb.BluetoothSettings) {
 	}
 }
 
-func GetDefaultNetworkSettingsBluetooth() (*pb.EthernetInterfaceSettings) {
+func GetDefaultNetworkSettingsBluetooth() *pb.EthernetInterfaceSettings {
 	ifSettings := &pb.EthernetInterfaceSettings{
-		Name:       BT_ETHERNET_BRIDGE_NAME,
-		Enabled:    true,
-		Mode:       pb.EthernetInterfaceSettings_DHCP_SERVER,
-		IpAddress4: "172.26.0.1",
-		Netmask4:   "255.255.255.0",
+		Name:               BT_ETHERNET_BRIDGE_NAME,
+		Enabled:            true,
+		Mode:               pb.EthernetInterfaceSettings_DHCP_SERVER,
+		IpAddress4:         "172.26.0.1",
+		Netmask4:           "255.255.255.0",
 		DhcpServerSettings: GetDefaultDHCPConfigBluetooth(),
 	}
 	return ifSettings
 }
 
-func GetDefaultNetworkSettingsUSB() (*pb.EthernetInterfaceSettings) {
+func GetDefaultNetworkSettingsUSB() *pb.EthernetInterfaceSettings {
 	//configure 172.24.0.1/255.255.255.252 for usbeth
-	ifSettings := &pb.EthernetInterfaceSettings {
+	ifSettings := &pb.EthernetInterfaceSettings{
 		Enabled:            true,
 		Name:               USB_ETHERNET_BRIDGE_NAME,
 		IpAddress4:         "172.16.0.1",
@@ -64,8 +64,8 @@ func GetDefaultNetworkSettingsUSB() (*pb.EthernetInterfaceSettings) {
 	return ifSettings
 }
 
-func GetDefaultNetworkSettingsWiFi() (*pb.EthernetInterfaceSettings) {
-	ifSettings := &pb.EthernetInterfaceSettings {
+func GetDefaultNetworkSettingsWiFi() *pb.EthernetInterfaceSettings {
+	ifSettings := &pb.EthernetInterfaceSettings{
 		Enabled:            true,
 		Name:               WIFI_ETHERNET_IFACE_NAME,
 		Mode:               pb.EthernetInterfaceSettings_DHCP_SERVER,
@@ -90,8 +90,8 @@ func GetDefaultDHCPConfigUSB() (settings *pb.DHCPServerSettings) {
 		},
 		Options: map[uint32]string{
 			//Note: Options 1 (Netmask), 12 (Hostname) and 28 (Broadcast Address) are still enabled
-			3:   "", //Disable option: Router
-			6:   "", //Disable option: DNS
+			3: "", //Disable option: Router
+			6: "", //Disable option: DNS
 			//252: "http://172.16.0.1/wpad.dat",
 		},
 	}
@@ -114,8 +114,8 @@ func GetDefaultDHCPConfigBluetooth() (settings *pb.DHCPServerSettings) {
 			&pb.DHCPServerRange{RangeLower: "172.26.0.2", RangeUpper: "172.26.0.20", LeaseTime: "5m"},
 		},
 		Options: map[uint32]string{
-			3:   "172.26.0.1", //Disable option: Router
-			6:   "172.26.0.1", //Disable option: DNS
+			3: "172.26.0.1", //Disable option: Router
+			6: "172.26.0.1", //Disable option: DNS
 		},
 	}
 	return
@@ -133,8 +133,8 @@ func GetDefaultDHCPConfigWiFi() (settings *pb.DHCPServerSettings) {
 			&pb.DHCPServerRange{RangeLower: "172.24.0.2", RangeUpper: "172.24.0.20", LeaseTime: "5m"},
 		},
 		Options: map[uint32]string{
-			3:   "", //Disable option: Router
-			6:   "", //Disable option: DNS
+			3: "", //Disable option: Router
+			6: "", //Disable option: DNS
 		},
 	}
 	return
@@ -171,8 +171,8 @@ func GetDefaultGadgetSettings() (res pb.GadgetSettings) {
 			DevAddr:  DEFAULT_CDC_ECM_DEV_ADDR,
 		},
 		UmsSettings: &pb.GadgetSettingsUMS{
-			File:"", //we don't supply an image file, which is no problem as it could be applied later on (removable media)
-			Cdrom:false, //By default we don't emulate a CD drive, but a flashdrive
+			File:  "",    //we don't supply an image file, which is no problem as it could be applied later on (removable media)
+			Cdrom: false, //By default we don't emulate a CD drive, but a flashdrive
 		},
 	}
 

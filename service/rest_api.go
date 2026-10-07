@@ -300,10 +300,10 @@ func (s *sseEventStream) comment(text string) {
 // interface and are no-ops or errors rather than panics, so an unexpected call
 // degrades instead of taking the service down.
 
-func (s *sseEventStream) Context() context.Context      { return s.ctx }
-func (s *sseEventStream) SetHeader(metadata.MD) error   { return nil }
-func (s *sseEventStream) SendHeader(metadata.MD) error  { return nil }
-func (s *sseEventStream) SetTrailer(metadata.MD)        {}
+func (s *sseEventStream) Context() context.Context     { return s.ctx }
+func (s *sseEventStream) SetHeader(metadata.MD) error  { return nil }
+func (s *sseEventStream) SendHeader(metadata.MD) error { return nil }
+func (s *sseEventStream) SetTrailer(metadata.MD)       {}
 func (s *sseEventStream) SendMsg(m interface{}) error {
 	e, ok := m.(*pb.Event)
 	if !ok {

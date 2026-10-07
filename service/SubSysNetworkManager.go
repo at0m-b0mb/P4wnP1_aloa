@@ -18,9 +18,9 @@ var (
 	ErrUnmanagedInterface = errors.New("Not a managed network interface")
 )
 
-func NewNetworkManager(rootService *Service) (nm *NetworkManager, err error){
+func NewNetworkManager(rootService *Service) (nm *NetworkManager, err error) {
 	nm = &NetworkManager{
-		rootSvc: rootService,
+		rootSvc:           rootService,
 		ManagedInterfaces: make(map[string]*NetworkInterfaceManager),
 	}
 
@@ -28,36 +28,43 @@ func NewNetworkManager(rootService *Service) (nm *NetworkManager, err error){
 
 	// USB
 	err = nm.AddManagedInterface(GetDefaultNetworkSettingsUSB())
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	// WiFi
 	err = nm.AddManagedInterface(GetDefaultNetworkSettingsWiFi())
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	// Bluetooth
 	err = nm.AddManagedInterface(GetDefaultNetworkSettingsBluetooth())
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 
 	//ToDo: Deploy all settings once, to assure consistency of server state and real adapter configuration
 
 	return nm, nil
 }
 
-
 type NetworkManager struct {
 	ManagedInterfaces map[string]*NetworkInterfaceManager
-	rootSvc *Service
+	rootSvc           *Service
 }
 
 func (nm *NetworkManager) AddManagedInterface(startupConfig *pb.EthernetInterfaceSettings) (err error) {
-	nim,err := NewNetworkInterfaceManager(nm, startupConfig.Name, startupConfig)
-	if err != nil { return err }
+	nim, err := NewNetworkInterfaceManager(nm, startupConfig.Name, startupConfig)
+	if err != nil {
+		return err
+	}
 	nm.ManagedInterfaces[startupConfig.Name] = nim
 	return
 }
 
 func (nm *NetworkManager) GetManagedInterfaceNames() (ifnames []string) {
 	ifnames = make([]string, len(nm.ManagedInterfaces))
-	i:=0
-	for name,_ := range nm.ManagedInterfaces {
+	i := 0
+	for name, _ := range nm.ManagedInterfaces {
 		ifnames[i] = name
 		i += 1
 	}
@@ -72,23 +79,21 @@ func (nm *NetworkManager) GetManagedInterface(name string) (nim *NetworkInterfac
 	}
 }
 
-
-
 type NetworkInterfaceState struct {
 	InterfacePresent bool
-	CurrentSettings *pb.EthernetInterfaceSettings
+	CurrentSettings  *pb.EthernetInterfaceSettings
 }
 
 // ToDo: interface watcher (up/down --> auto redeploy)
 type NetworkInterfaceManager struct {
-	nm *NetworkManager
+	nm            *NetworkManager
 	InterfaceName string
-	state *NetworkInterfaceState
+	state         *NetworkInterfaceState
 
-	CmdDnsmasq        *exec.Cmd
-	mutexDnsmasq      *sync.Mutex
-	LoggerDnsmasq     *util.TeeLogger
-	leaseMonitor *dnsmasqLeaseMonitor
+	CmdDnsmasq    *exec.Cmd
+	mutexDnsmasq  *sync.Mutex
+	LoggerDnsmasq *util.TeeLogger
+	leaseMonitor  *dnsmasqLeaseMonitor
 }
 
 func (nim *NetworkInterfaceManager) GetState() (res *NetworkInterfaceState) {
@@ -118,12 +123,12 @@ func (nim *NetworkInterfaceManager) OnReceivedDhcpRelease(release *DhcpLease) {
 
 func (nim *NetworkInterfaceManager) ReDeploy() (err error) {
 	/*
-	if settings, existing := ServiceState.StoredNetworkSettings[ifName]; existing {
-		log.Printf("Redeploying stored Network settings for interface '%s' ...\n", ifName)
-		return ConfigureInterface(settings)
-	} else {
-		return errors.New(fmt.Sprintf("No stored interface settings found for '%s'\n", ifName))
-	}
+		if settings, existing := ServiceState.StoredNetworkSettings[ifName]; existing {
+			log.Printf("Redeploying stored Network settings for interface '%s' ...\n", ifName)
+			return ConfigureInterface(settings)
+		} else {
+			return errors.New(fmt.Sprintf("No stored interface settings found for '%s'\n", ifName))
+		}
 	*/
 	return nim.DeploySettings(nim.state.CurrentSettings)
 }
@@ -147,7 +152,9 @@ func (nim *NetworkInterfaceManager) DeploySettings(settings *pb.EthernetInterfac
 	case pb.EthernetInterfaceSettings_MANUAL:
 		//Generate net
 		ipNet, err := IpNetFromIPv4AndNetmask(settings.IpAddress4, settings.Netmask4)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 
 		//Flush old IPs
 		netlink.NetworkLinkFlush(iface)
@@ -158,21 +165,29 @@ func (nim *NetworkInterfaceManager) DeploySettings(settings *pb.EthernetInterfac
 		if settings.Enabled {
 			log.Printf("Setting Interface %s to UP\n", iface.Name)
 			err = netlink.NetworkLinkUp(iface)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 			log.Printf("Setting Interface %s to MULTICAST to ON\n", iface.Name)
 			err = netlink.NetworkSetMulticast(iface, true)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 
 		} else {
 			log.Printf("Setting Interface %s to DOWN\n", iface.Name)
 			err = netlink.NetworkLinkDown(iface)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 		}
 
 	case pb.EthernetInterfaceSettings_DHCP_SERVER:
 		//Generate net
 		ipNet, err := IpNetFromIPv4AndNetmask(settings.IpAddress4, settings.Netmask4)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 
 		//Flush old IPs
 		netlink.NetworkLinkFlush(iface)
@@ -183,11 +198,14 @@ func (nim *NetworkInterfaceManager) DeploySettings(settings *pb.EthernetInterfac
 		if settings.Enabled {
 			log.Printf("Setting Interface %s to UP\n", iface.Name)
 			err = netlink.NetworkLinkUp(iface)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 			log.Printf("Setting Interface %s to MULTICAST to ON\n", iface.Name)
 			err = netlink.NetworkSetMulticast(iface, true)
-			if err != nil { return err }
-
+			if err != nil {
+				return err
+			}
 
 			//check DhcpServerSettings
 			if settings.DhcpServerSettings == nil {
@@ -198,7 +216,9 @@ func (nim *NetworkInterfaceManager) DeploySettings(settings *pb.EthernetInterfac
 			ifName := settings.Name
 			confName := NameConfigFileDHCPSrv(ifName)
 			err = DHCPCreateConfigFile(settings.DhcpServerSettings, confName)
-			if err != nil {return err}
+			if err != nil {
+				return err
+			}
 			//stop already running DHCPServers for the interface
 			nim.StopDHCPServer()
 
@@ -218,27 +238,37 @@ func (nim *NetworkInterfaceManager) DeploySettings(settings *pb.EthernetInterfac
 
 			//start the DHCP server
 			err = nim.StartDHCPServer(confName)
-			if err != nil {return err}
+			if err != nil {
+				return err
+			}
 		} else {
 			log.Printf("Setting Interface %s to DOWN\n", iface.Name)
 			err = netlink.NetworkLinkDown(iface)
 		}
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 	case pb.EthernetInterfaceSettings_DHCP_CLIENT:
 		netlink.NetworkLinkFlush(iface)
 		if settings.Enabled {
 			log.Printf("Setting Interface %s to UP\n", iface.Name)
 			err = netlink.NetworkLinkUp(iface)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 			log.Printf("Setting Interface %s to MULTICAST to ON\n", iface.Name)
 			err = netlink.NetworkSetMulticast(iface, true)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 
 			nim.StartDHCPClient()
 		} else {
 			log.Printf("Setting Interface %s to DOWN\n", iface.Name)
 			err = netlink.NetworkLinkDown(iface)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 		}
 
 	}
@@ -254,10 +284,10 @@ func (nim *NetworkInterfaceManager) DeploySettings(settings *pb.EthernetInterfac
 
 func NewNetworkInterfaceManager(nm *NetworkManager, ifaceName string, startupSettings *pb.EthernetInterfaceSettings) (nim *NetworkInterfaceManager, err error) {
 	nim = &NetworkInterfaceManager{
-		nm: nm,
+		nm:            nm,
 		InterfaceName: ifaceName,
-		state: &NetworkInterfaceState{},
-		mutexDnsmasq: &sync.Mutex{},
+		state:         &NetworkInterfaceState{},
+		mutexDnsmasq:  &sync.Mutex{},
 		LoggerDnsmasq: util.NewTeeLogger(false),
 	}
 	nim.leaseMonitor = NewDnsmasqLeaseMonitor(nim)
@@ -265,13 +295,11 @@ func NewNetworkInterfaceManager(nm *NetworkManager, ifaceName string, startupSet
 	//nim.LoggerDnsmasq.SetPrefix("dnsmasq-" + ifaceName + ": ")
 	nim.LoggerDnsmasq.AddOutput(nim.leaseMonitor)
 
-
 	nim.state.CurrentSettings = startupSettings
 	nim.ReDeploy()
 
 	return
 }
-
 
 /* HELPER */
 func nameLeaseFileDHCPSrv(nameIface string) (lf string) {
@@ -280,7 +308,9 @@ func nameLeaseFileDHCPSrv(nameIface string) (lf string) {
 
 func ParseIPv4Mask(maskstr string) (net.IPMask, error) {
 	mask := net.ParseIP(maskstr)
-	if mask == nil { return nil, errors.New("Couldn't parse netmask") }
+	if mask == nil {
+		return nil, errors.New("Couldn't parse netmask")
+	}
 
 	net.ParseCIDR(maskstr)
 	return net.IPv4Mask(mask[12], mask[13], mask[14], mask[15]), nil
@@ -288,17 +318,19 @@ func ParseIPv4Mask(maskstr string) (net.IPMask, error) {
 
 func IpNetFromIPv4AndNetmask(ipv4 string, netmask string) (*net.IPNet, error) {
 	mask, err := ParseIPv4Mask(netmask)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 
 	ip := net.ParseIP(ipv4)
-	if mask == nil { return nil, errors.New("Couldn't parse IP") }
+	if mask == nil {
+		return nil, errors.New("Couldn't parse IP")
+	}
 
 	netw := ip.Mask(mask)
 
 	return &net.IPNet{IP: netw, Mask: mask}, nil
 }
-
-
 
 func CreateBridge(name string) (err error) {
 	return netlink.CreateBridge(name, false)
@@ -312,17 +344,18 @@ func DeleteBridge(name string) error {
 	return netlink.DeleteBridge(name)
 }
 
-//Uses sysfs (not IOCTL)
+// Uses sysfs (not IOCTL)
 func SetBridgeSTP(name string, stp_on bool) (err error) {
 	value := "0"
-	if (stp_on) { value = "1" }
+	if stp_on {
+		value = "1"
+	}
 	return os.WriteFile(fmt.Sprintf("/sys/class/net/%s/bridge/stp_state", name), []byte(value), os.ModePerm)
 }
 
 func SetBridgeForwardDelay(name string, fd uint) (err error) {
 	return os.WriteFile(fmt.Sprintf("/sys/class/net/%s/bridge/forward_delay", name), []byte(fmt.Sprintf("%d", fd)), os.ModePerm)
 }
-
 
 // ToDo: remove error part
 func CheckInterfaceExistence(name string) (res bool) {

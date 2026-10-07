@@ -30,15 +30,12 @@ var (
 	tmpUsbUMSFile        = ""
 	tmpUsbUMSCdromMode   = false
 
-	tmpUsbSerialnumber   = "deadbeef1337"
-	tmpUsbVid            = "0x1d6b"
-	tmpUsbPid            = "0x1347"
-	tmpUsbManufacturer   = "MaMe82"
-	tmpUsbProduct        = "P4wnP1 by MaMe82"
-
-
+	tmpUsbSerialnumber = "deadbeef1337"
+	tmpUsbVid          = "0x1d6b"
+	tmpUsbPid          = "0x1347"
+	tmpUsbManufacturer = "MaMe82"
+	tmpUsbProduct      = "P4wnP1 by MaMe82"
 )
-
 
 func PrintGadgetSettings(gs *pb.GadgetSettings, useJson bool) {
 	res := ""
@@ -48,31 +45,31 @@ func PrintGadgetSettings(gs *pb.GadgetSettings, useJson bool) {
 			res = string(b)
 		}
 	} else {
-//			res = "Composite Gadget\n"
-			res += fmt.Sprintf("Enabled:      %v\n", gs.Enabled)
-			res += fmt.Sprintf("Product:      %s\n", gs.Product)
-			res += fmt.Sprintf("Manufacturer: %s\n", gs.Manufacturer)
-			res += fmt.Sprintf("Serialnumber: %s\n", gs.Serial)
-			res += fmt.Sprintf("PID:          %s\n", gs.Pid)
-			res += fmt.Sprintf("VID:          %s\n", gs.Vid)
-			res += "\n"
-			res += fmt.Sprintf("Functions:\n")
-			res += fmt.Sprintf("    RNDIS:        %v\n", gs.Use_RNDIS)
-			res += fmt.Sprintf("    CDC ECM:      %v\n", gs.Use_CDC_ECM)
-			res += fmt.Sprintf("    Serial:       %v\n", gs.Use_SERIAL)
-			res += fmt.Sprintf("    HID Mouse:    %v\n", gs.Use_HID_MOUSE)
-			res += fmt.Sprintf("    HID Keyboard: %v\n", gs.Use_HID_KEYBOARD)
-			res += fmt.Sprintf("    HID Generic:  %v\n", gs.Use_HID_RAW)
-			res += fmt.Sprintf("    Mass Storage: %v\n", gs.Use_UMS)
+		//			res = "Composite Gadget\n"
+		res += fmt.Sprintf("Enabled:      %v\n", gs.Enabled)
+		res += fmt.Sprintf("Product:      %s\n", gs.Product)
+		res += fmt.Sprintf("Manufacturer: %s\n", gs.Manufacturer)
+		res += fmt.Sprintf("Serialnumber: %s\n", gs.Serial)
+		res += fmt.Sprintf("PID:          %s\n", gs.Pid)
+		res += fmt.Sprintf("VID:          %s\n", gs.Vid)
+		res += "\n"
+		res += fmt.Sprintf("Functions:\n")
+		res += fmt.Sprintf("    RNDIS:        %v\n", gs.Use_RNDIS)
+		res += fmt.Sprintf("    CDC ECM:      %v\n", gs.Use_CDC_ECM)
+		res += fmt.Sprintf("    Serial:       %v\n", gs.Use_SERIAL)
+		res += fmt.Sprintf("    HID Mouse:    %v\n", gs.Use_HID_MOUSE)
+		res += fmt.Sprintf("    HID Keyboard: %v\n", gs.Use_HID_KEYBOARD)
+		res += fmt.Sprintf("    HID Generic:  %v\n", gs.Use_HID_RAW)
+		res += fmt.Sprintf("    Mass Storage: %v\n", gs.Use_UMS)
 
-			if gs.Use_UMS {
-				if gs.UmsSettings.Cdrom {
-					res += fmt.Sprintf("    ---- Storage Mode: CD-Rom\n")
-				} else {
-					res += fmt.Sprintf("    ---- Storage Mode: Flashdrive\n")
-				}
-				res += fmt.Sprintf("    ---- Storage File: %s\n", gs.UmsSettings.File)
+		if gs.Use_UMS {
+			if gs.UmsSettings.Cdrom {
+				res += fmt.Sprintf("    ---- Storage Mode: CD-Rom\n")
+			} else {
+				res += fmt.Sprintf("    ---- Storage Mode: Flashdrive\n")
 			}
+			res += fmt.Sprintf("    ---- Storage File: %s\n", gs.UmsSettings.File)
+		}
 
 	}
 	fmt.Println(res)
@@ -107,7 +104,6 @@ func usbSet(cmd *cobra.Command, args []string) {
 		newGs.Serial = tmpUsbSerialnumber
 	}
 
-
 	newGs.Enabled = !tmpUsbDisableGadget
 	newGs.Use_RNDIS = tmpUsbUseRNDIS
 	newGs.Use_CDC_ECM = tmpUsbUseECM
@@ -116,7 +112,6 @@ func usbSet(cmd *cobra.Command, args []string) {
 	newGs.Use_HID_MOUSE = tmpUsbUseHIDMouse
 	newGs.Use_HID_RAW = tmpUsbUseHIDRaw
 	newGs.Use_UMS = tmpUsbUseUMS
-
 
 	if tmpUsbUseUMS {
 		newGs.UmsSettings.Cdrom = tmpUsbUMSCdromMode
@@ -127,19 +122,18 @@ func usbSet(cmd *cobra.Command, args []string) {
 	}
 
 	//Update service settings
-	deployedGs,err := ClientDeployGadgetSettings(StrRemoteHost, StrRemotePort, newGs)
+	deployedGs, err := ClientDeployGadgetSettings(StrRemoteHost, StrRemotePort, newGs)
 	if err != nil {
 		fmt.Printf("Error deploying Gadget Settings: %v\nReverted to:\n%+v", err, deployedGs)
 		os.Exit(-1)
 		return
 	}
 
-
 	if BoolJson {
-		PrintGadgetSettings(deployedGs,true)
+		PrintGadgetSettings(deployedGs, true)
 	} else {
 		fmt.Println("Successfully deployed USB gadget settings")
-		PrintGadgetSettings(deployedGs,false)
+		PrintGadgetSettings(deployedGs, false)
 	}
 
 	return
@@ -151,7 +145,6 @@ func usbMount(cmd *cobra.Command, args []string) {
 		log.Println(err)
 		return
 	}
-
 
 	if gs.Use_UMS {
 		//gs.UmsSettings.Cdrom = tmpUsbUMSCdromMode
@@ -165,16 +158,15 @@ func usbMount(cmd *cobra.Command, args []string) {
 		os.Exit(-1)
 	}
 
-
 	return
 }
 
 func usbGet(cmd *cobra.Command, args []string) {
 	if gs, err := ClientGetDeployedGadgetSettings(StrRemoteHost, StrRemotePort); err == nil {
 		if BoolJson {
-			PrintGadgetSettings(gs,true)
+			PrintGadgetSettings(gs, true)
 		} else {
-			PrintGadgetSettings(gs,false)
+			PrintGadgetSettings(gs, false)
 		}
 	} else {
 		log.Println(err)
@@ -184,7 +176,9 @@ func usbGet(cmd *cobra.Command, args []string) {
 func usbGetDevicePath(dev devPath) {
 	gs, err := ClientGetDeployedGadgetSettings(StrRemoteHost, StrRemotePort)
 	if err != nil {
-		fmt.Println("%+v\n", err)
+		// Was fmt.Println with a format string, which printed the literal
+		// "%+v" and then the error on the next line.
+		fmt.Printf("%+v\n", err)
 		os.Exit(-1)
 	}
 
@@ -275,7 +269,7 @@ func init() {
 	cmdUsbGet := &cobra.Command{
 		Use:   "get",
 		Short: "Retrieve information on current USB gadget settings",
-		Run: usbGet,
+		Run:   usbGet,
 	}
 	cmdUsbGetDevice := &cobra.Command{
 		Use:   "device",

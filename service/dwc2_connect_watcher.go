@@ -168,13 +168,22 @@ func (d *Dwc2ConnectWatcher) Start() (err error) {
 func (d *Dwc2ConnectWatcher) Stop() error {
 	d.isRunning = false
 
-	// leave dwc2 group
-	if grpId, err := d.fam.GetGroupByName(dwc2_group_name); err == nil {
-		d.genl.DropGroupMembership(grpId)
+	// d.fam is nil on any kernel without the P4wnP1 dwc2 netlink family, which
+	// is every stock Raspberry Pi OS kernel -- Start() returns
+	// EP4wnP1FamilyMissing without ever assigning it. d.genl can be nil for the
+	// same reason. This runs from Service.Stop() ahead of the reboot syscall,
+	// so dereferencing either used to stop the device rebooting at all.
+	if d.fam != nil && d.genl != nil {
+		// leave dwc2 group
+		if grpId, err := d.fam.GetGroupByName(dwc2_group_name); err == nil {
+			d.genl.DropGroupMembership(grpId)
+		}
 	}
-	// close soket
+	if d.genl == nil {
+		return nil
+	}
+	// close socket
 	return d.genl.Close()
-
 }
 
 func NewDwc2ConnectWatcher(rootSvc *Service) (d *Dwc2ConnectWatcher) {

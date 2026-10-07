@@ -756,6 +756,30 @@ func (s *server) FSReadFile(ctx context.Context, req *pb.ReadFileRequest) (resp 
 		return nil, err
 	}
 
+	// req.Len is an int64 straight off the wire. Allocating it unchecked is a
+	// remote kill switch: one malformed request from any token holder asks for
+	// a multi-gigabyte slice on a 512MB device.
+	//
+	// Note what this does and does not mitigate. A huge-but-representable
+	// length is not a catchable panic -- it is a runtime out-of-memory fatal
+	// throw, or the OOM killer -- and recover() cannot intercept either. The
+	// bounds check below IS the mitigation; the panic-recovery interceptor
+	// added alongside it does not help here.
+	//
+	// Len == 0 is left legal on purpose: a zero-length read returning
+	// ReadCount 0 is the end-of-file sentinel the client download loop keys on,
+	// so rejecting it would break file downloads.
+	if req.Len < 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "negative read length %d", req.Len)
+	}
+	if req.Len > maxReadChunk {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"read length %d exceeds the %d byte limit", req.Len, maxReadChunk)
+	}
+	if req.Start < 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "negative read offset %d", req.Start)
+	}
+
 	chunk := make([]byte, req.Len)
 	n, err := common.ReadFile(filePath, req.Start, chunk, perm)
 	if err == io.EOF {
@@ -1165,6 +1189,11 @@ func StartRpcWebServer(host string, port string) {
 
 // errWifiUnavailable is returned by the WiFi RPCs when the subsystem failed to
 // initialise (no wlan0 on this board, or hostapd/wpa_supplicant missing).
+// maxReadChunk caps a single FSReadFile allocation. The largest thing anyone
+// legitimately reads through this API is a HIDScript or a template; 8MiB is
+// generous for both and small enough to be harmless on a 512MB Pi Zero W.
+const maxReadChunk = 8 << 20
+
 const errWifiUnavailable = "the WiFi subsystem is unavailable on this device"
 
 // wifiCurrentSettings returns the deployed WiFi settings, or nil when the
@@ -1188,9 +1217,20 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 	// bearer token in metadata. There is no exempt-method list -- there
 	// are no RPCs that should be reachable without auth. (The HTTP
 	// /api/auth/login endpoint is what callers use to obtain a token.)
+	// Interceptor order matters: recovery is OUTERMOST so it also covers a
+	// panic raised inside the auth interceptor itself. grpc-go does not
+	// recover handler panics on its own, so without this any panic anywhere in
+	// a handler takes down the whole process -- and this device is an
+	// appliance, so that means it stops being reachable at all.
 	s := grpc.NewServer(
-		grpc.UnaryInterceptor(auth.UnaryInterceptor(authMgr)),
-		grpc.StreamInterceptor(auth.StreamInterceptor(authMgr)),
+		grpc.ChainUnaryInterceptor(
+			recoveryUnaryInterceptor,
+			auth.UnaryInterceptor(authMgr),
+		),
+		grpc.ChainStreamInterceptor(
+			recoveryStreamInterceptor,
+			auth.StreamInterceptor(authMgr),
+		),
 	)
 	pb.RegisterP4WNP1Server(s, srv)
 
@@ -1209,7 +1249,13 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 	log.Printf("P4wnP1 gRPC server listening on %s", listen_address_grpc)
 
 	//Wrap the server into a gRPC-web server
-	grpc_web_srv := grpcweb.WrapServer(s, grpcweb.WithWebsockets(true))
+	// The library default is originFunc = allow-everything with
+	// AllowCredentials:true, which answers CORS preflights from any website.
+	// Every shipped client is same-origin, so deny cross-origin outright.
+	grpc_web_srv := grpcweb.WrapServer(s,
+		grpcweb.WithWebsockets(true),
+		grpcweb.WithOriginFunc(func(string) bool { return false }),
+	)
 
 	// HTTP auth handler -- serves /api/auth/login + whoami + changepw +
 	// logout + health. These bypass the gRPC interceptor entirely; the

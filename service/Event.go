@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/mame82/P4wnP1_aloa/common_web"
 	"github.com/mame82/P4wnP1_aloa/hid"
@@ -9,7 +10,6 @@ import (
 	"log"
 	"sync"
 	"time"
-	"errors"
 )
 
 type EventManager struct {
@@ -18,17 +18,17 @@ type EventManager struct {
 	cancel     context.CancelFunc
 
 	registeredReceiversMutex *sync.Mutex
-	registeredReceivers  map[*EventReceiver]bool
-	registerReceiver chan *EventReceiver
-	unregisterReceiver chan *EventReceiver
+	registeredReceivers      map[*EventReceiver]bool
+	registerReceiver         chan *EventReceiver
+	unregisterReceiver       chan *EventReceiver
 }
 
 func NewEventManager(queueSize int) *EventManager {
 	EvMgr := &EventManager{
-		eventQueue:           make(chan *pb.Event, queueSize),
-		registeredReceivers:  make(map[*EventReceiver]bool),
-		registerReceiver: make(chan *EventReceiver),
-		unregisterReceiver: make(chan *EventReceiver),
+		eventQueue:               make(chan *pb.Event, queueSize),
+		registeredReceivers:      make(map[*EventReceiver]bool),
+		registerReceiver:         make(chan *EventReceiver),
+		unregisterReceiver:       make(chan *EventReceiver),
 		registeredReceiversMutex: &sync.Mutex{},
 	}
 	EvMgr.ctx, EvMgr.cancel = context.WithCancel(context.Background())
@@ -66,10 +66,8 @@ func (em *EventManager) RegisterReceiver(filterEventType int64) *EventReceiver {
 		Ctx:             ctx,
 		Cancel:          cancel,
 		FilterEventType: filterEventType,
-		waitRegister: make(chan struct{}),
+		waitRegister:    make(chan struct{}),
 	}
-
-
 
 	em.registerReceiver <- er
 	er.isRegistered = true
@@ -78,9 +76,8 @@ func (em *EventManager) RegisterReceiver(filterEventType int64) *EventReceiver {
 	<-er.waitRegister
 
 	go func() {
-		<- er.Ctx.Done() //continue watching and assure unregister as soon as possible if canceled
+		<-er.Ctx.Done() //continue watching and assure unregister as soon as possible if canceled
 		em.UnregisterReceiver(er)
-
 
 	}()
 
@@ -132,14 +129,14 @@ func (em *EventManager) register_unregister() {
 loop:
 	for {
 		select {
-		case er := <- em.registerReceiver:  // Fix: this would already unlock the RegisterReceiver method ...
+		case er := <-em.registerReceiver: // Fix: this would already unlock the RegisterReceiver method ...
 			em.registeredReceiversMutex.Lock()
 			em.registeredReceivers[er] = true // ... but only at this point it is assured that the Listener receives events ...
 			fmt.Printf("Registered event receiver type %d, overall receiver count %d\n", er.FilterEventType, len(em.registeredReceivers))
 			// ... this is solved by signaling the successful registration by closing wait channel (the registerReceiver method doesn't return before this channel is closed)
 			close(er.waitRegister)
 			em.registeredReceiversMutex.Unlock()
-		case er := <- em.unregisterReceiver:
+		case er := <-em.unregisterReceiver:
 			em.registeredReceiversMutex.Lock()
 			delete(em.registeredReceivers, er)
 			er.Cancel() // cancel context BEFORE closing the eventQueue channel
@@ -154,7 +151,7 @@ loop:
 }
 
 type EventReceiver struct {
-	waitRegister chan struct{}
+	waitRegister    chan struct{}
 	isRegistered    bool
 	Ctx             context.Context
 	Cancel          context.CancelFunc
@@ -182,8 +179,9 @@ func ConstructEventNotifyStateChange(stateType common_web.EvtStateChangeType) *p
 		return prefix + "information"
 	case 5:
 		return prefix + "verbose"
- */
+*/
 type LogLevel int
+
 const (
 	LOG_LEVEL_UNDEFINED LogLevel = iota
 	LOG_LEVEL_CRITICAL
@@ -271,7 +269,7 @@ func DeconstructEventTriggerGpioIn(evt *pb.Event) (gpioName string, level bool, 
 		err = e
 		return
 	}
-	if evTypeInt64,match := evt.Values[0].Val.(*pb.EventValue_Tint64); !match {
+	if evTypeInt64, match := evt.Values[0].Val.(*pb.EventValue_Tint64); !match {
 		err = e
 		return
 	} else {
@@ -293,7 +291,7 @@ func DeconstructEventTriggerGroupReceive(evt *pb.Event) (groupName string, value
 		err = e
 		return
 	}
-	if evTypeInt64,match := evt.Values[0].Val.(*pb.EventValue_Tint64); !match {
+	if evTypeInt64, match := evt.Values[0].Val.(*pb.EventValue_Tint64); !match {
 		err = e
 		return
 	} else {
@@ -329,7 +327,6 @@ func ConstructEventHID(hidEvent hid.Event) *pb.Event {
 		vmID = eVM.Id
 	}
 
-
 	unixTimeMillis := time.Now().UnixNano() / 1e6
 
 	return &pb.Event{
@@ -342,7 +339,7 @@ func ConstructEventHID(hidEvent hid.Event) *pb.Event {
 			{Val: &pb.EventValue_Tstring{Tstring: resString}},          //result String
 			{Val: &pb.EventValue_Tstring{Tstring: errString}},          //error String (message in case of error)
 			{Val: &pb.EventValue_Tstring{Tstring: message}},            //Mesage text of event
-			{Val: &pb.EventValue_Tint64{Tint64: unixTimeMillis}},      //Timestamp of event genration
+			{Val: &pb.EventValue_Tint64{Tint64: unixTimeMillis}},       //Timestamp of event genration
 		},
 	}
 }

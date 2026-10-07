@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package service
@@ -43,7 +44,6 @@ func NameConfigFileDHCPSrv(nameIface string) string {
 	return fmt.Sprintf("/tmp/dnsmasq_%s.conf", nameIface)
 }
 
-
 func (nim *NetworkInterfaceManager) StartDHCPClient() (err error) {
 	nameIface := nim.InterfaceName
 	log.Printf("Starting DHCP client for interface '%s'...\n", nameIface)
@@ -54,14 +54,14 @@ func (nim *NetworkInterfaceManager) StartDHCPClient() (err error) {
 		return errors.New(fmt.Sprintf("The given interface '%s' doesn't exist", nameIface))
 	}
 
-
 	//We use the run command and allow dhcpcd to daemonize
 	proc := exec.Command("/sbin/dhcpcd", "-b", "-C", "wpa_supplicant", nameIface) //we avoid starting wpa_supplicant along with the dhcp client
 	dhcpcd_out, err := proc.CombinedOutput()
 	//err = proc.Run()
-	if err != nil { return err}
+	if err != nil {
+		return err
+	}
 	fmt.Printf("Dhcpcd output for %s:\n%s", nameIface, dhcpcd_out)
-
 
 	log.Printf("... DHCP client for interface '%s' started\n", nameIface)
 	return nil
@@ -78,18 +78,22 @@ func (nim *NetworkInterfaceManager) IsDHCPClientRunning() (running bool, pid int
 
 	//Check if the pidFile exists
 	if _, err := os.Stat(pid_file); os.IsNotExist(err) {
-		return false, 0,nil //file doesn't exist, so we assume dhcpcd isn't running
+		return false, 0, nil //file doesn't exist, so we assume dhcpcd isn't running
 	}
 
 	//File exists, read the PID
 	content, err := os.ReadFile(pid_file)
-	if err != nil { return false, 0, err}
+	if err != nil {
+		return false, 0, err
+	}
 	pid, err = strconv.Atoi(strings.TrimSuffix(string(content), "\n"))
-	if err != nil { return false, 0, errors.New(fmt.Sprintf("Error parsing PID file %s: %v", pid_file, err))}
+	if err != nil {
+		return false, 0, errors.New(fmt.Sprintf("Error parsing PID file %s: %v", pid_file, err))
+	}
 
 	//With PID given, check if the process is indeed running (pid_file could stay, even if the process has died already)
 	err_kill := syscall.Kill(pid, 0) //sig 0: doesn't send a signal, but error checking is still performed
-	switch err_kill{
+	switch err_kill {
 	case nil:
 		//ToDo: Check if the running process image is indeed dhcpcd
 		return true, pid, nil //Process is running
@@ -104,7 +108,6 @@ func (nim *NetworkInterfaceManager) IsDHCPClientRunning() (running bool, pid int
 	}
 }
 
-
 func (nim *NetworkInterfaceManager) StopDHCPClient() (err error) {
 	nameIface := nim.InterfaceName
 	log.Printf("Stopping DHCP client for interface '%s'...\n", nameIface)
@@ -115,21 +118,20 @@ func (nim *NetworkInterfaceManager) StopDHCPClient() (err error) {
 		return errors.New(fmt.Sprintf("The given interface '%s' doesn't exist", nameIface))
 	}
 
-
 	//We use the run command and allow dhcpcd to daemonize
 	proc := exec.Command("/sbin/dhcpcd", "-x", nameIface)
 	dhcpcd_out, err := proc.CombinedOutput()
 	//err = proc.Run()
-	if err != nil { return err}
+	if err != nil {
+		return err
+	}
 	fmt.Printf("Dhcpcd out for %s:\n%s", nameIface, dhcpcd_out)
-
-
 
 	log.Printf("... DHCP client for interface '%s' stopped\n", nameIface)
 	return nil
 }
 
-func (nim *NetworkInterfaceManager) StartDHCPServer(configPath string) (err error)  {
+func (nim *NetworkInterfaceManager) StartDHCPServer(configPath string) (err error) {
 	nim.mutexDnsmasq.Lock()
 	defer nim.mutexDnsmasq.Unlock()
 
@@ -150,11 +152,9 @@ func (nim *NetworkInterfaceManager) StartDHCPServer(configPath string) (err erro
 		return errors.New(fmt.Sprintf("The given interface '%s' doesn't exist", nameIface))
 	}
 
-
 	nim.CmdDnsmasq = exec.Command("/usr/sbin/dnsmasq", "--log-facility=-", "-k", "-x", pidFileDHCPSrv(nameIface), "-C", configPath)
 	nim.CmdDnsmasq.Stdout = nim.LoggerDnsmasq.LogWriter
 	nim.CmdDnsmasq.Stderr = nim.LoggerDnsmasq.LogWriter
-
 
 	err = nim.CmdDnsmasq.Start()
 	if err != nil {
@@ -162,13 +162,11 @@ func (nim *NetworkInterfaceManager) StartDHCPServer(configPath string) (err erro
 		return errors.New(fmt.Sprintf("Error starting dnsmasq '%v'", err))
 	}
 
-
-
 	log.Printf("... DHCP server for interface '%s' started\n", nameIface)
 	return nil
 }
 
-func (nim *NetworkInterfaceManager) StopDHCPServer() (err error)  {
+func (nim *NetworkInterfaceManager) StopDHCPServer() (err error) {
 	eSuccess := fmt.Sprintf("... dnsmasq for interface '%s' stopped", nim.InterfaceName)
 	eCantStop := fmt.Sprintf("... couldn't terminate dnsmasq for interface '%s'", nim.InterfaceName)
 
@@ -182,8 +180,9 @@ func (nim *NetworkInterfaceManager) StopDHCPServer() (err error)  {
 	}
 
 	err = ProcSoftKill(nim.CmdDnsmasq, time.Second)
-	if err != nil { return errors.New(eCantStop) }
-
+	if err != nil {
+		return errors.New(eCantStop)
+	}
 
 	nim.CmdDnsmasq = nil
 	log.Println(eSuccess)
@@ -192,7 +191,9 @@ func (nim *NetworkInterfaceManager) StopDHCPServer() (err error)  {
 
 func DHCPCreateConfigFile(s *pb.DHCPServerSettings, filename string) (err error) {
 	file_content, err := DHCPCreateConfigFileString(s)
-	if err != nil {return}
+	if err != nil {
+		return
+	}
 	err = os.WriteFile(filename, []byte(file_content), os.ModePerm)
 	//ToDo: test config with `dnsmasq -C configfile --test`
 	return
@@ -201,26 +202,29 @@ func DHCPCreateConfigFile(s *pb.DHCPServerSettings, filename string) (err error)
 func DHCPCreateConfigFileString(s *pb.DHCPServerSettings) (config string, err error) {
 	config = fmt.Sprintf("interface=%s\n", s.ListenInterface)
 	//bind only o the given interface, except suppressed by `doNotBindInterface` option
-	if !s.DoNotBindInterface { config += fmt.Sprintf("bind-interfaces\n") }
+	if !s.DoNotBindInterface {
+		config += fmt.Sprintf("bind-interfaces\n")
+	}
 	config += fmt.Sprintf("port=%d\n", s.ListenPort)
-	if len(s.CallbackScript) > 0 { config += fmt.Sprintf("dhcp-script=%s\n", s.CallbackScript) }
+	if len(s.CallbackScript) > 0 {
+		config += fmt.Sprintf("dhcp-script=%s\n", s.CallbackScript)
+	}
 	if len(s.LeaseFile) > 0 {
 		config += fmt.Sprintf("dhcp-leasefile=%s\n", s.LeaseFile)
 	} else {
 		config += fmt.Sprintf("dhcp-leasefile=%s\n", leaseFileDHCPSrv(s)) //default lease file
 	}
 
-
 	//Iterate over Ranges
 	for _, pRange := range s.Ranges {
 		//ToDo: regex check for leaseTime
 		/*
-		If the lease time is
-              given, then leases will be given for that length of  time.  The
-              lease  time is in seconds, or minutes (eg 45m) or hours (eg 1h)
-              or "infinite". If not given, the  default  lease  time  is  one
-              hour.  The  minimum lease time is two minutes
-		 */
+				If the lease time is
+		              given, then leases will be given for that length of  time.  The
+		              lease  time is in seconds, or minutes (eg 45m) or hours (eg 1h)
+		              or "infinite". If not given, the  default  lease  time  is  one
+		              hour.  The  minimum lease time is two minutes
+		*/
 		//ToDo: check rangeLower + rangeUpper to be valid IP addresses
 		if len(pRange.LeaseTime) > 0 {
 			config += fmt.Sprintf("dhcp-range=%s,%s,%s\n", pRange.RangeLower, pRange.RangeUpper, pRange.LeaseTime)
@@ -248,11 +252,13 @@ func DHCPCreateConfigFileString(s *pb.DHCPServerSettings) (config string, err er
 		config += o_str
 	}
 	config += fmt.Sprintf("log-dhcp\n") //extensive logging by default
-	if (!s.NotAuthoritative) { config += fmt.Sprintf("dhcp-authoritative\n") }
+	if !s.NotAuthoritative {
+		config += fmt.Sprintf("dhcp-authoritative\n")
+	}
 
 	//Iterate over static hosts
-	for _,host := range s.StaticHosts {
-		config+=fmt.Sprintf("dhcp-host=%s,%s\n", host.Mac, host.Ip)
+	for _, host := range s.StaticHosts {
+		config += fmt.Sprintf("dhcp-host=%s,%s\n", host.Mac, host.Ip)
 	}
 
 	return
@@ -262,13 +268,12 @@ func DHCPCreateConfigFileString(s *pb.DHCPServerSettings) (config string, err er
 var reLease = regexp.MustCompile(".*DHCPACK\\((.*)\\) ([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}) ([0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}) (.*)")
 var reRelease = regexp.MustCompile(".*DHCPRELEASE\\((.*)\\) ([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}) ([0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2})")
 
-
 type DhcpLease struct {
 	Release bool
-	Iface string
-	Ip net.IP
-	Mac net.HardwareAddr
-	Host string //only used for lease, not release
+	Iface   string
+	Ip      net.IP
+	Mac     net.HardwareAddr
+	Host    string //only used for lease, not release
 }
 
 type dnsmasqLeaseMonitor struct {
@@ -278,9 +283,9 @@ type dnsmasqLeaseMonitor struct {
 func (m *dnsmasqLeaseMonitor) Write(p []byte) (n int, err error) {
 
 	/*
-	dnsmasq-wlan0: 16:53:49 dnsmasq-dhcp[1855]: 1450307105 DHCPACK(wlan0) 172.24.0.18 34:e6:xx:xx:xx:xx who-knows
-	dnsmasq-wlan0: 16:53:58 dnsmasq-dhcp[1855]: 4200697351 DHCPRELEASE(wlan0) 172.24.0.18 34:e6:xx:xx:xx:xx
-	 */
+		dnsmasq-wlan0: 16:53:49 dnsmasq-dhcp[1855]: 1450307105 DHCPACK(wlan0) 172.24.0.18 34:e6:xx:xx:xx:xx who-knows
+		dnsmasq-wlan0: 16:53:58 dnsmasq-dhcp[1855]: 4200697351 DHCPRELEASE(wlan0) 172.24.0.18 34:e6:xx:xx:xx:xx
+	*/
 	lineScanner := bufio.NewScanner(bytes.NewReader(p))
 	lineScanner.Split(bufio.ScanLines)
 	for lineScanner.Scan() {
@@ -294,8 +299,10 @@ func (m *dnsmasqLeaseMonitor) Write(p []byte) (n int, err error) {
 				lease := &DhcpLease{}
 				lease.Iface = leaseMatches[1]
 				lease.Ip = net.ParseIP(leaseMatches[2])
-				mac,errP := net.ParseMAC(leaseMatches[3])
-				if errP != nil { continue } //ignore if mac address couldn't be parsed
+				mac, errP := net.ParseMAC(leaseMatches[3])
+				if errP != nil {
+					continue
+				} //ignore if mac address couldn't be parsed
 				lease.Mac = mac
 				if len(leaseMatches) > 4 {
 					//assume 4th match is hostname
@@ -305,12 +312,10 @@ func (m *dnsmasqLeaseMonitor) Write(p []byte) (n int, err error) {
 			}
 
 			/*
-			for i,m := range leaseMatches {
-				fmt.Printf("\tRegex lease %d: %s\n", i, m)
-			}
+				for i,m := range leaseMatches {
+					fmt.Printf("\tRegex lease %d: %s\n", i, m)
+				}
 			*/
-
-
 
 		case strings.Contains(line, "DHCPRELEASE"):
 			//fmt.Printf("Lease monitor %s RELEASE: %s\n", m.nim.InterfaceName, line)
@@ -319,8 +324,10 @@ func (m *dnsmasqLeaseMonitor) Write(p []byte) (n int, err error) {
 				release := &DhcpLease{}
 				release.Iface = leaseMatches[1]
 				release.Ip = net.ParseIP(leaseMatches[2])
-				mac,errP := net.ParseMAC(leaseMatches[3])
-				if errP != nil { continue } //ignore if mac address couldn't be parsed
+				mac, errP := net.ParseMAC(leaseMatches[3])
+				if errP != nil {
+					continue
+				} //ignore if mac address couldn't be parsed
 				release.Mac = mac
 				release.Release = true
 
@@ -331,10 +338,8 @@ func (m *dnsmasqLeaseMonitor) Write(p []byte) (n int, err error) {
 
 	}
 
-
-	return len(p),nil
+	return len(p), nil
 }
-
 
 func NewDnsmasqLeaseMonitor(nim *NetworkInterfaceManager) *dnsmasqLeaseMonitor {
 	return &dnsmasqLeaseMonitor{
