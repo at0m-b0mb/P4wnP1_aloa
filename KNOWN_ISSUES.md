@@ -1,6 +1,6 @@
 # Known issues
 
-Last refreshed: 2026-10-07, for v0.3.1. Two audit passes (96 agents, then 57)
+Last refreshed: 2026-10-07, for v0.4.0. Two audit passes (96 agents, then 57)
 in which every high-severity finding was independently re-checked by a second
 reviewer before being accepted, plus a pass driving the console by hand against
 the real service, which is where the worst bug in this list was found.
@@ -99,6 +99,37 @@ dropped-argument format strings and three unreachable returns.
 
 Build tags gated the core service to 32-bit ARM. They were incidental, not a
 real dependency. Pi Zero 2 W / 3 / 4 / 5 now build.
+
+---
+
+## Added in v0.4.0 -- the OLED screen
+
+A second way to drive the device: the Waveshare 1.3inch OLED HAT's screen and
+five-way stick, with the same reach as the web console.
+
+### Not verified on hardware
+
+**No OLED HAT has been connected.** The SPI driver, the GPIO joystick reader
+and the panel initialisation cross-compile for both Pi architectures and are
+exercised through interfaces by 41 tests, but no pixel has been lit. What is
+checked without hardware: the SH1106 column offset and charge-pump commands,
+the 128x64 multiplex and COM-pin configuration, the framebuffer's byte layout
+and clipping, debounce and auto-repeat timing on an injected clock, every RPC
+name against `proto/grpc.proto`, and twenty thousand random button presses.
+
+If the panel stays dark, in order of likelihood: SPI is not enabled
+(`dtparam=spi=on`), the controller is SSD1306 rather than SH1106 (pass
+`--controller ssd1306`), or the HAT is strapped for I2C rather than its
+default 4-wire SPI (`--bus i2c`). `journalctl -u p4wnp1-oled` says which.
+
+### Fixed while building it
+
+Two pre-existing bugs that `go vet` surfaced once `./cmd/...` entered the vet
+set: `P4wnP1_service` and `testhid` both passed **unbuffered** channels to
+`signal.Notify`, which sends non-blocking and therefore discards a signal
+delivered before the receiver is ready. On the service that is
+`systemctl stop` appearing to hang until systemd SIGKILLs it, which skips the
+datastore's clean close -- the same class as the reboot bug fixed in v0.2.0.
 
 ---
 

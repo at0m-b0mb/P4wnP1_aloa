@@ -86,6 +86,52 @@ answers the prompt.
 
 ---
 
+## The OLED screen
+
+<p align="center">
+  <img src="docs/img/oled-screens.png" alt="Every screen of the OLED interface" width="760">
+</p>
+
+Fit a **Waveshare 1.3inch OLED HAT** and the device gains a second way to be driven: the screen
+and its five-way stick, with no laptop and no network. Not a status display — the same control
+surface as the console. Loadouts, the USB composition, payloads, running jobs, radio and
+network configs, reflex sets, backups, LED, reboot and shutdown.
+
+```
+up / down     move            KEY1  the action named on the bottom line
+right, press  enter / confirm KEY2  refresh
+left          back            KEY3  home
+```
+
+The bottom line always says what KEY1 does on that screen. Eight unlabelled controls and no
+manual within reach is otherwise a thing you have to memorise, and a thing you have to memorise
+is a thing you stop using.
+
+It authenticates with the machine-local credential the service writes to
+`/run/p4wnp1/local.token`, so there is nothing to configure: it is a local script like any
+other, holding an ordinary session that expires and can be revoked. The image enables SPI and
+installs the unit; a board with **no** HAT fitted boots exactly as before, and the daemon says
+so once in the journal and exits.
+
+**Try it without any hardware at all:**
+
+```bash
+make oled-sim
+```
+
+That runs the whole interface in a browser against a fake device — the same UI, fonts, menus
+and state machine the hardware runs, with a PNG for the panel and buttons for the stick. Point
+`--url` at a real device to drive that instead. `make oled-shots` regenerates the sheet above.
+
+Two details worth knowing if you are wiring your own panel. The HAT is **SH1106**, not SSD1306:
+its RAM is 132 columns wide with the 128-pixel panel centred, so the first visible column is 2,
+and driving it as an SSD1306 shifts every frame two pixels and wraps it. The charge-pump
+command differs too, and sending the wrong one leaves the panel initialised but **unlit**,
+which is indistinguishable from a wiring fault. Both controllers and both buses are supported;
+`--controller ssd1306` and `--bus i2c` are there when you need them.
+
+---
+
 ## The console
 
 <p align="center">
@@ -184,6 +230,8 @@ make verify          # every gate below, in order, cheapest failure first
 make smoke           # run the service in a container, end to end (28 checks)
 make feature-test    # call all 83 RPCs against the real binary (85 checks)
 make access-control  # attack the running service (60 checks, all must FAIL)
+make oled-sim        # drive the OLED interface in a browser, no hardware needed
+make oled-shots      # render every OLED screen to one sheet
 make check-quoting   # values install.sh writes must survive being sourced
 make check-render    # render every console view in jsdom (11 checks)
 make check-rpc       # console RPC payloads vs the .proto
@@ -324,9 +372,13 @@ happily accepted a helper that called itself and removed every table in the cons
 Also verified: both architectures cross-compile and `go vet` is clean for both; 93 test
 functions across the auth, JSON-bridge, PSK-guard and DuckyScript packages pass on linux/arm64;
 images build from official Raspberry Pi OS releases and pass the mount-and-inspect check above;
-and the console was driven **in a real browser against the real service binary** — sign-in, all
+the console was driven **in a real browser against the real service binary** — sign-in, all
 seven views, the live event stream, adding a reflex and reading it back off the API, both themes,
-and a 375px phone viewport with no sideways page scroll.
+and a 375px phone viewport with no sideways page scroll; and the OLED interface has 41 tests of
+its own, covering the SH1106 addressing and charge-pump commands, the debounce timing on an
+injected clock, every RPC name checked against the `.proto`, and twenty thousand random button
+presses that must never panic, never blank the screen and never strand you on a screen you
+cannot leave.
 
 That last one is not a formality. Driving it by hand is what found that the device could not
 authenticate to *itself*: `servicestart.sh` — the fallback that brings up the USB gadget, the
