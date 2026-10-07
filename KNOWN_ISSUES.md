@@ -9,7 +9,7 @@ common workflow. **Medium** — confusing or stale. **Low** — cosmetic.
 
 ---
 
-## Fixed in this pass
+## Fixed in v0.2.0
 
 ### Critical — the service panicked on every cold boot
 
@@ -101,6 +101,63 @@ real dependency. Pi Zero 2 W / 3 / 4 / 5 now build.
 
 ---
 
+## Fixed since v0.2.0
+
+Found by a second audit pass, and by building verification that would have
+caught them the first time. Each is now covered by a check in `make lint`.
+
+### High — badger refused to open after an unclean shutdown
+
+Opened with `Truncate` at its default of `false`. This device's normal power-off
+is being pulled out of a USB port, so an unclean shutdown mid-write is the
+expected case -- and without `Truncate` badger returns "Value log truncate
+required to run DB" and refuses to open, so the template database never loads
+and the service cannot start. `SyncWrites` was already on, so everything
+acknowledged is on disk; truncating discards only what was in flight.
+
+### High — the whole Keystrokes view was non-functional
+
+Every RPC in the HIDScript path used a wrong request shape: `dir` sent as a
+boolean, `content` instead of `data`, an absolute path where a relative one was
+required, and a read with no `len`. You could not run a script, and loading a
+stored one silently returned an empty string. Found and fixed, and
+`tools/check-rpc-shapes.py` now checks every console payload against the proto.
+
+### High — "Use at boot" erased the boot configuration
+
+`SetStartupMasterTemplate` takes a `StringMessage`, whose field is `msg`. The
+console sent `templateName`, which the JSON bridge discarded silently, so the
+button set the boot default to an empty string instead of setting it.
+
+### Medium — device events destroyed in-progress edits
+
+A USB attach or detach re-rendered the whole Cable view, discarding half-entered
+values. That event arrives exactly when someone is most likely to be mid-edit.
+
+### Medium — the focus indicator failed WCAG 1.4.11
+
+An alpha-blended gold measuring 1.27:1 to 1.94:1 against the surfaces it
+appeared on, against a 3:1 requirement. Now solid, 5.19:1 to 11.34:1, and
+enforced by the contrast suite.
+
+### Medium — a self-recursive helper removed every table
+
+`dataTable()` called itself, so Radio, Reflexes and Loadouts rendered their
+first card and stopped. Valid syntax, so `node --check` passed it. This is why
+`make check-render` exists.
+
+### Medium — tables scrolled the whole page sideways on a phone
+
+At 375px the tables measured 489px, so the page scrolled horizontally and every
+other layout broke with it.
+
+### Low — the job list never refreshed
+
+A HIDScript job finishing produces no event the console can see, so the list
+showed it running until you navigated away and back.
+
+---
+
 ## Open
 
 ### High — no TLS
@@ -109,14 +166,6 @@ The console is served over plain HTTP, so bearer tokens ride in cleartext.
 Acceptable over USB or the device's own WPA2 AP; not acceptable anywhere else.
 A self-signed cert generated at first boot, with fingerprint verification on
 first connect, is the intended fix.
-
-### High — badger is not crash-safe as configured
-
-`dist/db` uses badger v1.5.5 (2018) with default open options. This device is
-normally powered off by being pulled out of a USB port, so an unclean shutdown
-mid-write is the *normal* case, not an edge case. A truncated value log can
-lose recent template changes or fail to open. Needs `Truncate: true` and a
-sync-on-write policy at minimum.
 
 ### Medium — the shipped template database still contains the old defaults
 

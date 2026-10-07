@@ -86,10 +86,11 @@ address, with the attach state driven by real gadget events.
 
 | View | What it is |
 |---|---|
+| **Overview** | What the device is presenting and doing right now, and a plain-language primer if you are new to it |
 | **Cable** | USB composition and the identity the device claims — vendor, product, serial |
 | **Radio** | WiFi state, the Bluetooth controller, and the interface table |
-| **Keystrokes** | HIDScript editor, runner, and job control |
-| **Reflexes** | The trigger/action rules the device acts on by itself |
+| **Keystrokes** | HIDScript editor and runner, with the full function reference on the page |
+| **Reflexes** | Build, arm and delete the trigger/action rules the device runs by itself |
 | **Loadouts** | Whole-device configurations, backup, reboot, shutdown |
 | **Journal** | Everything the device reports, live |
 
@@ -98,7 +99,15 @@ address, with the attach state driven by real gadget events.
   <img src="docs/img/console-journal-dark.jpg" alt="The Journal view, streaming device events live" width="49%">
 </p>
 
-**196KB total, 9 files, no framework and no build step** — 120KB of that is two variable
+It is built to be learnable by someone who has never used a P4wnP1. The
+Overview says in plain words what the device is and what it is doing; every USB
+function explains what the host will see; the HIDScript reference lists all 24
+functions on the page you write scripts on, because they are injected into a
+runtime VM and appear in no file you can open; and failures are translated into
+what went wrong and what to do about it, with a button to the view that fixes
+it, rather than showing the service's own wording.
+
+**196KB total, no framework and no build step** — 120KB of that is two variable
 webfonts, served from the device because this appliance is routinely operated with no internet
 route at all. The smallest supported target is a Pi Zero W: one 1GHz ARM11 core and 512MB of
 RAM. Light and dark themes, and all 18 text and UI colour pairings are checked against WCAG AA
@@ -155,9 +164,13 @@ Everything cross-compiles from macOS or Linux. No Pi required to build.
 make build-armv6     # binaries for Pi Zero / Zero W
 make build-arm64     # binaries for Pi Zero 2 W / 3 / 4 / 5
 make image           # flashable .img.xz for both, via Docker
-make test            # unit tests
-make smoke           # run the service in a container, end to end (21 checks)
-make contrast        # WCAG check on the console palette
+make test            # Go unit tests
+make smoke           # run the service in a container, end to end (24 checks)
+make check-render    # render every console view in jsdom (11 checks)
+make check-rpc       # console RPC payloads vs the .proto
+make check-js        # parse the console JavaScript
+make contrast        # WCAG check on the console palette (21 pairings)
+make mock            # serve the console against a mock device, no Pi needed
 ```
 
 Image building is documented in **[image/README.md](image/README.md)**. Every built image is
@@ -207,7 +220,7 @@ Being specific about this matters more than the feature list.
 **No physical Raspberry Pi was used at any point.**
 
 *Verified by automation.* `make smoke` runs the **real service binary against the real data
-tree in a container** and checks 21 things end to end — all passing:
+tree in a container** and checks 24 things end to end — all passing:
 
 ```
 PASS  firstboot bootstrap writes auth.json 0600      PASS  login returns a token (43 chars)
@@ -227,6 +240,13 @@ That test exists because "it compiles" and "the unit tests pass" were both true 
 the service was panicking on every cold boot. The panic was on a success path, inside a
 constructor, behind a `modprobe` that made a manual restart look healthy. Nothing short of
 starting the binary would have caught it — and it caught a second one while being written.
+
+The console has its own gates, each built after a bug got past the previous one:
+`make check-rpc` compares every RPC payload the console sends against the `.proto`
+(the JSON bridge discards unknown fields, so a misspelled name is silently dropped —
+that produced five real bugs, one of which erased the boot configuration);
+`make check-render` renders all seven views in jsdom (`node --check` only parses, and
+happily accepted a helper that called itself and removed every table in the console).
 
 Also verified: both architectures cross-compile and `go vet` is clean for both; 81 test
 functions across the auth, JSON-bridge, PSK-guard and DuckyScript packages pass on linux/arm64;

@@ -1,5 +1,81 @@
 # changelog
 
+## unreleased -- console usability and stability
+
+A second audit pass over v0.2.0, and the verification that would have caught
+each of these the first time.
+
+### The Keystrokes view did not work at all
+
+Every RPC in the HIDScript path used a wrong request shape -- `dir` sent as a
+boolean, `content` instead of `data`, an absolute path where a relative one was
+required, a read with no `len`, and a response field that does not exist. You
+could not run a script, and loading a stored one silently gave you an empty
+string. That is the core creative task on this device.
+
+### "Use at boot" erased the boot configuration
+
+`SetStartupMasterTemplate` takes a `StringMessage` whose field is `msg`; the
+console sent `templateName`. The JSON bridge discards unknown fields, so the
+request succeeded and set the boot default to an empty string.
+
+### Other fixes
+
+- A self-recursive `dataTable()` helper silently removed every table from
+  Radio, Reflexes and Loadouts. Valid syntax; `node --check` passed it.
+- Tables scrolled the whole page sideways at 375px.
+- A USB attach or detach re-rendered the Cable view and discarded in-progress
+  edits -- an event that arrives exactly when someone is mid-edit.
+- The focus indicator measured 1.27:1 against a 3:1 WCAG requirement.
+- The HID warning was skipped when Keystrokes was deep-linked.
+- The job list never refreshed, so a finished job showed as running.
+- badger opened without `Truncate`, so an unclean shutdown -- the normal way
+  this device is powered off -- left it refusing to open.
+- `rm -rf "$P4ROOT/$d"` in the image builder, unguarded, as root in a chroot.
+
+### Learnability
+
+- **Overview**, now the default view: a plain-language primer on what the
+  device is, a live status strip, and the four concepts explained in the
+  product's own vocabulary. Assembled entirely from existing RPCs.
+- **Reflexes can be built from the UI.** It was read-only -- the device's
+  distinguishing capability was the one thing the console would not let you
+  touch. Create, arm, disarm and delete, with the form driven by the same table
+  that builds the wire payload.
+- **A HIDScript reference** on the page you write scripts on, listing all 24
+  functions the VM exposes. They are injected at runtime and appear in no file
+  an operator can open.
+- **Saving scripts to the device.** There was no way to do it; anything written
+  in the console was lost on navigation.
+- **Each USB function explains itself**, including the one genuinely
+  non-obvious thing: RNDIS is what Windows accepts, CDC ECM is what macOS and
+  Linux accept, and the answer is usually both.
+- **Errors are translated** into what went wrong and what to do, with a button
+  to the view that fixes it.
+- Real dialogs replace all 10 `window.prompt`/`alert`/`confirm` calls. Those
+  could not validate, could not explain consequences, and `prompt()` is blocked
+  outright in some mobile browsers -- and this console is often driven from a
+  phone.
+- Skip link, nav landmark, labelled log region, and tables that scroll in place
+  instead of taking the page with them.
+
+### Verification added
+
+Each of these exists because a bug got past the previous gate.
+
+- `make check-rpc` -- every console RPC payload against the `.proto`. Would
+  have caught all five wrong-field bugs.
+- `make check-render` -- all seven views rendered in jsdom. Catches runtime
+  failures that `node --check` cannot see.
+- `make check-js` -- parses the console JavaScript.
+- `make mock` -- a shape-strict mock device, so the console can be developed
+  with no Pi. The previous mock accepted whatever it was sent, which is what
+  let four wrong field names ship.
+- `make smoke` grew to 24 checks; the contrast suite to 21 pairings, now
+  including the focus indicator.
+- shellcheck widened to the image pipeline and tools.
+
+
 ## v0.2.0 -- 2026-10-06
 
 The project did not work. This release makes it boot, adds a usable interface,
