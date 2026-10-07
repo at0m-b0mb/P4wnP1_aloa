@@ -505,3 +505,18 @@ details.ref > summary:hover { color: var(--text); }
 .concept-plain { color: var(--text-muted); font-size: var(--t-small); }
 .concept-detail { padding: 0 var(--s4) var(--s4); }
 .concept-detail p { margin: 0 0 var(--s3); color: var(--text-muted); max-width: 70ch; }
+
+/* --- richer toasts (title + guidance + action) -------------------------- */
+.toast { position: relative; padding-right: var(--s6); }
+.toast-title { margin: 0; font-weight: 600; color: var(--text); }
+.toast-hint {
+  margin: var(--s1) 0 0; font-size: var(--t-small);
+  color: var(--text-muted); line-height: 1.5;
+}
+.toast-close {
+  position: absolute; top: var(--s2); right: var(--s2);
+  appearance: none; border: 0; background: none; cursor: pointer;
+  font-size: 18px; line-height: 1; color: var(--text-faint);
+  padding: 2px 6px; border-radius: var(--radius);
+}
+.toast-close:hover { color: var(--text); background: var(--surface-sunk); }

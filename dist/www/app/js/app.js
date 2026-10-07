@@ -11,6 +11,131 @@
 /* Shared helpers -- h(), $, clear(), toast(), the dialogs, b64encode/b64decode
  * and the formatters -- live in ui.js, which loads first. */
 
+/* --- turning backend errors into something you can act on ------------------
+ *
+ * The service's error strings are written for whoever was debugging the
+ * subsystem at the time: "HIDScript not available (mouse and keyboard
+ * disabled)", "couldn't find working UDC driver", "Hostapd failed to bring up
+ * Access Point". Each is accurate and none tells an operator what to DO. These
+ * are the failures you actually hit, with the fix attached.
+ *
+ * Matching is on a substring of the backend message, deliberately loose: the
+ * exact wording has changed upstream before, and a translation that silently
+ * stops matching is worse than none. Anything unmatched falls through to the
+ * raw message rather than being swallowed. */
+const ERROR_GUIDE = [
+  {
+    match: /HIDScript (not available|engine disabled)|mouse and keyboard disable/i,
+    message: 'No keyboard or mouse is being presented to the host.',
+    hint: 'A script has nothing to type into. Enable the keyboard or mouse function under Cable and deploy.',
+    action: { label: 'Open Cable', view: 'cable' },
+  },
+  {
+    match: /find working UDC|no UDC|udc driver/i,
+    message: 'The Pi has no USB device controller bound.',
+    hint: 'USB gadget mode is not active, so no USB function can work. Check that config.txt contains "dtoverlay=dwc2" and cmdline.txt contains "modules-load=dwc2", then reboot.',
+  },
+  {
+    match: /gadget .* doesn't exist|USB subsystem not available/i,
+    message: 'The USB gadget is not composed.',
+    hint: 'Deploy a USB composition under Cable first. If that fails too, the device is not in USB gadget mode at all.',
+    action: { label: 'Open Cable', view: 'cable' },
+  },
+  {
+    match: /reverted to old ones/i,
+    message: 'That USB composition was refused, and the previous one was put back.',
+    hint: 'Nothing was lost. A common cause is asking for more functions than the available USB endpoints allow -- try removing one.',
+  },
+  {
+    match: /Hostapd failed|Error starting hostapd/i,
+    message: 'The access point did not start.',
+    hint: 'Most often the WiFi regulatory domain is unset -- hostapd refuses to run without a country code -- or wlan0 is rfkill-blocked. Check the regulatory domain under Radio.',
+    action: { label: 'Open Radio', view: 'radio' },
+  },
+  {
+    match: /WiFi subsystem is unavailable/i,
+    message: 'This device has no usable WiFi.',
+    hint: 'Either the board has no WiFi, wlan0 did not appear at boot, or hostapd and wpa_supplicant are not installed. Everything else on the device still works.',
+  },
+  {
+    match: /no BSS configurations provided/i,
+    message: 'Station mode needs a network to join.',
+    hint: 'You set WiFi to station mode but listed no SSID to connect to.',
+  },
+  {
+    match: /outside the allowed directories|must be relative/i,
+    message: 'That file path is not allowed.',
+    hint: 'The device only reads and writes inside its own script folders and /tmp. This is a guard against reading arbitrary files over the API.',
+  },
+  {
+    match: /key exists already/i,
+    message: 'Something is already stored under that name.',
+    hint: 'Pick a different name, or delete the existing one first.',
+  },
+  {
+    match: /exceeds the .* byte limit|negative read/i,
+    message: 'That read was refused as unreasonable.',
+    hint: 'The file is probably too large to open in the console. Fetch it over SSH instead.',
+  },
+  {
+    match: /Couldn't load any language map/i,
+    message: 'The keyboard layout files are missing.',
+    hint: 'The device cannot type without them. Reinstall, or check /usr/local/P4wnP1/keymaps exists.',
+  },
+  {
+    match: /bluez|bluetooth mgmt-api|Newer Bluez/i,
+    message: 'The Bluetooth stack is not usable.',
+    hint: 'Either no controller was found, or bluetoothd is not running. Bluetooth features are unavailable; the rest of the device is unaffected.',
+  },
+];
+
+/* Returns {message, hint, action} for anything thrown by the API client. */
+function explainError(e, what) {
+  const raw = (e && e.message) ? String(e.message) : String(e || 'unknown error');
+
+  if (e instanceof Api.ApiError) {
+    if (e.status === 403) {
+      return { message: 'The device refused that request as cross-origin.',
+               hint: 'Open the console directly from the device address rather than through another page or a proxy.' };
+    }
+    if (e.status === 415) {
+      return { message: 'The device rejected the request format.', hint: raw };
+    }
+    if (e.status === 501) {
+      return { message: 'That is not implemented on this device yet.', hint: raw };
+    }
+    if (e.status === 503) {
+      return { message: 'That subsystem is unavailable right now.', hint: raw };
+    }
+  }
+
+  for (const g of ERROR_GUIDE) {
+    if (g.match.test(raw)) return { message: g.message, hint: g.hint, action: g.action };
+  }
+
+  /* Unmatched: show it, prefixed with what we were doing, and keep it short
+     enough to read in a toast. A 4KB JSON blob in a toast helps nobody. */
+  const trimmed = raw.length > 240 ? raw.slice(0, 240) + '...' : raw;
+  return { message: (what ? 'Could not ' + what + '.' : 'That did not work.'), hint: trimmed };
+}
+
+/* Toast with guidance, and an action button when there is somewhere to go. */
+function reportError(e, what) {
+  const { message, hint, action } = explainError(e, what);
+  const box = $('#toasts');
+  if (!box) return;
+  const t = h('div.toast.toast-err',
+    h('p.toast-title', message),
+    hint ? h('p.toast-hint', hint) : null,
+    action ? h('button.btn.btn-sm', {
+      type: 'button', style: 'margin-top:8px',
+      onclick: () => { t.remove(); go(action.view); },
+    }, action.label) : null,
+    h('button.toast-close', { type: 'button', 'aria-label': 'Dismiss', onclick: () => t.remove() }, '×'));
+  box.append(t);
+  setTimeout(() => t.remove(), action ? 20000 : 12000);
+}
+
 /* Any RPC can fail because the operator just reconfigured the very interface
    they are talking over. Report it, never swallow it, and bounce to sign-in
    only when the token itself is the problem. */
@@ -18,7 +143,7 @@ async function guard(fn, what) {
   try { return await fn(); }
   catch (e) {
     if (e instanceof Api.ApiError && e.isAuthFailure) { Api.setToken(null); renderSignIn(); return undefined; }
-    toast((what ? what + ': ' : '') + e.message, true);
+    reportError(e, what);
     return undefined;
   }
 }
