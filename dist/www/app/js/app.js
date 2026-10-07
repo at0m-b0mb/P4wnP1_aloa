@@ -523,7 +523,7 @@ Views.radio = async function () {
         figure(wifi.ssid || '--', 'ssid'),
         figure(String(wifi.channel || '--'), 'channel'),
         figure(WIFI_MODE[wifi.mode] || String(wifi.mode), 'mode')),
-      h('table.data', { style: 'margin-top:24px' },
+      dataTable( { style: 'margin-top:24px' },
         h('tbody',
           kvRow('Regulatory domain', cs.regulatory || 'unset',
             cs.regulatory ? null : 'hostapd refuses to start without one; the AP will not appear.'),
@@ -541,7 +541,7 @@ Views.radio = async function () {
         ? h('div.banner.banner-danger',
           h('p.banner-title', 'Controller not available'),
           h('p', 'No usable Bluetooth controller was found. On a Pi this usually means the kernel module or the bluetooth service did not come up.'))
-        : h('table.data',
+        : dataTable(
           h('tbody',
             kvRow('Name', bt.name || '--'),
             kvRow('Short name', bt.short_name || '--'),
@@ -558,7 +558,7 @@ Views.radio = async function () {
   const ETH_MODE = ['manual', 'dhcp client', 'dhcp server', 'unmanaged'];
   main.append(h('div.card',
     h('h2.card-title', 'Interfaces'),
-    list.length ? h('table.data',
+    list.length ? dataTable(
       h('thead', h('tr',
         h('th', 'Interface'), h('th', 'Mode'), h('th', 'Address'), h('th', 'In use'))),
       h('tbody', ...list.map(i => h('tr',
@@ -811,7 +811,7 @@ async function refreshJobs() {
   State.hidJobs = (r && r.ids) || [];
   clear(host);
   if (!State.hidJobs.length) { host.append(h('div.empty', 'None running.')); return; }
-  host.append(h('table.data',
+  host.append(dataTable(
     h('thead', h('tr', h('th', 'Job'), h('th', 'Actions'))),
     h('tbody', ...State.hidJobs.map(id => h('tr',
       h('td.mono', String(id)),
@@ -920,7 +920,7 @@ Views.reflexes = async function () {
       h('span.field-hint', items.length
         ? items.filter(t => t.isActive).length + ' of ' + items.length + ' armed'
         : '')),
-    items.length ? h('table.data',
+    items.length ? dataTable(
       h('thead', h('tr',
         h('th', 'Id'), h('th', 'When'), h('th', 'Then'),
         h('th', 'Once'), h('th', 'State'), h('th', ''))),
@@ -1099,7 +1099,7 @@ Views.loadouts = async function () {
 
   main.append(h('div.card',
     h('h2.card-title', 'Stored loadouts'),
-    names.length ? h('table.data',
+    names.length ? dataTable(
       h('thead', h('tr', h('th', 'Name'), h('th', 'Boot default'), h('th', 'Actions'))),
       h('tbody', ...names.map(n => h('tr',
         h('td.mono', n),
@@ -1276,6 +1276,15 @@ function pageHead(title, note) {
       h('h1', { class: 'page-title display' }, title),
       note ? h('p.page-note', note) : null),
     h('div', { id: 'head-extra' }));
+}
+
+/* Tables carry more columns than a phone is wide. Wrapping them in their own
+   horizontal scroller keeps the PAGE from scrolling sideways -- which breaks
+   every other layout on the screen -- while the table itself stays readable
+   and scrollable in place. */
+function dataTable(...children) {
+  return h('div.table-wrap', { tabindex: '0', role: 'region', 'aria-label': 'Table, scrollable horizontally' },
+    dataTable( ...children));
 }
 
 function kvRow(k, v, hint) {

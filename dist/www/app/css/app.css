@@ -556,3 +556,18 @@ details.builder > summary:hover { color: var(--text); }
 }
 .builder-fields { margin-top: var(--s3); }
 .builder-fields .field:last-child { margin-bottom: 0; }
+
+/* --- tables that are wider than the screen ------------------------------ */
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Focusable so the scroll region is reachable by keyboard, per WCAG 2.1.1;
+     the outline would otherwise sit on a region with no visible boundary. */
+  border-radius: var(--radius);
+}
+.table-wrap:focus-visible { box-shadow: var(--ring); }
+.table-wrap table.data { min-width: 100%; }
+@media (max-width: 820px) {
+  /* Stop long cells from collapsing into one character per line. */
+  .table-wrap table.data { min-width: 440px; }
+}
