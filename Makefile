@@ -3,7 +3,7 @@ PATH := /usr/local/go/bin:$(PATH)
 
 .PHONY: all help compile build-armv6 build-service-armv6 build-cli-armv6 build-hashpw-armv6 \
         build-arm64 build-service-arm64 build-cli-arm64 build-hashpw-arm64 \
-        image image-armhf image-arm64 contrast smoke feature-test verify check-js check-rpc check-render mock dep install installkali remove lint test
+        image image-armhf image-arm64 contrast smoke feature-test access-control verify check-js check-rpc check-render mock dep install installkali remove lint test
 
 all: compile
 
@@ -23,6 +23,8 @@ help:
 	@echo "  make smoke         Run the service in a container and verify it works"
 	@echo "  make feature-test  Exercise all 83 RPCs against the real binary and"
 	@echo "                     report PASS / expected-without-hardware / FAIL"
+	@echo "  make access-control  Attack the running service: every check is an"
+	@echo "                     attack that must FAIL"
 	@echo "  make verify        Run every gate: js, render, rpc shapes, contrast,"
 	@echo "                     unit tests, vet (both arches), smoke, feature-test"
 	@echo "  make check-js      Syntax-check the web console JavaScript"
@@ -119,6 +121,14 @@ smoke:
 feature-test:
 	./tools/feature-test.sh arm64
 
+# The other gates ask "does it work?". This one asks "can it be made to do
+# something it should refuse?" -- every check is an attack that must fail.
+# Several were written by first demonstrating the attack succeeding against
+# the real binary, including a symlink in /tmp that got a root-owned cron job
+# written through the file-IO allowlist.
+access-control:
+	./tools/access-control-test.sh arm64
+
 # The whole suite, in the order that fails cheapest-first.
 verify:
 	./tools/check-js.sh
@@ -131,6 +141,7 @@ verify:
 	$(MAKE) test-linux
 	$(MAKE) smoke
 	$(MAKE) feature-test
+	$(MAKE) access-control
 	@echo
 	@echo "All gates passed."
 
@@ -159,7 +170,7 @@ lint:
 	          build_support/build.sh \
 	          image/build.sh image/lib/stage.sh image/lib/customize.sh image/lib/verify.sh \
 	          tools/smoke-test.sh tools/check-js.sh tools/check-render.sh \
-	          tools/feature-test.sh
+	          tools/feature-test.sh tools/access-control-test.sh tools/live-console.sh
 	@# One shell, not two: each recipe line gets its own shell, so an `exit 0`
 	@# on the guard line ended only that shell and golangci-lint ran anyway --
 	@# which made `make lint` fail on every machine that does not have it.

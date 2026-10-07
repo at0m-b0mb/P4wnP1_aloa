@@ -122,13 +122,45 @@ func TestLocalTokenIsRevokedWithAllSessions(t *testing.T) {
 		t.Fatal("local token survived RevokeAll: it is no longer an ordinary session")
 	}
 
-	// ...and a refresh repairs it, which is what the timer does on the device.
-	if err := m.ProvisionLocalToken(path); err != nil {
-		t.Fatalf("re-provision after revoke: %v", err)
-	}
+	// ...and ChangePassword must have re-issued it immediately, so the file on
+	// disk holds a credential that works RIGHT NOW. The device's own scripts
+	// must not be locked out by an admin changing their password.
 	fresh, _ := ReadLocalToken(path)
-	if _, err := m.ValidateToken(fresh); err != nil {
-		t.Errorf("re-provisioned token does not authenticate: %v", err)
+	if fresh == "" {
+		t.Fatal("no local token on disk after a password change")
+	}
+	if fresh == tok {
+		t.Fatal("the token file still holds the revoked token")
+	}
+	sess, err := m.ValidateToken(fresh)
+	if err != nil {
+		t.Fatalf("the device cannot authenticate to itself after a password change: %v", err)
+	}
+	if sess.Username != LocalUsername {
+		t.Errorf("re-issued session username = %q, want %q", sess.Username, LocalUsername)
+	}
+}
+
+// A password change on a Manager that never issued a local credential must not
+// invent one -- that would create a token file on a host where nothing asked
+// for it.
+func TestChangePasswordDoesNotInventALocalToken(t *testing.T) {
+	m := testManager(t)
+	if err := m.Store.SetPassword("admin", "initial-password-ok"); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+	// Make sure no earlier test left global state behind.
+	if err := m.RemoveLocalToken(); err != nil {
+		t.Fatalf("RemoveLocalToken: %v", err)
+	}
+	if err := m.ChangePassword(nil, "admin", "initial-password-ok", "another-password-ok"); err != nil { //nolint:staticcheck // nil ctx is unused by ChangePassword
+		t.Fatalf("ChangePassword: %v", err)
+	}
+	m.local.mu.Lock()
+	path := m.local.path
+	m.local.mu.Unlock()
+	if path != "" {
+		t.Errorf("a local token was provisioned at %q by a password change", path)
 	}
 }
 

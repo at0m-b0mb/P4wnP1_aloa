@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"io/ioutil"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -34,7 +35,63 @@ func safeJoinUnderBase(base, name string) (string, error) {
 		!strings.HasPrefix(cleanedJoined, cleanedBase+string(filepath.Separator)) {
 		return "", errors.New("path traversal rejected: '" + name + "' escapes '" + base + "'")
 	}
+	// The check above is purely LEXICAL -- filepath.Clean does not consult the
+	// filesystem -- so on its own it proves nothing about where the path leads
+	// once the kernel resolves symlinks. One of the allowed bases is /tmp,
+	// which is world-writable, so any local user can leave a symlink in it for
+	// a root-owned service to follow. That was demonstrated: a non-root user
+	// created /tmp/sub/escalate -> /etc/cron.d/pwned and FSWriteFile wrote a
+	// root-owned cron job through it.
+	//
+	// The kernel's fs.protected_symlinks does NOT cover this. It refuses to
+	// follow a symlink owned by someone else only when the symlink sits
+	// directly in a STICKY world-writable directory; a symlink one level down,
+	// inside an ordinary directory the attacker created, is followed normally.
+	if err := verifyResolvesUnderBase(cleanedBase, cleanedJoined); err != nil {
+		return "", err
+	}
 	return cleanedJoined, nil
+}
+
+// verifyResolvesUnderBase resolves symlinks on the deepest existing ancestor
+// of candidate and confirms it is still inside base.
+//
+// It walks upwards because the candidate frequently does not exist yet -- a
+// write creates it. Whatever the deepest existing ancestor is, THAT is what
+// the kernel will traverse, so that is what must be contained. If the leaf
+// itself exists and is a symlink, EvalSymlinks resolves it here; if it is a
+// dangling symlink, EvalSymlinks fails with ENOENT and the O_NOFOLLOW on the
+// open in common/filesys.go catches it instead. The two checks cover each
+// other's blind spot.
+func verifyResolvesUnderBase(base, candidate string) error {
+	realBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		// A base that does not resolve is a deployment problem, not an attack.
+		return errors.New("cannot resolve allowed directory '" + base + "': " + err.Error())
+	}
+	probe := candidate
+	for {
+		resolved, err := filepath.EvalSymlinks(probe)
+		if err == nil {
+			if resolved != realBase &&
+				!strings.HasPrefix(resolved, realBase+string(filepath.Separator)) {
+				return errors.New("path traversal rejected: '" + candidate +
+					"' resolves through a symlink to '" + resolved +
+					"', outside '" + base + "'")
+			}
+			return nil
+		}
+		if !os.IsNotExist(err) {
+			return err
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			// Walked to the filesystem root without finding anything that
+			// exists. Nothing can be traversed, so nothing can escape.
+			return nil
+		}
+		probe = parent
+	}
 }
 
 // safePathInAllowlist returns the cleaned form of an absolute path iff that

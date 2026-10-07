@@ -52,13 +52,18 @@ const LocalUsername = "local-script"
 
 // localTokenState tracks the token currently on disk so it can be revoked
 // when replaced.
+//
+// This lives on the Manager, NOT at package scope. It was a package-level var,
+// which meant two Managers shared one slot: the second to provision silently
+// took ownership of the first's entry, so the first's session could no longer
+// be revoked by anything and its file was never removed. One Manager also
+// called Revoke() for the other's token against its OWN session map, where it
+// did not exist -- a no-op that looked like a successful revocation.
 type localTokenState struct {
 	mu    sync.Mutex
 	token string
 	path  string
 }
-
-var localState localTokenState
 
 // ProvisionLocalToken mints a session for the device's own scripts and
 // writes the token to path with mode 0600 (parent directory 0700),
@@ -74,11 +79,11 @@ func (m *Manager) ProvisionLocalToken(path string) error {
 		return err
 	}
 
-	localState.mu.Lock()
-	previous := localState.token
-	localState.token = sess.Token
-	localState.path = path
-	localState.mu.Unlock()
+	m.local.mu.Lock()
+	previous := m.local.token
+	m.local.token = sess.Token
+	m.local.path = path
+	m.local.mu.Unlock()
 
 	if previous != "" {
 		m.Sessions.Revoke(previous)
@@ -114,6 +119,30 @@ func writeTokenFile(path, tok string) error {
 	return nil
 }
 
+// ReprovisionLocalTokenIfConfigured re-issues the local credential, but only
+// if one was ever provisioned. Safe to call from anywhere that destroys
+// sessions.
+//
+// Sessions.RevokeAll() does not know that one of the sessions it is wiping
+// belongs to the device itself. Without this, changing the admin password
+// killed the credential servicestart.sh and every trigger action authenticate
+// with, and nothing repaired it until KeepLocalTokenFresh next ticked -- up to
+// twelve hours later. For that whole window a trigger firing on the device
+// would have failed Unauthenticated, which is precisely the outage the local
+// credential exists to prevent.
+func (m *Manager) ReprovisionLocalTokenIfConfigured() {
+	m.local.mu.Lock()
+	path := m.local.path
+	m.local.mu.Unlock()
+
+	if path == "" {
+		return // none was ever issued; nothing to repair
+	}
+	if err := m.ProvisionLocalToken(path); err != nil {
+		fmt.Fprintf(os.Stderr, "could not re-issue the local token after revoking sessions: %v\n", err)
+	}
+}
+
 // KeepLocalTokenFresh re-provisions the local token every half session TTL
 // until stop is closed. Blocks; run it in a goroutine.
 //
@@ -143,12 +172,12 @@ func (m *Manager) KeepLocalTokenFresh(path string, stop <-chan struct{}) {
 // RemoveLocalToken revokes the session and deletes the file. Safe to call
 // when none was provisioned.
 func (m *Manager) RemoveLocalToken() error {
-	localState.mu.Lock()
-	tok := localState.token
-	path := localState.path
-	localState.token = ""
-	localState.path = ""
-	localState.mu.Unlock()
+	m.local.mu.Lock()
+	tok := m.local.token
+	path := m.local.path
+	m.local.token = ""
+	m.local.path = ""
+	m.local.mu.Unlock()
 
 	if tok != "" {
 		m.Sessions.Revoke(tok)

@@ -249,7 +249,25 @@ func apiChangePassword(host, username, oldPw, newPw string) error {
 		Username: username, OldPassword: oldPw, NewPassword: newPw,
 	})
 	url := fmt.Sprintf("http://%s:%s/api/auth/changepw", host, authHTTPPort)
-	resp, err := httpClient.Post(url, "application/json", bytes.NewReader(body))
+
+	// This endpoint requires a bearer token: proving you know the old password
+	// is not enough, because the request also names the account to change.
+	// It was being sent with httpClient.Post, which attaches no headers, so
+	// `P4wnP1_cli auth changepw` answered 401 every single time it was run.
+	// The smoke test asserts that a changepw WITHOUT a token is refused -- a
+	// correct assertion that passed while the CLI sent exactly that shape.
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if tok := CurrentToken(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	} else {
+		return errors.New("not logged in: run 'P4wnP1_cli auth login' first")
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}

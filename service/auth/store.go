@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -41,6 +43,11 @@ type Store struct {
 
 	mu    sync.RWMutex
 	users map[string]string // username -> bcrypt hash
+
+	// loadedMod and loadedSize are the modtime and size of the file as of the
+	// last load, used to notice an out-of-band rewrite. See reloadIfChanged.
+	loadedMod  time.Time
+	loadedSize int64
 }
 
 // NewStore opens the password file at path. If the file doesn't exist, an
@@ -76,7 +83,45 @@ func (s *Store) load() error {
 	for _, u := range file.Users {
 		s.users[u.Username] = u.PasswordHash
 	}
+	if fi, err := os.Stat(s.path); err == nil {
+		s.loadedMod, s.loadedSize = fi.ModTime(), fi.Size()
+	}
 	return nil
+}
+
+// reloadIfChanged re-reads the password file when another process has
+// rewritten it.
+//
+// p4wnp1-hashpw runs as a SEPARATE PROCESS and writes this file directly --
+// that is how first boot seeds the account and how an operator resets a
+// forgotten password. The running service had read the file once at startup
+// and never looked again, so after such a reset the new password was rejected
+// and THE OLD ONE KEPT WORKING until the service happened to restart. A
+// password reset that leaves the old password live is worse than no reset,
+// because the operator believes they have rotated it.
+//
+// Checked on the Verify path rather than with a watcher: this file changes
+// perhaps twice in a device's life, and a stat() per login attempt is
+// immaterial next to the bcrypt comparison that follows it.
+func (s *Store) reloadIfChanged() {
+	if s.path == "" {
+		return // in-memory store, used by tests
+	}
+	fi, err := os.Stat(s.path)
+	if err != nil {
+		return // missing or unreadable: keep what we have
+	}
+	s.mu.RLock()
+	unchanged := fi.ModTime().Equal(s.loadedMod) && fi.Size() == s.loadedSize
+	s.mu.RUnlock()
+	if unchanged {
+		return
+	}
+	if err := s.load(); err != nil {
+		// A corrupt or half-written file must not wipe the users we already
+		// have -- that would lock the operator out of their own device.
+		log.Printf("WARNING: auth: %s changed on disk but could not be re-read: %v", s.path, err)
+	}
 }
 
 // persist writes the current map back to disk atomically (write+rename).
@@ -158,6 +203,9 @@ func (s *Store) SetPassword(username, password string) error {
 // user doesn't exist, so the caller can't distinguish "no such user" from
 // "wrong password" -- standard auth hygiene.
 func (s *Store) Verify(username, password string) bool {
+	// Pick up a rewrite by p4wnp1-hashpw in another process before deciding.
+	s.reloadIfChanged()
+
 	s.mu.RLock()
 	hash, ok := s.users[username]
 	s.mu.RUnlock()

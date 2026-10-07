@@ -19,6 +19,14 @@ type Manager struct {
 	// stopPruner signals the GC goroutine to exit. Closed once by Close.
 	stopPruner chan struct{}
 	closeOnce  sync.Once
+
+	// local tracks the machine-local credential issued to the device's own
+	// scripts. See localcred.go for why it is kept out of Sessions, and why
+	// it belongs here rather than at package scope.
+	local localTokenState
+
+	// failedLogin serialises the delay on a rejected login. See Login.
+	failedLogin sync.Mutex
 }
 
 // NewManager wires up a Manager from a Store and Sessions. Starts a
@@ -61,7 +69,19 @@ func (m *Manager) Close() {
 // extra delay.
 func (m *Manager) Login(_ context.Context, username, password string) (*Session, error) {
 	if !m.Store.Verify(username, password) {
+		// Hold a lock across the delay. Sleeping alone throttles nothing:
+		// each request sleeps in its own goroutine, so twenty parallel
+		// guesses cost about one second in total rather than twenty, and the
+		// "no useful brute-force throughput" the delay was meant to provide
+		// was not being provided at all. Serialising rejections caps the rate
+		// at one guess per FailedLoginDelay no matter how many connections
+		// an attacker opens.
+		//
+		// Only REJECTED logins take the lock, so a correct password is never
+		// made to queue behind an attacker.
+		m.failedLogin.Lock()
 		time.Sleep(FailedLoginDelay)
+		m.failedLogin.Unlock()
 		return nil, ErrInvalidCredentials
 	}
 	return m.Sessions.Mint(username, m.ttl)
@@ -79,6 +99,10 @@ func (m *Manager) ChangePassword(_ context.Context, username, oldPassword, newPa
 		return err
 	}
 	m.Sessions.RevokeAll()
+	// RevokeAll has just destroyed the device's own script credential along
+	// with every human session. Re-issue it now rather than leaving the
+	// device unable to drive itself until the refresh timer next fires.
+	m.ReprovisionLocalTokenIfConfigured()
 	return nil
 }
 
