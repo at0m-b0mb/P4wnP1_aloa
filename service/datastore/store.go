@@ -14,7 +14,7 @@ import (
 
 /*
 https://github.com/dgraph-io/badger --> Apache 2 (compatible)
- */
+*/
 
 var (
 	ErrCreate = errors.New("Error creating store")
@@ -51,9 +51,26 @@ func (s *Store) Open(initDbBackupPath string) (err error) {
 	badgerOpts.TableLoadingMode = options.FileIO
 	badgerOpts.ValueLogLoadingMode = options.FileIO
 
+	// Recover from a partially-written value log instead of refusing to open.
+	//
+	// This device's NORMAL power-off is being pulled out of a USB port, so an
+	// unclean shutdown mid-write is the expected case, not an edge case. With
+	// Truncate left at its default of false, badger returns "Value log truncate
+	// required to run DB" and REFUSES to open -- which here means the template
+	// database never loads and the service cannot start. The device bricks
+	// itself on the most ordinary thing an operator does to it.
+	//
+	// The trade is explicit and worth stating: truncating discards whatever
+	// was being written when power was lost. Losing the last in-flight template
+	// edit is strictly better than a device that will not boot, and SyncWrites
+	// above means everything already acknowledged is on disk.
+	badgerOpts.Truncate = true
+
 	// check if DB dir exists
-	exists,err := exists(s.Path)
-	if err != nil { return err }
+	exists, err := exists(s.Path)
+	if err != nil {
+		return err
+	}
 
 	s.Db, err = badger.Open(badgerOpts)
 	if s.serializer == nil {
@@ -69,6 +86,12 @@ func (s *Store) Open(initDbBackupPath string) (err error) {
 }
 
 func (s *Store) Close() {
+	// Called from Service.Stop() during shutdown, where Open() may never have
+	// succeeded. badger needs this close to flush its value log; skipping it is
+	// how recent template edits get lost across a reboot.
+	if s == nil || s.Db == nil {
+		return
+	}
 	s.Db.Close()
 }
 
@@ -243,7 +266,7 @@ func (s *Store) Get(key string, target interface{}) (err error) {
 			return err
 		}
 
-		val,err := item.ValueCopy([]byte{})
+		val, err := item.ValueCopy([]byte{})
 		if err != nil {
 			return err
 		}
@@ -322,7 +345,7 @@ func (s *Store) DeleteMulti(keys []string) (err error) {
 		errDel := txn.Delete([]byte(key))
 		if errDel != nil {
 			if err == badger.ErrTxnTooBig {
-				txn.Commit()                 // commit current transaction
+				txn.Commit()                    // commit current transaction
 				txn = s.Db.NewTransaction(true) // replace with new transaction
 				txn.Delete([]byte(key))         // add Delete which produced error to new transaction
 			} else {
