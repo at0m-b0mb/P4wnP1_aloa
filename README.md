@@ -39,12 +39,12 @@ Built from `v0.2.0`, on **Raspberry Pi OS Lite (Debian 13 "trixie"), 2026-09-15*
 
 | Image | Size | Boards |
 |---|---|---|
-| `P4wnP1-ALOA-v0.2.0-armhf.img.xz` | 656M | Pi Zero, **Pi Zero W**, Pi 1 |
+| `P4wnP1-ALOA-v0.2.0-armhf.img.xz` | 640M | Pi Zero, **Pi Zero W**, Pi 1 |
 | `P4wnP1-ALOA-v0.2.0-arm64.img.xz` | 592M | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 |
 
 ```
-armhf  sha256  e87ef407db652e71b1d7b77112a627def080559ac7664b9c31728534a3591d93
-arm64  sha256  85b59a6c41f8786f6dca3f8e94c1fab5b90c07c12ee605b1b351e1967746cbc6
+armhf  sha256  1d57fd3071368c2250095e50ea66be655c120b211c91d992dbd410102450b568
+arm64  sha256  72794cd82d3fa1a45da14d6db6efc9818bf8d0e3cf3280f8879c8b8f1efe263f
 ```
 
 Verify, flash, and boot with the cable in the **data** port (the inner one on a Zero):
