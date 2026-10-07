@@ -15,6 +15,8 @@ import (
 	"github.com/mame82/P4wnP1_aloa/service/bluetooth"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"io"
 	"log"
 	"net"
@@ -620,7 +622,7 @@ func (s *server) Stop() error {
 func (s *server) StoreDeployedWifiSettings(ctx context.Context, m *pb.StringMessage) (e *pb.Empty, err error) {
 	//defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_STORED_WIFI_SETTINGS_LIST))
 	return s.StoreWifiSettings(ctx, &pb.WifiRequestSettingsStorage{
-		Settings:     s.rootSvc.SubSysWifi.State.CurrentSettings,
+		Settings:     wifiCurrentSettings(s),
 		TemplateName: m.Msg,
 	})
 }
@@ -659,19 +661,31 @@ func (s *server) ListStoredWifiSettings(ctx context.Context, e *pb.Empty) (sa *p
 
 func (s *server) DeployWiFiSettings(ctx context.Context, wset *pb.WiFiSettings) (wstate *pb.WiFiState, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_WIFI))
+	if s.rootSvc.SubSysWifi == nil {
+		return nil, status.Error(codes.Unavailable, errWifiUnavailable)
+	}
 	return s.rootSvc.SubSysWifi.DeploySettings(wset)
 }
 
 func (s *server) GetWiFiState(ctx context.Context, empty *pb.Empty) (wstate *pb.WiFiState, err error) {
 	// Update state before transmitting back
+	if s.rootSvc.SubSysWifi == nil {
+		return nil, status.Error(codes.Unavailable, errWifiUnavailable)
+	}
 	s.rootSvc.SubSysWifi.UpdateStateFromIw()
 
 	st := s.rootSvc.SubSysWifi.State
 	return st, nil
 }
 
+// ListenWiFiStateChanges was never implemented and its body was
+// `panic("implement me")`. grpc-go does not recover panics raised inside a
+// handler, so any authenticated caller -- and, once the JSON API landed, any
+// HTTP client that could reach /api/v1/rpc/ListenWiFiStateChanges -- could
+// take the entire service down with a single request. An honest Unimplemented
+// is the correct answer until it is written.
 func (s *server) ListenWiFiStateChanges(ctx context.Context, empty *pb.Empty) (wstate *pb.WiFiState, err error) {
-	panic("implement me")
+	return nil, status.Error(codes.Unimplemented, "ListenWiFiStateChanges is not implemented; poll GetWiFiState or subscribe to the event stream instead")
 }
 
 func (s *server) EchoRequest(ctx context.Context, req *pb.StringMessage) (resp *pb.StringMessage, err error) {
@@ -1148,6 +1162,20 @@ func StartRpcWebServer(host string, port string) {
 	log.Fatal(http_srv.ListenAndServe())
 }
 */
+
+// errWifiUnavailable is returned by the WiFi RPCs when the subsystem failed to
+// initialise (no wlan0 on this board, or hostapd/wpa_supplicant missing).
+const errWifiUnavailable = "the WiFi subsystem is unavailable on this device"
+
+// wifiCurrentSettings returns the deployed WiFi settings, or nil when the
+// subsystem is unavailable, so callers building a composite message do not
+// nil-dereference.
+func wifiCurrentSettings(s *server) *pb.WiFiSettings {
+	if s.rootSvc.SubSysWifi == nil || s.rootSvc.SubSysWifi.State == nil {
+		return nil
+	}
+	return s.rootSvc.SubSysWifi.State.CurrentSettings
+}
 
 func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort string, absWebRoot string) {
 	//ToDo: Return servers/TCP listener to allow closing from caller

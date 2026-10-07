@@ -340,6 +340,18 @@ func (wSvc *WiFiService) DeploySettings(newWifiSettings *pb.WiFiSettings) (wstat
 	wSvc.mutexSettings.Lock()
 	defer wSvc.mutexSettings.Unlock()
 
+	// Never bring up an access point on a PSK that is published in this
+	// project's source. See wifi_psk_guard.go -- the shipped template database
+	// still carries the upstream default, and it would otherwise be what a
+	// freshly flashed device actually broadcasts.
+	if newWifiSettings != nil && newWifiSettings.Ap_BSS != nil {
+		bss := newWifiSettings.Ap_BSS
+		guardAccessPointPSK(&WiFiSettingsPSKView{
+			Get: func() string { return bss.PSK },
+			Set: func(v string) { bss.PSK = v },
+		})
+	}
+
 	//ToDo: Dis/Enable nexmon if needed
 
 	//stop wpa_supplicant if needed
@@ -434,16 +446,45 @@ func (wSvc *WiFiService) DeploySettings(newWifiSettings *pb.WiFiSettings) (wstat
 	return wSvc.State, nil
 }
 
-func NewWifiService(rootSvc *Service) (res *WiFiService) {
+// wifiIfaceWaitTimeout bounds how long NewWifiService waits for wlan0 to
+// appear. P4wnP1.service runs with DefaultDependencies=no and
+// Before=sysinit.target -- deliberately, so the USB gadget is enumerated
+// before an impatient host gives up -- which means it is NOT ordered against
+// systemd-udevd. brcmfmac loads its firmware asynchronously over SDIO, so on a
+// cold boot wlan0 frequently does not exist yet at the moment this runs.
+//
+// Waiting here rather than adding Wants=sys-subsystem-net-devices-wlan0.device
+// to the unit is deliberate: that would stall the unit for the 90-second
+// DefaultDeviceTimeoutSec on any board where wlan0 never appears at all (a Pi
+// Zero without WiFi), delaying everything else the device does.
+const wifiIfaceWaitTimeout = 15 * time.Second
+
+// NewWifiService builds the WiFi subsystem.
+//
+// It returns an error rather than panicking. It used to panic on either a
+// missing external binary or a missing wlan0, and since it is called from
+// NewService() with no recover() in the path, a cold-boot race against udev
+// took the WHOLE device down -- no USB, no HID, no web console -- for the rest
+// of that boot. The caller now degrades: everything else still comes up and
+// only the WiFi RPCs report the subsystem as unavailable.
+func NewWifiService(rootSvc *Service) (res *WiFiService, err error) {
 	ifName := wifi_if_name
-	err := wifiCheckExternalBinaries()
-	if err != nil {
-		panic(err)
+	if err = wifiCheckExternalBinaries(); err != nil {
+		// Permanent: no amount of waiting installs hostapd.
+		return nil, fmt.Errorf("WiFi unavailable: %w", err)
 	}
 
-	//Check interface existence
-	if exists := CheckInterfaceExistence(ifName); !exists {
-		panic(fmt.Errorf("WiFi interface '%s' not present", ifName))
+	// Transient: poll for the interface instead of failing on the first look.
+	if !CheckInterfaceExistence(ifName) {
+		log.Printf("WiFi interface '%s' not present yet, waiting up to %s ...", ifName, wifiIfaceWaitTimeout)
+		deadline := time.Now().Add(wifiIfaceWaitTimeout)
+		for !CheckInterfaceExistence(ifName) {
+			if time.Now().After(deadline) {
+				return nil, fmt.Errorf("WiFi interface '%s' did not appear within %s", ifName, wifiIfaceWaitTimeout)
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+		log.Printf("... WiFi interface '%s' appeared", ifName)
 	}
 
 	res = &WiFiService{
@@ -483,7 +524,7 @@ func NewWifiService(rootSvc *Service) (res *WiFiService) {
 		Client_BSSList: []*pb.WiFiBSSCfg{&pb.WiFiBSSCfg{SSID: "", PSK: ""}},
 		Ap_BSS:         &pb.WiFiBSSCfg{},
 	}
-	return res
+	return res, nil
 }
 
 // io.Writer firing a signal if predefined output arrives

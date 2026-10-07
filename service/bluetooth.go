@@ -66,15 +66,13 @@ type BtService struct {
 // in a go routine and let RPC calls relying on bluetooth sub system fail, till bluetooth is usable. This would mean that
 // an event has to be PUSHED to the webclient, once bluetooth is usable.
 
-
-
 func NewBtService(rootService *Service, retryTimeout time.Duration) (res *BtService) {
 	res = &BtService{
-		RootSvc: rootService,
-		Agent:   bluetooth.NewDefaultAgent("1337"),
-		BrName:  BT_ETHERNET_BRIDGE_NAME,
+		RootSvc:              rootService,
+		Agent:                bluetooth.NewDefaultAgent("1337"),
+		BrName:               BT_ETHERNET_BRIDGE_NAME,
 		serviceAvailableLock: &sync.Mutex{},
-		defaultSettings:GetDefaultBluetoothSettings(),
+		defaultSettings:      GetDefaultBluetoothSettings(),
 	}
 
 	log.Println("Starting Bluetooth sub system...")
@@ -107,11 +105,11 @@ func NewBtService(rootService *Service, retryTimeout time.Duration) (res *BtServ
 
 			// Deploy default settings
 
-			_,err := res.DeployBluetoothControllerInformation(res.defaultSettings.Ci)
+			_, err := res.DeployBluetoothControllerInformation(res.defaultSettings.Ci)
 			if err != nil {
 				log.Println("Not able to deploy default bluetooth settings: ", err.Error())
 			} else {
-				_,err = res.DeployBluetoothAgentSettings(res.defaultSettings.As)
+				_, err = res.DeployBluetoothAgentSettings(res.defaultSettings.As)
 				if err != nil {
 					log.Println("Not able to deploy default bluetooth agent settings: ", err.Error())
 				}
@@ -119,7 +117,6 @@ func NewBtService(rootService *Service, retryTimeout time.Duration) (res *BtServ
 			log.Println("Finished setting up bluetooth")
 		}
 	}()
-
 
 	return
 }
@@ -130,7 +127,7 @@ func (bt *BtService) ReplaceDefaultSettings(s *pb.BluetoothSettings) {
 
 func (bt *BtService) Stop() {
 	bt.Agent.Stop() // unregister the agent again
-	if ci,err := bt.Controller.ReadControllerInformation(); err == nil {
+	if ci, err := bt.Controller.ReadControllerInformation(); err == nil {
 		if ci.ServiceNetworkServerNap {
 			bt.UnregisterNetworkServer(toolz.UUID_NETWORK_SERVER_NAP)
 		}
@@ -144,13 +141,13 @@ func (bt *BtService) Stop() {
 	bt.DisableBridge()
 }
 
-func (bt *BtService) setServiceAvailable(val bool)  {
+func (bt *BtService) setServiceAvailable(val bool) {
 	bt.serviceAvailableLock.Lock()
 	defer bt.serviceAvailableLock.Unlock()
 	bt.serviceAvailable = val
 }
 
-func (bt *BtService) IsServiceAvailable() bool  {
+func (bt *BtService) IsServiceAvailable() bool {
 	bt.serviceAvailableLock.Lock()
 	defer bt.serviceAvailableLock.Unlock()
 	return bt.serviceAvailable
@@ -186,34 +183,35 @@ func (bt *BtService) DeployBluetoothNetworkService(btNwSvc *pb.BluetoothNetworkS
 	}
 }
 
-
 func (bt *BtService) GetBluetoothAgentSettings() (as *pb.BluetoothAgentSettings, err error) {
 	if !bt.IsServiceAvailable() {
-		return &pb.BluetoothAgentSettings{},bluetooth.ErrBtSvcNotAvailable
+		return &pb.BluetoothAgentSettings{}, bluetooth.ErrBtSvcNotAvailable
 	}
 	as = &pb.BluetoothAgentSettings{}
 
-	pin,err := bt.GetPIN()
-	if err != nil { return as,err }
+	pin, err := bt.GetPIN()
+	if err != nil {
+		return as, err
+	}
 	as.Pin = pin
 	return
 }
 
-
 func (bt *BtService) DeployBluetoothAgentSettings(src *pb.BluetoothAgentSettings) (res *pb.BluetoothAgentSettings, err error) {
 	if !bt.IsServiceAvailable() {
-		return &pb.BluetoothAgentSettings{},bluetooth.ErrBtSvcNotAvailable
+		return &pb.BluetoothAgentSettings{}, bluetooth.ErrBtSvcNotAvailable
 	}
 	res = &pb.BluetoothAgentSettings{}
 	err = bt.SetPIN(src.Pin)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	return bt.GetBluetoothAgentSettings()
 }
 
-
 func (bt *BtService) DeployBluetoothControllerInformation(newBtCiRpc *pb.BluetoothControllerInformation) (updateBtCiRpc *pb.BluetoothControllerInformation, err error) {
 	if !bt.IsServiceAvailable() {
-		return &pb.BluetoothControllerInformation{},bluetooth.ErrBtSvcNotAvailable
+		return &pb.BluetoothControllerInformation{}, bluetooth.ErrBtSvcNotAvailable
 	}
 
 	btCi := bluetooth.BluetoothControllerInformationFromRpc(newBtCiRpc)
@@ -224,31 +222,35 @@ func (bt *BtService) DeployBluetoothControllerInformation(newBtCiRpc *pb.Bluetoo
 	// Update provided network services if needed
 	if btCi.ServiceNetworkServerNap || btCi.ServiceNetworkServerGn || btCi.ServiceNetworkServerPanu {
 		err = bt.EnableBridge()
-		if err != nil { return &pb.BluetoothControllerInformation{},err }
+		if err != nil {
+			return &pb.BluetoothControllerInformation{}, err
+		}
 	} else {
 		bt.DisableBridge()
 	}
 
 	log.Println("Updating settings from controller information...")
-	updatedCi,err := bt.Controller.UpdateSettingsFromChangedControllerInformation(btCi, bridgeNameNap, bridgeNamePanu, bridgeNameGn)
+	updatedCi, err := bt.Controller.UpdateSettingsFromChangedControllerInformation(btCi, bridgeNameNap, bridgeNamePanu, bridgeNameGn)
 	log.Printf("Deployed bluetooth settings\n%+v\n%v\n", updatedCi, err)
-	if err != nil { return &pb.BluetoothControllerInformation{},err }
+	if err != nil {
+		return &pb.BluetoothControllerInformation{}, err
+	}
 	updateBtCiRpc = bluetooth.BluetoothControllerInformationToRpc(updatedCi)
 	return updateBtCiRpc, nil
 }
 
-
-func (bt *BtService) GetControllerInformation() (ctlInfo *pb.BluetoothControllerInformation ,err error) {
+func (bt *BtService) GetControllerInformation() (ctlInfo *pb.BluetoothControllerInformation, err error) {
 	if !bt.IsServiceAvailable() {
-		return &pb.BluetoothControllerInformation{},bluetooth.ErrBtSvcNotAvailable
+		return &pb.BluetoothControllerInformation{}, bluetooth.ErrBtSvcNotAvailable
 	}
-	btCi,err := bt.Controller.ReadControllerInformation()
-	if err != nil { return &pb.BluetoothControllerInformation{},err}
+	btCi, err := bt.Controller.ReadControllerInformation()
+	if err != nil {
+		return &pb.BluetoothControllerInformation{}, err
+	}
 	btCiRpc := bluetooth.BluetoothControllerInformationToRpc(btCi)
 	btCiRpc.IsAvailable = bt.IsServiceAvailable()
-	return btCiRpc,nil
+	return btCiRpc, nil
 }
-
 
 /*
 // Notes: On Bluetooth settings
@@ -352,11 +354,10 @@ func (bt *BtService) SetPIN(pin string) (err error) {
 
 func (bt *BtService) GetPIN() (pin string, err error) {
 	if !bt.IsServiceAvailable() {
-		return pin,bluetooth.ErrBtSvcNotAvailable
+		return pin, bluetooth.ErrBtSvcNotAvailable
 	}
 	return bt.Agent.GetPIN(), nil
 }
-
 
 func (bt *BtService) RegisterNetworkServer(uuid toolz.NetworkServerUUID) (err error) {
 	if !bt.IsServiceAvailable() {
@@ -372,7 +373,6 @@ func (bt *BtService) UnregisterNetworkServer(uuid toolz.NetworkServerUUID) (err 
 	}
 	return bt.Controller.UnregisterNetworkServer(uuid)
 }
-
 
 func (bt *BtService) ConnectNetwork(deviceMac string, uuid toolz.NetworkServerUUID) (err error) {
 	if !bt.IsServiceAvailable() {
@@ -390,28 +390,28 @@ func (bt *BtService) DisconnectNetwork(deviceMac string) (err error) {
 
 func (bt *BtService) IsServerNAPEnabled() (res bool, err error) {
 	if !bt.IsServiceAvailable() {
-		return false,bluetooth.ErrBtSvcNotAvailable
+		return false, bluetooth.ErrBtSvcNotAvailable
 	}
 	return bt.Controller.IsServerNAPEnabled()
 }
 
 func (bt *BtService) IsServerPANUEnabled() (res bool, err error) {
 	if !bt.IsServiceAvailable() {
-		return false,bluetooth.ErrBtSvcNotAvailable
+		return false, bluetooth.ErrBtSvcNotAvailable
 	}
 	return bt.Controller.IsServerPANUEnabled()
 }
 
 func (bt *BtService) IsServerGNEnabled() (res bool, err error) {
 	if !bt.IsServiceAvailable() {
-		return false,bluetooth.ErrBtSvcNotAvailable
+		return false, bluetooth.ErrBtSvcNotAvailable
 	}
 	return bt.Controller.IsServerGNEnabled()
 }
 
 func (bt *BtService) CheckUUIDEnabled(uuids []string) (enabled []bool, err error) {
 	if !bt.IsServiceAvailable() {
-		return []bool{},bluetooth.ErrBtSvcNotAvailable
+		return []bool{}, bluetooth.ErrBtSvcNotAvailable
 	}
 
 	return bt.Controller.CheckUUIDList(uuids)
@@ -501,7 +501,6 @@ func (bt *BtService) EnableBridge() (err error) {
 		os.WriteFile("/proc/sys/net/ipv6/conf/all/disable_ipv6", []byte("1"), os.ModePerm)
 	}
 
-
 	return
 }
 
@@ -517,9 +516,12 @@ func (bt *BtService) DisableBridge() {
 // assures bnep kernel module is loaded
 func CheckBnep() error {
 	log.Printf("Checking for 'bnep' module...")
+	// log.Fatal here used to call os.Exit(1) on any lsmod failure, taking the
+	// whole daemon down over a Bluetooth precondition the caller is perfectly
+	// able to degrade around.
 	out, err := exec.Command("lsmod").Output()
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("could not run lsmod to check for bnep: %w", err)
 	}
 
 	if strings.Contains(string(out), "bnep") {
@@ -540,7 +542,7 @@ func CheckBnep() error {
 /*
 ToDo: The binaries used (bluez-tools) should be replaced by custom functions interfacing with bluez D-Bus API, later on.
 Example: https://github.com/muka/go-bluetooth
- */
+*/
 
 /*
 func (bt BtService) CheckExternalBinaries() error {
@@ -616,4 +618,3 @@ func BoolToInt(b bool) int {
 func BoolToIntStr(b bool) string {
 	return strconv.Itoa(BoolToInt(b))
 }
-

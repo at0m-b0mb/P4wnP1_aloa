@@ -1,10 +1,10 @@
 package cli_client
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	pb "github.com/mame82/P4wnP1_aloa/proto"
-	"errors"
-	"context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"io"
@@ -43,10 +43,7 @@ func ClientConnectServer(rpcHost string, rpcPort string) (
 	// Set up a connection to the server.
 	address := rpcHost + ":" + rpcPort
 	//log.Printf("Connecting %s ...", address)
-	connection, err = grpc.Dial(address,
-		grpc.WithInsecure(),
-		grpc.WithPerRPCCredentials(tokenAuthCreds{}),
-	)
+	connection, err = dialService(address)
 	if err != nil {
 		log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err)
 	}
@@ -73,53 +70,76 @@ func metadataContextWithToken(ctx context.Context) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, "authorization", "bearer "+token)
 }
 
+// dialService opens a connection to the P4wnP1 gRPC service with the cached
+// bearer token attached to every call.
+//
+// This exists because the token used to be wired into ClientConnectServer
+// alone, while twenty other functions in this file called
+// `dialService(address)` directly. Once the service started
+// enforcing authentication, every one of those -- which is nearly the whole
+// CLI, and the trigger-action helpers that boot scripts depend on -- failed
+// with Unauthenticated. Routing all of them through one dialer means a future
+// change to how the CLI authenticates cannot miss a call site again.
+func dialService(address string) (*grpc.ClientConn, error) {
+	return grpc.Dial(address,
+		grpc.WithInsecure(),
+		grpc.WithPerRPCCredentials(tokenAuthCreds{}),
+	)
+}
+
 func ClientTriggerGroupWait(host string, port string, groupname string, value int32) (err error) {
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil { return errors.New(fmt.Sprintf("Could not connect to P4wnP1 RPC server: %v", err)) }
+	connection, err := dialService(address)
+	if err != nil {
+		return errors.New(fmt.Sprintf("Could not connect to P4wnP1 RPC server: %v", err))
+	}
 	defer connection.Close()
 
 	rpcClient := pb.NewP4WNP1Client(connection)
 	ctx := context.Background()
 
-	_,err = rpcClient.WaitTriggerGroupReceive(ctx, &pb.TriggerGroupReceive{GroupName: groupname, Value: value})
+	_, err = rpcClient.WaitTriggerGroupReceive(ctx, &pb.TriggerGroupReceive{GroupName: groupname, Value: value})
 
 	return
 }
 func ClientTriggerGroupSend(host string, port string, groupname string, value int32) (err error) {
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil { return errors.New(fmt.Sprintf("Could not connect to P4wnP1 RPC server: %v", err)) }
+	connection, err := dialService(address)
+	if err != nil {
+		return errors.New(fmt.Sprintf("Could not connect to P4wnP1 RPC server: %v", err))
+	}
 	defer connection.Close()
 
 	rpcClient := pb.NewP4WNP1Client(connection)
 	ctx := context.Background()
-	ctx,cancel := context.WithTimeout(ctx,TIMEOUT_SHORT)
+	ctx, cancel := context.WithTimeout(ctx, TIMEOUT_SHORT)
 	defer cancel()
 
-	_,err = rpcClient.FireActionGroupSend(ctx, &pb.ActionGroupSend{GroupName: groupname, Value: value})
+	_, err = rpcClient.FireActionGroupSend(ctx, &pb.ActionGroupSend{GroupName: groupname, Value: value})
 
 	return
 }
 
 func ClientCreateTempDir(host string, port string, dir string, prefix string) (resultPath string, err error) {
-	return clientCreateTempDirOfFile(host,port,dir,prefix,true)
+	return clientCreateTempDirOfFile(host, port, dir, prefix, true)
 }
 
 func ClientCreateTempFile(host string, port string, dir string, prefix string) (resultPath string, err error) {
-	return clientCreateTempDirOfFile(host,port,dir,prefix,false)
+	return clientCreateTempDirOfFile(host, port, dir, prefix, false)
 }
 
 func ClientMountUMSImage(host string, port string, file string, cdrom bool) (err error) {
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil {return}
+	connection, err := dialService(address)
+	if err != nil {
+		return
+	}
 	defer connection.Close()
 	client := pb.NewP4WNP1Client(connection)
-	_,err = client.MountUMSFile(
+	_, err = client.MountUMSFile(
 		context.Background(),
 		&pb.GadgetSettingsUMS{
-			File: file,
+			File:  file,
 			Cdrom: cdrom,
 		})
 	return
@@ -127,37 +147,48 @@ func ClientMountUMSImage(host string, port string, file string, cdrom bool) (err
 
 func clientCreateTempDirOfFile(host string, port string, dir string, prefix string, dirOnlyNoFile bool) (resultPath string, err error) {
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil {return}
+	connection, err := dialService(address)
+	if err != nil {
+		return
+	}
 	defer connection.Close()
 	client := pb.NewP4WNP1Client(connection)
 	resp, err := client.FSCreateTempDirOrFile(
 		context.Background(),
 		&pb.TempDirOrFileRequest{
-			Prefix: prefix,
-			Dir: dir,
+			Prefix:     prefix,
+			Dir:        dir,
 			OnlyFolder: dirOnlyNoFile,
 		})
-	if err != nil {return}
+	if err != nil {
+		return
+	}
 	resultPath = resp.ResultPath
 	return
 }
 
-
-func ClientRegisterEvent(host string, port string,  evtType int64) (err error) {
+func ClientRegisterEvent(host string, port string, evtType int64) (err error) {
 	// open gRPC Client
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil {return}
+	connection, err := dialService(address)
+	if err != nil {
+		return
+	}
 	defer connection.Close()
 	client := pb.NewP4WNP1Client(connection)
 	evStream, err := client.EventListen(context.Background(), &pb.EventRequest{ListenType: evtType})
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	for {
 		event, err := evStream.Recv()
-		if err == io.EOF { break }
-		if err != nil { return err }
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
 
 		log.Printf("Event: %+v", event)
 	}
@@ -168,8 +199,10 @@ func ClientUploadFile(host string, port string, src io.Reader, folder pb.Accessi
 
 	// open gRPC Client
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil {return}
+	connection, err := dialService(address)
+	if err != nil {
+		return
+	}
 	defer connection.Close()
 	client := pb.NewP4WNP1Client(connection)
 
@@ -177,35 +210,41 @@ func ClientUploadFile(host string, port string, src io.Reader, folder pb.Accessi
 	_, err = client.FSWriteFile(
 		context.Background(),
 		&pb.WriteFileRequest{
-			Folder:folder,
-			Filename: filename,
-			Data: []byte{}, //empty chunk
-			Append: false,
+			Folder:       folder,
+			Filename:     filename,
+			Data:         []byte{}, //empty chunk
+			Append:       false,
 			MustNotExist: !forceOverwrite,
 		})
-	if err != nil {return}
+	if err != nil {
+		return
+	}
 
 	fmt.Printf("Start appending to '%s' in folder '%s'\n", filename, pb.AccessibleFolder_name[int32(folder)])
 
 	// start appending chunks read from source file to remote file (Remote file is closed and opened every time, but
 	// this avoids client to server streaming, which would be hard to implement for gRPC-web
 	chunksize := 1024
-	buf := make([]byte,chunksize)
+	buf := make([]byte, chunksize)
 	pos := int64(0)
 	for {
-		n,rErr := src.Read(buf)
+		n, rErr := src.Read(buf)
 		if rErr != nil {
-			if rErr == io.EOF { break } else { return rErr }
+			if rErr == io.EOF {
+				break
+			} else {
+				return rErr
+			}
 		}
 
 		sendData := buf[:n]
 		client.FSWriteFile(
 			context.Background(),
 			&pb.WriteFileRequest{
-				Folder:folder,
-				Filename: filename,
-				Data: sendData,
-				Append: true,
+				Folder:       folder,
+				Filename:     filename,
+				Data:         sendData,
+				Append:       true,
 				MustNotExist: false,
 			})
 
@@ -219,7 +258,9 @@ func ClientGetLED(host string, port string) (ls *pb.LEDSettings, err error) {
 	conn, client, ctx, cancel, err := ClientConnectServer(host, port)
 	defer conn.Close()
 	defer cancel()
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 
 	ls, err = client.GetLEDSettings(ctx, &pb.Empty{})
 	if err != nil {
@@ -231,47 +272,51 @@ func ClientGetLED(host string, port string) (ls *pb.LEDSettings, err error) {
 
 func ClientReboot(host string, port string, timeout time.Duration) (err error) {
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil { log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err) }
+	connection, err := dialService(address)
+	if err != nil {
+		log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err)
+	}
 	defer connection.Close()
 
 	rpcClient := pb.NewP4WNP1Client(connection)
 	ctx := context.Background()
 	if timeout > 0 {
-		ctxNew,cancel := context.WithTimeout(ctx, timeout)
+		ctxNew, cancel := context.WithTimeout(ctx, timeout)
 		ctx = ctxNew
 		defer cancel()
 	}
 
-	_,err = rpcClient.Reboot(ctx, &pb.Empty{})
+	_, err = rpcClient.Reboot(ctx, &pb.Empty{})
 	return
 }
 
 func ClientShutdown(host string, port string, timeout time.Duration) (err error) {
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil { log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err) }
+	connection, err := dialService(address)
+	if err != nil {
+		log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err)
+	}
 	defer connection.Close()
 
 	rpcClient := pb.NewP4WNP1Client(connection)
 	ctx := context.Background()
 	if timeout > 0 {
-		ctxNew,cancel := context.WithTimeout(ctx, timeout)
+		ctxNew, cancel := context.WithTimeout(ctx, timeout)
 		ctx = ctxNew
 		defer cancel()
 	}
 
-	_,err = rpcClient.Shutdown(ctx, &pb.Empty{})
+	_, err = rpcClient.Shutdown(ctx, &pb.Empty{})
 	return
 }
-
 
 func ClientDeployGadgetSettings(host string, port string, newGs *pb.GadgetSettings) (gs *pb.GadgetSettings, err error) {
 	conn, client, ctx, cancel, err := ClientConnectServer(host, port)
 	defer conn.Close()
 	defer cancel()
-	if err != nil { return 	}
-
+	if err != nil {
+		return
+	}
 
 	gs, err = client.DeployGadgetSetting(ctx, newGs)
 	if err != nil {
@@ -289,7 +334,9 @@ func ClientGetDeployedGadgetSettings(host string, port string) (gs *pb.GadgetSet
 	conn, client, ctx, cancel, err := ClientConnectServer(host, port)
 	defer conn.Close()
 	defer cancel()
-	if err != nil {	return }
+	if err != nil {
+		return
+	}
 
 	gs, err = client.GetDeployedGadgetSetting(ctx, &pb.Empty{})
 	if err != nil {
@@ -303,13 +350,14 @@ func ClientSetLED(host string, port string, ls pb.LEDSettings) (err error) {
 	conn, client, ctx, cancel, err := ClientConnectServer(host, port)
 	defer conn.Close()
 	defer cancel()
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 
 	_, err = client.SetLEDSettings(ctx, &ls)
 	if err != nil {
 		log.Printf("Error setting LED blink count %d: %v", ls.BlinkCount, err)
 	}
-
 
 	return
 }
@@ -318,7 +366,7 @@ func ClientDeployEthernetInterfaceSettings(host string, port string, settings *p
 	// Set up a connection to the server.
 	address := host + ":" + port
 	//log.Printf("Connecting %s ...", address)
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
+	connection, err := dialService(address)
 	if err != nil {
 		log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err)
 	}
@@ -327,7 +375,7 @@ func ClientDeployEthernetInterfaceSettings(host string, port string, settings *p
 	rpcClient := pb.NewP4WNP1Client(connection)
 
 	// Contact the server
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second * 30)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
 	_, err = rpcClient.DeployEthernetInterfaceSettings(ctx, settings)
@@ -339,7 +387,7 @@ func ClientDeployWifiSettings(host string, port string, settings *pb.WiFiSetting
 	// Set up a connection to the server.
 	address := host + ":" + port
 	//log.Printf("Connecting %s ...", address)
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
+	connection, err := dialService(address)
 	if err != nil {
 		log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err)
 	}
@@ -348,46 +396,50 @@ func ClientDeployWifiSettings(host string, port string, settings *pb.WiFiSetting
 	rpcClient := pb.NewP4WNP1Client(connection)
 
 	// Contact the server
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second * 30)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
-	state,err = rpcClient.DeployWiFiSettings(ctx, settings)
+	state, err = rpcClient.DeployWiFiSettings(ctx, settings)
 	return
 }
 
 func ClientHIDRunScript(host string, port string, ctx context.Context, scriptPath string, timeoutSeconds uint32) (scriptRes *pb.HIDScriptResult, err error) {
 	scriptReq := &pb.HIDScriptRequest{
-		ScriptPath: scriptPath,
+		ScriptPath:     scriptPath,
 		TimeoutSeconds: timeoutSeconds,
 	}
 
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil { log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err) }
+	connection, err := dialService(address)
+	if err != nil {
+		log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err)
+	}
 	defer connection.Close()
 
 	rpcClient := pb.NewP4WNP1Client(connection)
 
-	scriptRes,err = rpcClient.HIDRunScript(ctx, scriptReq)
+	scriptRes, err = rpcClient.HIDRunScript(ctx, scriptReq)
 	return
 }
 
 func ClientHIDRunScriptJob(host string, port string, scriptPath string, timeoutSeconds uint32) (scriptJob *pb.HIDScriptJob, err error) {
 	scriptReq := &pb.HIDScriptRequest{
-		ScriptPath: scriptPath,
+		ScriptPath:     scriptPath,
 		TimeoutSeconds: timeoutSeconds,
 	}
 
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil { log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err) }
+	connection, err := dialService(address)
+	if err != nil {
+		log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err)
+	}
 	defer connection.Close()
 
 	rpcClient := pb.NewP4WNP1Client(connection)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second * 30)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
-	scriptJob,err = rpcClient.HIDRunScriptJob(ctx, scriptReq)
+	scriptJob, err = rpcClient.HIDRunScriptJob(ctx, scriptReq)
 	return
 }
 
@@ -397,18 +449,19 @@ func ClientHIDCancelScriptJob(host string, port string, jobID uint32) (err error
 	}
 
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil { log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err) }
+	connection, err := dialService(address)
+	if err != nil {
+		log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err)
+	}
 	defer connection.Close()
 
 	rpcClient := pb.NewP4WNP1Client(connection)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second * 30)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
-	_,err = rpcClient.HIDCancelScriptJob(ctx, cancelReq)
+	_, err = rpcClient.HIDCancelScriptJob(ctx, cancelReq)
 	return
 }
-
 
 func ClientHIDGetScriptJobResult(host string, port string, jobID uint32) (scriptRes *pb.HIDScriptResult, err error) {
 	req := &pb.HIDScriptJob{
@@ -416,91 +469,108 @@ func ClientHIDGetScriptJobResult(host string, port string, jobID uint32) (script
 	}
 
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil { log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err) }
+	connection, err := dialService(address)
+	if err != nil {
+		log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err)
+	}
 	defer connection.Close()
 
 	rpcClient := pb.NewP4WNP1Client(connection)
 	//	ctx, cancel := context.WithTimeout(context.Background(), time.Second * 30)
 	//	defer cancel()
 
-	scriptRes,err = rpcClient.HIDGetScriptJobResult(context.Background(), req)
+	scriptRes, err = rpcClient.HIDGetScriptJobResult(context.Background(), req)
 	return
 }
 
 func ClientListTemplateType(timeout time.Duration, host string, port string, ttype pb.ActionDeploySettingsTemplate_TemplateType) (res []string, err error) {
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil { log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err) }
+	connection, err := dialService(address)
+	if err != nil {
+		log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err)
+	}
 	defer connection.Close()
 
 	rpcClient := pb.NewP4WNP1Client(connection)
 	ctx := context.Background()
 	if timeout > 0 {
-		ctxNew,cancel := context.WithTimeout(ctx, timeout)
+		ctxNew, cancel := context.WithTimeout(ctx, timeout)
 		ctx = ctxNew
 		defer cancel()
 	}
 
 	switch ttype {
 	case pb.ActionDeploySettingsTemplate_USB:
-		ma,err := rpcClient.ListStoredUSBSettings(ctx, &pb.Empty{})
-		if err != nil { return res,err }
-		return ma.MsgArray,nil
+		ma, err := rpcClient.ListStoredUSBSettings(ctx, &pb.Empty{})
+		if err != nil {
+			return res, err
+		}
+		return ma.MsgArray, nil
 	case pb.ActionDeploySettingsTemplate_TRIGGER_ACTIONS:
-		ma,err := rpcClient.ListStoredTriggerActionSets(ctx, &pb.Empty{})
-		if err != nil { return res,err }
-		return ma.MsgArray,nil
+		ma, err := rpcClient.ListStoredTriggerActionSets(ctx, &pb.Empty{})
+		if err != nil {
+			return res, err
+		}
+		return ma.MsgArray, nil
 	case pb.ActionDeploySettingsTemplate_WIFI:
-		ma,err := rpcClient.ListStoredWifiSettings(ctx, &pb.Empty{})
-		if err != nil { return res,err }
-		return ma.MsgArray,nil
+		ma, err := rpcClient.ListStoredWifiSettings(ctx, &pb.Empty{})
+		if err != nil {
+			return res, err
+		}
+		return ma.MsgArray, nil
 	case pb.ActionDeploySettingsTemplate_NETWORK:
-		ma,err := rpcClient.ListStoredEthernetInterfaceSettings(ctx, &pb.Empty{})
-		if err != nil { return res,err }
-		return ma.MsgArray,nil
+		ma, err := rpcClient.ListStoredEthernetInterfaceSettings(ctx, &pb.Empty{})
+		if err != nil {
+			return res, err
+		}
+		return ma.MsgArray, nil
 	case pb.ActionDeploySettingsTemplate_BLUETOOTH:
-		ma,err := rpcClient.ListStoredBluetoothSettings(ctx, &pb.Empty{})
-		if err != nil { return res,err }
-		return ma.MsgArray,nil
+		ma, err := rpcClient.ListStoredBluetoothSettings(ctx, &pb.Empty{})
+		if err != nil {
+			return res, err
+		}
+		return ma.MsgArray, nil
 	case pb.ActionDeploySettingsTemplate_FULL_SETTINGS:
-		ma,err := rpcClient.ListStoredMasterTemplate(ctx, &pb.Empty{})
-		if err != nil { return res,err }
-		return ma.MsgArray,nil
+		ma, err := rpcClient.ListStoredMasterTemplate(ctx, &pb.Empty{})
+		if err != nil {
+			return res, err
+		}
+		return ma.MsgArray, nil
 	default:
-		return res,errors.New("unknown template type")
+		return res, errors.New("unknown template type")
 	}
-
 
 }
 
 func ClientDeployTemplateType(timeout time.Duration, host string, port string, ttype pb.ActionDeploySettingsTemplate_TemplateType, name string) (err error) {
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil { log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err) }
+	connection, err := dialService(address)
+	if err != nil {
+		log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err)
+	}
 	defer connection.Close()
 
 	rpcClient := pb.NewP4WNP1Client(connection)
 	ctx := context.Background()
 	if timeout > 0 {
-		ctxNew,cancel := context.WithTimeout(ctx, timeout)
+		ctxNew, cancel := context.WithTimeout(ctx, timeout)
 		ctx = ctxNew
 		defer cancel()
 	}
 
 	switch ttype {
 	case pb.ActionDeploySettingsTemplate_USB:
-		_,err = rpcClient.DeployStoredUSBSettings(ctx, &pb.StringMessage{Msg:name})
+		_, err = rpcClient.DeployStoredUSBSettings(ctx, &pb.StringMessage{Msg: name})
 	case pb.ActionDeploySettingsTemplate_TRIGGER_ACTIONS:
-		_,err = rpcClient.DeployStoredTriggerActionSetReplace(ctx, &pb.StringMessage{Msg:name})
+		_, err = rpcClient.DeployStoredTriggerActionSetReplace(ctx, &pb.StringMessage{Msg: name})
 	case pb.ActionDeploySettingsTemplate_WIFI:
-		_,err = rpcClient.DeployStoredWifiSettings(ctx, &pb.StringMessage{Msg:name})
+		_, err = rpcClient.DeployStoredWifiSettings(ctx, &pb.StringMessage{Msg: name})
 	case pb.ActionDeploySettingsTemplate_NETWORK:
-		_,err = rpcClient.DeployStoredEthernetInterfaceSettings(ctx, &pb.StringMessage{Msg:name})
+		_, err = rpcClient.DeployStoredEthernetInterfaceSettings(ctx, &pb.StringMessage{Msg: name})
 	case pb.ActionDeploySettingsTemplate_BLUETOOTH:
-		_,err = rpcClient.DeployStoredBluetoothSettings(ctx, &pb.StringMessage{Msg:name})
+		_, err = rpcClient.DeployStoredBluetoothSettings(ctx, &pb.StringMessage{Msg: name})
 	case pb.ActionDeploySettingsTemplate_FULL_SETTINGS:
-		_,err = rpcClient.DeployStoredMasterTemplate(ctx, &pb.StringMessage{Msg:name})
+		_, err = rpcClient.DeployStoredMasterTemplate(ctx, &pb.StringMessage{Msg: name})
 	default:
 		return errors.New("unknown template type")
 	}
@@ -510,58 +580,66 @@ func ClientDeployTemplateType(timeout time.Duration, host string, port string, t
 
 func ClientDBBackup(timeout time.Duration, host string, port string, name string) (err error) {
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil { log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err) }
+	connection, err := dialService(address)
+	if err != nil {
+		log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err)
+	}
 	defer connection.Close()
 
 	rpcClient := pb.NewP4WNP1Client(connection)
 	ctx := context.Background()
 	if timeout > 0 {
-		ctxNew,cancel := context.WithTimeout(ctx, timeout)
+		ctxNew, cancel := context.WithTimeout(ctx, timeout)
 		ctx = ctxNew
 		defer cancel()
 	}
 
-	_,err = rpcClient.DBBackup(ctx, &pb.StringMessage{Msg:name})
+	_, err = rpcClient.DBBackup(ctx, &pb.StringMessage{Msg: name})
 
 	return
 }
 
 func ClientDBRestore(timeout time.Duration, host string, port string, name string) (err error) {
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil { log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err) }
+	connection, err := dialService(address)
+	if err != nil {
+		log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err)
+	}
 	defer connection.Close()
 
 	rpcClient := pb.NewP4WNP1Client(connection)
 	ctx := context.Background()
 	if timeout > 0 {
-		ctxNew,cancel := context.WithTimeout(ctx, timeout)
+		ctxNew, cancel := context.WithTimeout(ctx, timeout)
 		ctx = ctxNew
 		defer cancel()
 	}
 
-	_,err = rpcClient.DBRestore(ctx, &pb.StringMessage{Msg:name})
+	_, err = rpcClient.DBRestore(ctx, &pb.StringMessage{Msg: name})
 
 	return
 }
 
 func ClientDBList(timeout time.Duration, host string, port string) (names []string, err error) {
 	address := host + ":" + port
-	connection, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil { log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err) }
+	connection, err := dialService(address)
+	if err != nil {
+		log.Fatalf("Could not connect to P4wnP1 RPC server: %v", err)
+	}
 	defer connection.Close()
 
 	rpcClient := pb.NewP4WNP1Client(connection)
 	ctx := context.Background()
 	if timeout > 0 {
-		ctxNew,cancel := context.WithTimeout(ctx, timeout)
+		ctxNew, cancel := context.WithTimeout(ctx, timeout)
 		ctx = ctxNew
 		defer cancel()
 	}
 
-	backups,err := rpcClient.ListStoredDBBackups(ctx, &pb.Empty{})
-	if err != nil { return names, err}
+	backups, err := rpcClient.ListStoredDBBackups(ctx, &pb.Empty{})
+	if err != nil {
+		return names, err
+	}
 
-	return backups.MsgArray,nil
+	return backups.MsgArray, nil
 }

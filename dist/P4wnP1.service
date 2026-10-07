@@ -1,20 +1,41 @@
 [Unit]
-Description=P4wnP1 Startup Service
-#After=systemd-modules-load.service
+Description=P4wnP1 A.L.O.A.
+Documentation=https://github.com/at0m-b0mb/P4wnP1_aloa
+
+# Deliberately early. DefaultDependencies=no + Before=sysinit.target starts the
+# service during the sysinit phase so the USB gadget is composed and enumerated
+# before an attached host gives up waiting for a device to appear. That is the
+# whole point of the appliance, so it is worth the awkwardness.
+#
+# The cost is that this is NOT ordered against systemd-udevd, so wlan0 may not
+# exist yet when the service starts. That race is handled in Go (NewWifiService
+# waits briefly, then degrades) rather than with a device dependency here: a
+# Wants=sys-subsystem-net-devices-wlan0.device would stall the unit for the
+# 90-second DefaultDeviceTimeoutSec on any board that has no WiFi at all.
 After=local-fs.target
 DefaultDependencies=no
 Before=sysinit.target
 
+# Rate limiting lives in [Unit], not [Service] -- it has since systemd 229, and
+# putting it in [Service] is silently ignored. Five attempts in a minute, then
+# stop: enough to ride out a transient boot race, few enough that a genuinely
+# unrecoverable fault lands in `failed` state where the healthcheck and
+# `systemctl status` can see it, instead of flapping forever and chewing
+# through the SD card.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
 [Service]
 Type=simple
-#Type=forking
-#RemainAfterExit=yes
 ExecStart=/usr/local/bin/P4wnP1_service
-#StandardOutput=journal+console
-#StandardError=journal+console
+
+# Without this, any crash left the appliance dead until someone pulled the
+# power -- there was no Restart= directive at all.
+Restart=on-failure
+RestartSec=5
+
 StandardOutput=journal
 StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-#WantedBy=sysinit.target

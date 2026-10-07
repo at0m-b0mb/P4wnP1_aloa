@@ -21,15 +21,14 @@ import (
 // owned by root.
 const AuthFilePath = "/etc/p4wnp1/auth.json"
 
-
 func RegisterDefaultTriggerActions(tam *TriggerActionManager) {
 	// create test trigger
 
 	// Trigger to run startup script
 	serviceUpRunScript := &pb.TriggerAction{
-		IsActive: true,
+		IsActive:  true,
 		Immutable: true,
-		OneShot: false,
+		OneShot:   false,
 		Trigger: &pb.TriggerAction_ServiceStarted{
 			ServiceStarted: &pb.TriggerServiceStarted{},
 		},
@@ -42,82 +41,82 @@ func RegisterDefaultTriggerActions(tam *TriggerActionManager) {
 	tam.AddTriggerAction(serviceUpRunScript)
 
 	/*
-	logServiceStart := &pb.TriggerAction{
-		IsActive: true,
-		Trigger: &pb.TriggerAction_ServiceStarted{
-			ServiceStarted: &pb.TriggerServiceStarted{},
-		},
-		Action: &pb.TriggerAction_Log{
-			Log: &pb.ActionLog{},
-		},
-	}
-	tam.AddTriggerAction(logServiceStart)
+		logServiceStart := &pb.TriggerAction{
+			IsActive: true,
+			Trigger: &pb.TriggerAction_ServiceStarted{
+				ServiceStarted: &pb.TriggerServiceStarted{},
+			},
+			Action: &pb.TriggerAction_Log{
+				Log: &pb.ActionLog{},
+			},
+		}
+		tam.AddTriggerAction(logServiceStart)
 
-	logDHCPLease := &pb.TriggerAction{
-		IsActive: true,
-		Trigger: &pb.TriggerAction_DhcpLeaseGranted{
-			DhcpLeaseGranted: &pb.TriggerDHCPLeaseGranted{},
-		},
-		Action: &pb.TriggerAction_Log{
-			Log: &pb.ActionLog{},
-		},
-	}
-	tam.AddTriggerAction(logDHCPLease)
+		logDHCPLease := &pb.TriggerAction{
+			IsActive: true,
+			Trigger: &pb.TriggerAction_DhcpLeaseGranted{
+				DhcpLeaseGranted: &pb.TriggerDHCPLeaseGranted{},
+			},
+			Action: &pb.TriggerAction_Log{
+				Log: &pb.ActionLog{},
+			},
+		}
+		tam.AddTriggerAction(logDHCPLease)
 
-	logUSBGadgetConnected := &pb.TriggerAction{
-		IsActive: true,
-		Trigger: &pb.TriggerAction_UsbGadgetConnected{
-			UsbGadgetConnected: &pb.TriggerUSBGadgetConnected{},
-		},
-		Action: &pb.TriggerAction_Log{
-			Log: &pb.ActionLog{},
-		},
-	}
-	tam.AddTriggerAction(logUSBGadgetConnected)
+		logUSBGadgetConnected := &pb.TriggerAction{
+			IsActive: true,
+			Trigger: &pb.TriggerAction_UsbGadgetConnected{
+				UsbGadgetConnected: &pb.TriggerUSBGadgetConnected{},
+			},
+			Action: &pb.TriggerAction_Log{
+				Log: &pb.ActionLog{},
+			},
+		}
+		tam.AddTriggerAction(logUSBGadgetConnected)
 
-	logUSBGadgetDisconnected := &pb.TriggerAction{
-		IsActive: true,
-		Trigger: &pb.TriggerAction_UsbGadgetDisconnected{
-			UsbGadgetDisconnected: &pb.TriggerUSBGadgetDisconnected{},
-		},
-		Action: &pb.TriggerAction_Log{
-			Log: &pb.ActionLog{},
-		},
-	}
-	tam.AddTriggerAction(logUSBGadgetDisconnected)
+		logUSBGadgetDisconnected := &pb.TriggerAction{
+			IsActive: true,
+			Trigger: &pb.TriggerAction_UsbGadgetDisconnected{
+				UsbGadgetDisconnected: &pb.TriggerUSBGadgetDisconnected{},
+			},
+			Action: &pb.TriggerAction_Log{
+				Log: &pb.ActionLog{},
+			},
+		}
+		tam.AddTriggerAction(logUSBGadgetDisconnected)
 
-	logWifiAp := &pb.TriggerAction{
-		IsActive: true,
-		Trigger: &pb.TriggerAction_WifiAPStarted{
-			WifiAPStarted: &pb.TriggerWifiAPStarted{},
-		},
-		Action: &pb.TriggerAction_Log{
-			Log: &pb.ActionLog{},
-		},
-	}
-	tam.AddTriggerAction(logWifiAp)
+		logWifiAp := &pb.TriggerAction{
+			IsActive: true,
+			Trigger: &pb.TriggerAction_WifiAPStarted{
+				WifiAPStarted: &pb.TriggerWifiAPStarted{},
+			},
+			Action: &pb.TriggerAction_Log{
+				Log: &pb.ActionLog{},
+			},
+		}
+		tam.AddTriggerAction(logWifiAp)
 
-	logWifiSta := &pb.TriggerAction{
-		IsActive: true,
-		Trigger: &pb.TriggerAction_WifiConnectedAsSta{
-			WifiConnectedAsSta: &pb.TriggerWifiConnectedAsSta{},
-		},
-		Action: &pb.TriggerAction_Log{
-			Log: &pb.ActionLog{},
-		},
-	}
-	tam.AddTriggerAction(logWifiSta)
+		logWifiSta := &pb.TriggerAction{
+			IsActive: true,
+			Trigger: &pb.TriggerAction_WifiConnectedAsSta{
+				WifiConnectedAsSta: &pb.TriggerWifiConnectedAsSta{},
+			},
+			Action: &pb.TriggerAction_Log{
+				Log: &pb.ActionLog{},
+			},
+		}
+		tam.AddTriggerAction(logWifiSta)
 
-	logSSHLogin := &pb.TriggerAction{
-		IsActive: true,
-		Trigger: &pb.TriggerAction_SshLogin{
-			SshLogin: &pb.TriggerSSHLogin{},
-		},
-		Action: &pb.TriggerAction_Log{
-			Log: &pb.ActionLog{},
-		},
-	}
-	tam.AddTriggerAction(logSSHLogin)
+		logSSHLogin := &pb.TriggerAction{
+			IsActive: true,
+			Trigger: &pb.TriggerAction_SshLogin{
+				SshLogin: &pb.TriggerSSHLogin{},
+			},
+			Action: &pb.TriggerAction_Log{
+				Log: &pb.ActionLog{},
+			},
+		}
+		tam.AddTriggerAction(logSSHLogin)
 	*/
 }
 
@@ -135,21 +134,21 @@ type Service struct {
 	SubSysRPC            *server
 	SubSysAuth           *auth.Manager
 	SubSysTriggerActions *TriggerActionManager
-	SubSysGpio *GpioManager
+	SubSysGpio           *GpioManager
 
 	SubSysDwc2ConnectWatcher *Dwc2ConnectWatcher
 
-	Ctx context.Context
-	Cancel context.CancelFunc
-	rebootOnStop bool
+	Ctx            context.Context
+	Cancel         context.CancelFunc
+	rebootOnStop   bool
 	shutdownOnStop bool
 }
 
 func NewService() (svc *Service, err error) {
 	svc = &Service{}
-	svc.Ctx,svc.Cancel = context.WithCancel(context.Background())
+	svc.Ctx, svc.Cancel = context.WithCancel(context.Background())
 
-	svc.SubSysDataStore, err = datastore.Open(common.PATH_DATA_STORE, common.PATH_DATA_STORE_BACKUP + "/init.db")
+	svc.SubSysDataStore, err = datastore.Open(common.PATH_DATA_STORE, common.PATH_DATA_STORE_BACKUP+"/init.db")
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +166,14 @@ func NewService() (svc *Service, err error) {
 		return nil, err
 	}
 
-	svc.SubSysWifi = NewWifiService(svc) //Depends on NetworkSubSys
+	// Depends on NetworkSubSys. A WiFi failure is NOT fatal: a Pi Zero has no
+	// WiFi at all, and on a cold boot wlan0 may simply not have appeared yet.
+	// Everything else -- USB gadget, HID, the console -- must still come up.
+	if svc.SubSysWifi, err = NewWifiService(svc); err != nil {
+		log.Printf("WARNING: WiFi subsystem unavailable: %v", err)
+		log.Printf("         The device will run without WiFi; the WiFi RPCs will report this.")
+		svc.SubSysWifi = nil
+	}
 
 	svc.SubSysGpio = NewGpioManager(svc) //Depends on event subsys
 
@@ -175,7 +181,7 @@ func NewService() (svc *Service, err error) {
 
 	svc.SubSysDwc2ConnectWatcher = NewDwc2ConnectWatcher(svc) // Depends on EventManager, should be started before USB gadget settings are deployed (to avoid missing initial state change)
 
-	svc.SubSysBluetooth = NewBtService(svc, time.Second * 120) //Depends on NetworkSubSys (try to bring up bluetooth for up to 120s in background)
+	svc.SubSysBluetooth = NewBtService(svc, time.Second*120) //Depends on NetworkSubSys (try to bring up bluetooth for up to 120s in background)
 
 	// Auth subsystem: load the password file (mode 0600). A missing file is
 	// treated as "no users configured yet" -- the service still starts but
@@ -210,10 +216,9 @@ func (s *Service) Start() (context.Context, context.CancelFunc) {
 
 	// Register TriggerActions
 	/*
-	log.Println("Register default TriggerActions ...")
-	RegisterDefaultTriggerActions(s.SubSysTriggerActions)
+		log.Println("Register default TriggerActions ...")
+		RegisterDefaultTriggerActions(s.SubSysTriggerActions)
 	*/
-
 
 	scriptFallback := false
 	//retrieve Startup MasterTemplate name from store
@@ -224,7 +229,7 @@ func (s *Service) Start() (context.Context, context.CancelFunc) {
 		fmt.Printf("Loading MasterTemplate '%s' for startup ...\n", startupTemplate)
 
 		// Deploy MasterTemplate
-		_,errDeployStartupTemplate := s.SubSysRPC.DeployStoredMasterTemplate(context.Background(), &pb.StringMessage{Msg:startupTemplate})
+		_, errDeployStartupTemplate := s.SubSysRPC.DeployStoredMasterTemplate(context.Background(), &pb.StringMessage{Msg: startupTemplate})
 		if errDeployStartupTemplate != nil {
 			fmt.Printf("... error deploying Startup MasterTemplate '%s': %v\n", startupTemplate, errDeployStartupTemplate)
 			scriptFallback = true
@@ -238,7 +243,6 @@ func (s *Service) Start() (context.Context, context.CancelFunc) {
 		fmt.Println("... Fallback: Deploying TriggerAction for script based startup with 'servicestart.sh'")
 		RegisterDefaultTriggerActions(s.SubSysTriggerActions)
 	}
-
 
 	// fire service started Event
 	log.Println("Fire service started event ...")

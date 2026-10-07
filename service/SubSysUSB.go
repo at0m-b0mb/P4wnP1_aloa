@@ -1,8 +1,10 @@
+//go:build linux
 // +build linux
 
 package service
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -22,18 +24,18 @@ import (
 )
 
 const (
-	USB_EP_USAGE_HID_RAW = 1
+	USB_EP_USAGE_HID_RAW      = 1
 	USB_EP_USAGE_HID_KEYBOARD = 1
-	USB_EP_USAGE_HID_MOUSE = 1
-	USB_EP_USAGE_RNDIS = 2
-	USB_EP_USAGE_CDC_ECM = 2
-	USB_EP_USAGE_CDC_SERIAL = 2
-	USB_EP_USAGE_UMS = 2
-	USB_EP_USAGE_MAX = 7
+	USB_EP_USAGE_HID_MOUSE    = 1
+	USB_EP_USAGE_RNDIS        = 2
+	USB_EP_USAGE_CDC_ECM      = 2
+	USB_EP_USAGE_CDC_SERIAL   = 2
+	USB_EP_USAGE_UMS          = 2
+	USB_EP_USAGE_MAX          = 7
 
-	USB_GADGET_NAME = "mame82_gadget"
-	USB_GADGET_DIR_BASE      = "/sys/kernel/config/usb_gadget"
-	USB_GADGET_DIR           = USB_GADGET_DIR_BASE + "/" + USB_GADGET_NAME
+	USB_GADGET_NAME     = "mame82_gadget"
+	USB_GADGET_DIR_BASE = "/sys/kernel/config/usb_gadget"
+	USB_GADGET_DIR      = USB_GADGET_DIR_BASE + "/" + USB_GADGET_NAME
 
 	USB_bcdDevice = "0x0100" //Version 1.00
 	USB_bcdUSB    = "0x0200" //mode: USB 2.0
@@ -73,15 +75,12 @@ const (
 	USB_FUNCTION_HID_RAW_report_length = "64"
 	USB_FUNCTION_HID_RAW_report_desc   = "\x06\x00\xff\t\x01\xa1\x01\t\x01\x15\x00&\xff\x00u\x08\x95@\x81\x02\t\x02\x15\x00&\xff\x00u\x08\x95@\x91\x02\xc0"
 	USB_FUNCTION_HID_RAW_name          = "hid.raw"
-
-
-
 )
 
 var (
-	ErrUsbNotUsable = errors.New("USB subsystem not available")
-	ErrHidNotUsable = errors.New("HIDScript not available (mouse and keyboard disabled)")
-	rp_usbHidDevName                      = regexp.MustCompile("(?m)DEVNAME=(.*)\n")
+	ErrUsbNotUsable  = errors.New("USB subsystem not available")
+	ErrHidNotUsable  = errors.New("HIDScript not available (mouse and keyboard disabled)")
+	rp_usbHidDevName = regexp.MustCompile("(?m)DEVNAME=(.*)\n")
 )
 
 type UsbManagerState struct {
@@ -91,7 +90,7 @@ type UsbManagerState struct {
 
 type UsbGadgetManager struct {
 	RootSvc *Service
-	Usable bool
+	Usable  bool
 
 	State *UsbManagerState
 	// ToDo: variable, indicating if HIDScript is usable
@@ -119,55 +118,69 @@ func (gm *UsbGadgetManager) HidScriptUsable() error {
 
 func (gm *UsbGadgetManager) HidScriptRun(ctx context.Context, scriptContent string) (result interface{}, err error) {
 	err = gm.HidScriptUsable()
-	if err != nil {	return }
+	if err != nil {
+		return
+	}
 
-	scriptVal,err := gm.hidCtl.RunScript(ctx, scriptContent, true)
-	if err != nil { return nil, err}
+	scriptVal, err := gm.hidCtl.RunScript(ctx, scriptContent, true)
+	if err != nil {
+		return nil, err
+	}
 
 	return scriptVal.Export()
 }
 
 func (gm *UsbGadgetManager) HidScriptStartBackground(ctx context.Context, scriptContent string) (job *hid.AsyncOttoJob, err error) {
 	err = gm.HidScriptUsable()
-	if err != nil {	return }
+	if err != nil {
+		return
+	}
 
 	return gm.hidCtl.StartScriptAsBackgroundJob(ctx, scriptContent, true)
 }
 
-//WaitBackgroundJobResult(ctx context.Context, job *AsyncOttoJob) (val otto.Value, err error) {
+// WaitBackgroundJobResult(ctx context.Context, job *AsyncOttoJob) (val otto.Value, err error) {
 func (gm *UsbGadgetManager) HidScriptWaitBackgroundJobResult(ctx context.Context, job *hid.AsyncOttoJob) (result interface{}, err error) {
 	err = gm.HidScriptUsable()
-	if err != nil {	return }
+	if err != nil {
+		return
+	}
 
-	scriptVal,err := gm.hidCtl.WaitBackgroundJobResult(ctx, job)
-	if err != nil { return nil, err}
+	scriptVal, err := gm.hidCtl.WaitBackgroundJobResult(ctx, job)
+	if err != nil {
+		return nil, err
+	}
 
 	return scriptVal.Export()
 }
 
 func (gm *UsbGadgetManager) HidScriptGetBackgroundJobByID(id int) (job *hid.AsyncOttoJob, err error) {
 	err = gm.HidScriptUsable()
-	if err != nil {	return }
+	if err != nil {
+		return
+	}
 
 	return gm.hidCtl.GetBackgroundJobByID(id)
 }
 
 func (gm *UsbGadgetManager) HidScriptGetAllRunningBackgroundJobs() (jobs []*hid.AsyncOttoJob, err error) {
 	err = gm.HidScriptUsable()
-	if err != nil {	return }
+	if err != nil {
+		return
+	}
 
 	return gm.hidCtl.GetAllBackgroundJobs()
 }
 
 func (gm *UsbGadgetManager) HidScriptCancelAllRunningBackgroundJobs() (err error) {
 	err = gm.HidScriptUsable()
-	if err != nil {	return }
+	if err != nil {
+		return
+	}
 
 	gm.hidCtl.CancelAllBackgroundJobs()
 	return
 }
-
-
 
 func NewUSBGadgetManager(rooSvc *Service) (newUGM *UsbGadgetManager, err error) {
 	newUGM = &UsbGadgetManager{
@@ -182,27 +195,22 @@ func NewUSBGadgetManager(rooSvc *Service) (newUGM *UsbGadgetManager, err error) 
 	if err = CheckLibComposite(); err != nil {
 		//return nil, errors.New(fmt.Sprintf("Couldn't load libcomposite: %v", err))
 		newUGM.Usable = false
-		return newUGM,nil
+		return newUGM, nil
 	}
-
-
 
 	newUGM.State.DevicePath[USB_FUNCTION_HID_KEYBOARD_name] = ""
 	newUGM.State.DevicePath[USB_FUNCTION_HID_MOUSE_name] = ""
 	newUGM.State.DevicePath[USB_FUNCTION_HID_RAW_name] = ""
-
 
 	defGS := GetDefaultGadgetSettings()
 	//newUGM.State.UndeployedGadgetSettings = &defGS //preload state with default settings
 	err = newUGM.DeployGadgetSettings(&defGS)
 	if err != nil {
 		newUGM.Usable = false
-		return newUGM,nil
+		return newUGM, nil
 	}
 	return
 }
-
-
 
 func ValidateGadgetSetting(gs *pb.GadgetSettings) error {
 	/* ToDo: validations
@@ -212,39 +220,63 @@ func ValidateGadgetSetting(gs *pb.GadgetSettings) error {
 	- check serial, product, Manufacturer to not be empty
 	- check Pid, Vid with regex (Note: we don't check if Vid+Pid have been used for another composite function setup, yet)
 	- Done: If the gadget is enabled, at least one function has to be enabled
-	 */
+	*/
 
 	log.Println("Validating gadget settings ...")
 
 	if gs.Use_RNDIS {
 		_, err := net.ParseMAC(gs.RndisSettings.DevAddr)
-		if err != nil { return errors.New(fmt.Sprintf("Validation Error RNDIS DeviceAddress: %v", err))}
+		if err != nil {
+			return errors.New(fmt.Sprintf("Validation Error RNDIS DeviceAddress: %v", err))
+		}
 
 		_, err = net.ParseMAC(gs.RndisSettings.HostAddr)
-		if err != nil { return errors.New(fmt.Sprintf("Validation Error RNDIS HostAddress: %v", err))}
+		if err != nil {
+			return errors.New(fmt.Sprintf("Validation Error RNDIS HostAddress: %v", err))
+		}
 	}
 
 	if gs.Use_CDC_ECM {
 		_, err := net.ParseMAC(gs.CdcEcmSettings.DevAddr)
-		if err != nil { return errors.New(fmt.Sprintf("Validation Error CDC ECM DeviceAddress: %v", err))}
+		if err != nil {
+			return errors.New(fmt.Sprintf("Validation Error CDC ECM DeviceAddress: %v", err))
+		}
 
 		_, err = net.ParseMAC(gs.CdcEcmSettings.HostAddr)
-		if err != nil { return errors.New(fmt.Sprintf("Validation Error CDC ECM HostAddress: %v", err))}
+		if err != nil {
+			return errors.New(fmt.Sprintf("Validation Error CDC ECM HostAddress: %v", err))
+		}
 	}
 
 	//check endpoint consumption
 	sumEp := 0
-	if gs.Use_RNDIS { sumEp += USB_EP_USAGE_RNDIS }
-	if gs.Use_CDC_ECM { sumEp += USB_EP_USAGE_CDC_ECM }
-	if gs.Use_UMS { sumEp += USB_EP_USAGE_UMS }
-	if gs.Use_HID_MOUSE { sumEp += USB_EP_USAGE_HID_MOUSE }
-	if gs.Use_HID_RAW { sumEp += USB_EP_USAGE_HID_RAW }
-	if gs.Use_HID_KEYBOARD { sumEp += USB_EP_USAGE_HID_KEYBOARD }
-	if gs.Use_SERIAL { sumEp += USB_EP_USAGE_CDC_SERIAL }
+	if gs.Use_RNDIS {
+		sumEp += USB_EP_USAGE_RNDIS
+	}
+	if gs.Use_CDC_ECM {
+		sumEp += USB_EP_USAGE_CDC_ECM
+	}
+	if gs.Use_UMS {
+		sumEp += USB_EP_USAGE_UMS
+	}
+	if gs.Use_HID_MOUSE {
+		sumEp += USB_EP_USAGE_HID_MOUSE
+	}
+	if gs.Use_HID_RAW {
+		sumEp += USB_EP_USAGE_HID_RAW
+	}
+	if gs.Use_HID_KEYBOARD {
+		sumEp += USB_EP_USAGE_HID_KEYBOARD
+	}
+	if gs.Use_SERIAL {
+		sumEp += USB_EP_USAGE_CDC_SERIAL
+	}
 
 	strConsumption := fmt.Sprintf("Gadget Settings consume %v out of %v available USB Endpoints\n", sumEp, USB_EP_USAGE_MAX)
 	log.Print(strConsumption)
-	if sumEp > USB_EP_USAGE_MAX { return errors.New(strConsumption)}
+	if sumEp > USB_EP_USAGE_MAX {
+		return errors.New(strConsumption)
+	}
 
 	//check if composite gadget is enabled without functions
 	if gs.Enabled &&
@@ -255,7 +287,7 @@ func ValidateGadgetSetting(gs *pb.GadgetSettings) error {
 		!gs.Use_HID_RAW &&
 		!gs.Use_UMS &&
 		!gs.Use_SERIAL {
-			return errors.New("if the composite gadget isn't disabled, as least one function has to be enabled")
+		return errors.New("if the composite gadget isn't disabled, as least one function has to be enabled")
 	}
 
 	return nil
@@ -287,7 +319,7 @@ func deleteUSBEthernetBridge() {
 
 /*
 Polls for presence of "usb0" / "usb1" till one of both is active or timeout is reached
- */
+*/
 
 func pollForUSBEthernet(timeout time.Duration) error {
 	for startTime := time.Now(); time.Since(startTime) < timeout; {
@@ -299,53 +331,105 @@ func pollForUSBEthernet(timeout time.Duration) error {
 		}
 
 		//Take a breath
-		time.Sleep(100*time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 		fmt.Print(".")
 	}
 	return errors.New(fmt.Sprintf("timeout %v reached before usb0 or usb1 became ready", timeout))
 }
 
+// kernelModuleLoaded reports whether a module is currently loaded, by reading
+// /proc/modules and matching the FIRST field of each line.
+//
+// Substring-matching the whole file is wrong: /proc/modules lists each module's
+// dependants in a later column, so "libcomposite" also appears on the usb_f_hid
+// line. That particular false positive happens to be harmless (if something
+// depends on libcomposite then libcomposite is loaded), but the same pattern is
+// not safe in general, and reading the field is no harder.
+//
+// /proc/modules is read directly rather than shelling out to lsmod: it is the
+// same data without depending on kmod's binaries or its output formatting.
+func kernelModuleLoaded(name string) (bool, error) {
+	f, err := os.Open("/proc/modules")
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		if i := strings.IndexByte(line, ' '); i > 0 {
+			if line[:i] == name {
+				return true, nil
+			}
+		}
+	}
+	return false, sc.Err()
+}
 
-
-
-//depends on `lsmod` binary
+// CheckLibComposite makes sure the libcomposite kernel module is available,
+// loading it if necessary.
+//
+// HISTORY -- this function is why a freshly flashed device was dead on arrival.
+// It used to end with:
+//
+//	err = exec.Command("modprobe", "libcomposite").Run()
+//	if err == nil { log.Println("... libcomposite loaded") }
+//	log.Println(err)
+//	log.Panic(err)        // <- unconditional
+//
+// log.Panic panics whatever it is handed, so a SUCCESSFUL modprobe panicked
+// with "<nil>". On a stock Raspberry Pi OS cold boot libcomposite is a
+// loadable module that is not loaded yet, and the preceding `rmmod
+// libcomposite` probe could never report "builtin" (rmmod on an absent module
+// reports that it is not loaded), so execution reached that line every time.
+// The panic happened inside NewService(), before Start(), with no recover()
+// anywhere in the call path -- no gRPC listener, no web console, no access
+// point, nothing.
+//
+// It was also deceptive to debug: the modprobe SUCCEEDS before the panic, so a
+// manual `systemctl restart P4wnP1` finds the module already loaded, returns
+// early, and the device looks healthy. Only cold boots failed, which matches
+// the "AP does not come up after a fresh boot" reports upstream.
+//
+// The caller already degrades correctly when this returns an error (it sets
+// Usable=false and carries on with the rest of the device working), so there
+// was never a reason to panic here.
 func CheckLibComposite() error {
 	log.Println("Checking for libcomposite...")
-	out, err := exec.Command("lsmod").Output()
-	if err != nil {
-		log.Println("lsmod failed")
-		log.Panic(err)
-		return err
-	}
 
-	if strings.Contains(string(out), "libcomposite") {
-		log.Println("... libcomposite loaded")
+	loaded, err := kernelModuleLoaded("libcomposite")
+	if err != nil {
+		return fmt.Errorf("could not read /proc/modules: %w", err)
+	}
+	if loaded {
+		log.Println("... libcomposite already loaded")
 		return nil
 	}
 
-	out, err = exec.Command("rmmod", "libcomposite").CombinedOutput()
-	if err != nil {
-		log.Println("rmmod failed")
+	// modprobe exits 0 for a module that is built into the kernel, so this one
+	// call covers both the loadable and the builtin case. No separate builtin
+	// probe is needed, and the old rmmod-based one could not have worked.
+	log.Println("... libcomposite not loaded, running modprobe")
+	if out, mErr := exec.Command("modprobe", "libcomposite").CombinedOutput(); mErr != nil {
+		return fmt.Errorf("modprobe libcomposite failed: %v (%s)",
+			mErr, strings.TrimSpace(string(out)))
 	}
 
-	if strings.Contains(string(out), "builtin") {
-		log.Println("... libcomposite available as builtin")
+	// Confirm rather than assume: on a kernel without the module at all,
+	// modprobe can still succeed in configurations where it resolves to a
+	// no-op, and USB gadget support would then silently not work.
+	if loaded, err = kernelModuleLoaded("libcomposite"); err == nil && !loaded {
+		// Builtin modules do not appear in /proc/modules. Treat a usable UDC
+		// as proof that gadget support is present either way.
+		if _, sErr := os.Stat("/sys/class/udc"); sErr != nil {
+			return errors.New("libcomposite is neither loaded nor builtin, and no UDC is present; USB gadget mode is unavailable")
+		}
+		log.Println("... libcomposite not in /proc/modules but a UDC is present; assuming builtin")
 		return nil
-	} else {
-		log.Println("... libcomposite is NOT a builtin?")
-		log.Println(out)
 	}
 
-	//if here, libcomposite isn't loaded ... try to load
-	log.Println("Libcomposite not loaded, trying to fix ...")
-	err = exec.Command("modprobe", "libcomposite").Run()
-	if err == nil {
-		log.Println("... libcomposite loaded")
-	}
-
-	log.Println(err)
-	log.Panic(err)
-	return err
+	log.Println("... libcomposite loaded")
+	return nil
 }
 
 func getUDCName() (string, error) {
@@ -420,7 +504,7 @@ func (gm *UsbGadgetManager) ParseGadgetState(gadgetName string) (result *pb.Gadg
 	//Check enabled functions in configuration
 
 	//USB RNDIS
-	if _, err1 := os.Stat(gadgetDir +"/configs/c.1/rndis.usb0"); !os.IsNotExist(err1) {
+	if _, err1 := os.Stat(gadgetDir + "/configs/c.1/rndis.usb0"); !os.IsNotExist(err1) {
 		result.Use_RNDIS = true
 
 		result.RndisSettings = &pb.GadgetSettingsEthernet{}
@@ -442,12 +526,12 @@ func (gm *UsbGadgetManager) ParseGadgetState(gadgetName string) (result *pb.Gadg
 		// we provide GadgetSettingsEthernet with default MAC adresses anyway, to have defaults in case RNDIS should be enabled
 		result.RndisSettings = &pb.GadgetSettingsEthernet{
 			HostAddr: DEFAULT_RNDIS_HOST_ADDR,
-			DevAddr: DEFAULT_RNDIS_DEV_ADDR,
+			DevAddr:  DEFAULT_RNDIS_DEV_ADDR,
 		}
 	}
 
 	//USB CDC ECM
-	if _, err1 := os.Stat(gadgetDir +"/configs/c.1/ecm.usb1"); !os.IsNotExist(err1) {
+	if _, err1 := os.Stat(gadgetDir + "/configs/c.1/ecm.usb1"); !os.IsNotExist(err1) {
 		result.Use_CDC_ECM = true
 
 		result.CdcEcmSettings = &pb.GadgetSettingsEthernet{}
@@ -470,32 +554,32 @@ func (gm *UsbGadgetManager) ParseGadgetState(gadgetName string) (result *pb.Gadg
 		// we provide GadgetSettingsEthernet with default MAC adresses anyway, to have defaults in case CDC ECM should be enabled
 		result.CdcEcmSettings = &pb.GadgetSettingsEthernet{
 			HostAddr: DEFAULT_CDC_ECM_HOST_ADDR,
-			DevAddr: DEFAULT_CDC_ECM_DEV_ADDR,
+			DevAddr:  DEFAULT_CDC_ECM_DEV_ADDR,
 		}
 	}
 
 	//USB serial
-	if _, err1 := os.Stat(gadgetDir +"/configs/c.1/acm.GS0"); !os.IsNotExist(err1) {
+	if _, err1 := os.Stat(gadgetDir + "/configs/c.1/acm.GS0"); !os.IsNotExist(err1) {
 		result.Use_SERIAL = true
 	}
 
 	//USB HID Keyboard
-	if _, err1 := os.Stat(gadgetDir +"/configs/c.1/"+USB_FUNCTION_HID_KEYBOARD_name); !os.IsNotExist(err1) {
+	if _, err1 := os.Stat(gadgetDir + "/configs/c.1/" + USB_FUNCTION_HID_KEYBOARD_name); !os.IsNotExist(err1) {
 		result.Use_HID_KEYBOARD = true
 	}
 
 	//USB HID Mouse
-	if _, err1 := os.Stat(gadgetDir +"/configs/c.1/"+USB_FUNCTION_HID_MOUSE_name); !os.IsNotExist(err1) {
+	if _, err1 := os.Stat(gadgetDir + "/configs/c.1/" + USB_FUNCTION_HID_MOUSE_name); !os.IsNotExist(err1) {
 		result.Use_HID_MOUSE = true
 	}
 
 	//USB HID Raw
-	if _, err1 := os.Stat(gadgetDir +"/configs/c.1/"+USB_FUNCTION_HID_RAW_name); !os.IsNotExist(err1) {
+	if _, err1 := os.Stat(gadgetDir + "/configs/c.1/" + USB_FUNCTION_HID_RAW_name); !os.IsNotExist(err1) {
 		result.Use_HID_RAW = true
 	}
 
 	//USB Mass Storage
-	if _, err1 := os.Stat(gadgetDir +"/configs/c.1/mass_storage.ms1"); !os.IsNotExist(err1) {
+	if _, err1 := os.Stat(gadgetDir + "/configs/c.1/mass_storage.ms1"); !os.IsNotExist(err1) {
 		result.Use_UMS = true
 		result.UmsSettings = &pb.GadgetSettingsUMS{}
 
@@ -789,9 +873,15 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 
 		//update device path
 		log.Println("Retrieving path to HID devices")
-		if devPath,errF := enumDevicePath(USB_FUNCTION_HID_KEYBOARD_name); errF == nil  { gm.State.DevicePath[USB_FUNCTION_HID_KEYBOARD_name] = devPath }
-		if devPath,errF := enumDevicePath(USB_FUNCTION_HID_MOUSE_name); errF == nil  { gm.State.DevicePath[USB_FUNCTION_HID_MOUSE_name] = devPath }
-		if devPath,errF := enumDevicePath(USB_FUNCTION_HID_RAW_name); errF == nil  { gm.State.DevicePath[USB_FUNCTION_HID_RAW_name] = devPath }
+		if devPath, errF := enumDevicePath(USB_FUNCTION_HID_KEYBOARD_name); errF == nil {
+			gm.State.DevicePath[USB_FUNCTION_HID_KEYBOARD_name] = devPath
+		}
+		if devPath, errF := enumDevicePath(USB_FUNCTION_HID_MOUSE_name); errF == nil {
+			gm.State.DevicePath[USB_FUNCTION_HID_MOUSE_name] = devPath
+		}
+		if devPath, errF := enumDevicePath(USB_FUNCTION_HID_RAW_name); errF == nil {
+			gm.State.DevicePath[USB_FUNCTION_HID_RAW_name] = devPath
+		}
 
 		//if Keyboard or Mouse are deployed, grab a HIDController Instance else set it to nil (the old HIDController object won't be destroyed)
 		if settings.Use_HID_KEYBOARD || settings.Use_HID_MOUSE {
@@ -808,27 +898,26 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 				log.Printf("HIDController for keyboard: '%s', mouse: '%s' and mapping path '%s' initialized\n", devPathKeyboard, devPathMouse, common.PATH_KEYBOARD_LANGUAGE_MAPS)
 			}
 		} else {
-			if gm.hidCtl != nil { gm.hidCtl.Abort() }
+			if gm.hidCtl != nil {
+				gm.hidCtl.Abort()
+			}
 			gm.hidCtl = nil
 			log.Printf("HIDController for keyboard / mouse disabled\n")
 		}
 	}
 
-
-
-
 	deleteUSBEthernetBridge() //delete former used bridge, if there's any
 	//In case USB ethernet is uesd (RNDIS or CDC ECM), we add a bridge interface
 	if usesUSBEthernet && settings.Enabled {
 		//wait till "usb0" or "usb1" comes up
-		err := pollForUSBEthernet(10*time.Second)
+		err := pollForUSBEthernet(10 * time.Second)
 		if err == nil {
 			//add USBEthernet bridge including the usb interfaces
 			log.Printf("... creating network bridge for USB ethernet devices")
 			addUSBEthernetBridge()
 			log.Printf("... checking for stored network interface settings for USB ethernet")
 			//ReInitNetworkInterface(USB_ETHERNET_BRIDGE_NAME)
-			if nim,err := gm.RootSvc.SubSysNetwork.GetManagedInterface(USB_ETHERNET_BRIDGE_NAME); err == nil {
+			if nim, err := gm.RootSvc.SubSysNetwork.GetManagedInterface(USB_ETHERNET_BRIDGE_NAME); err == nil {
 				nim.ReDeploy()
 			}
 
@@ -842,7 +931,7 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 	return nil
 }
 
-func enumDevicePath(funcName string) (devPath string, err error){
+func enumDevicePath(funcName string) (devPath string, err error) {
 	//cat /sys/dev/char/$(cat /sys/kernel/config/usb_gadget/mame82_gadget/functions/hid.mouse/dev)/uevent | grep DEVNAME
 	devfile := USB_GADGET_DIR + "/functions/" + funcName + "/dev"
 
@@ -854,7 +943,6 @@ func enumDevicePath(funcName string) (devPath string, err error){
 		udevNode = strings.TrimSuffix(string(res), "\n")
 	}
 
-
 	ueventPath := fmt.Sprintf("/sys/dev/char/%s/uevent", udevNode)
 	if ueventContent, err := os.ReadFile(ueventPath); err != nil {
 		err1 := errors.New(fmt.Sprintf("Gadget error reading uevent file '%s' for %s\n", ueventPath, funcName))
@@ -862,7 +950,9 @@ func enumDevicePath(funcName string) (devPath string, err error){
 	} else {
 
 		strDevNameSub := rp_usbHidDevName.FindStringSubmatch(string(ueventContent))
-		if len(strDevNameSub) > 1 { devPath = "/dev/" + strDevNameSub[1]}
+		if len(strDevNameSub) > 1 {
+			devPath = "/dev/" + strDevNameSub[1]
+		}
 	}
 
 	return
@@ -893,7 +983,9 @@ func (gm *UsbGadgetManager) DestroyAllGadgets() error {
 		}
 	}
 
-	if gm.hidCtl != nil { gm.hidCtl.Abort() }
+	if gm.hidCtl != nil {
+		gm.hidCtl.Abort()
+	}
 	gm.hidCtl = nil
 	log.Printf("HIDController for keyboard / mouse disabled\n")
 
@@ -901,8 +993,6 @@ func (gm *UsbGadgetManager) DestroyAllGadgets() error {
 }
 
 func (gm *UsbGadgetManager) DestroyGadget(gadgetName string) error {
-
-
 
 	gadgetDir := USB_GADGET_DIR_BASE + "/" + gadgetName
 
