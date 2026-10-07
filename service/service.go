@@ -173,6 +173,11 @@ func NewService() (svc *Service, err error) {
 		log.Printf("WARNING: WiFi subsystem unavailable: %v", err)
 		log.Printf("         The device will run without WiFi; the WiFi RPCs will report this.")
 		svc.SubSysWifi = nil
+		// Clear it. NewService returns this same `err` at the end, and main()
+		// panics on a non-nil return -- so logging "we will carry on without
+		// WiFi" and then leaving err set took the whole device down two lines
+		// later, which is the exact failure this block exists to prevent.
+		err = nil
 	}
 
 	svc.SubSysGpio = NewGpioManager(svc) //Depends on event subsys

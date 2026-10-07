@@ -1,0 +1,292 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown.min.css">
+<style>body{margin:0;background:#fff}.markdown-body{box-sizing:border-box;max-width:980px;margin:0 auto;padding:45px}</style>
+</head><body><article class="markdown-body"><p align="center" dir="auto">
+  <themed-picture data-catalyst-inline="true"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/img/banner-dark.svg">
+    <img src="docs/img/banner-light.svg" alt="P4wnP1 A.L.O.A. — a little offensive appliance" width="100%">
+  </picture></themed-picture>
+</p>
+<p align="center" dir="auto">
+  <strong>A Raspberry Pi that becomes whatever USB device the job needs.</strong><br>
+  Keyboard, mouse, network adapter, mass storage, serial — alone or all at once,<br>
+  reconfigurable from a browser, scriptable, and able to act on its own once the cable is in.
+</p>
+<p align="center" dir="auto">
+  <a href="https://github.com/at0m-b0mb/P4wnP1_aloa/releases/latest"><strong>Download an image</strong></a>
+   · 
+  <a href="#the-console">The console</a>
+   · 
+  <a href="#building">Build it yourself</a>
+   · 
+  <a href="#what-is-not-verified">What is not verified</a>
+</p>
+<hr>
+<blockquote>
+<p dir="auto"><strong>Authorized testing only.</strong> This is a red-team tool. Point it only at systems you own or<br>
+have written permission to test. See <a href="DISCLAIMER.md">DISCLAIMER.md</a>.</p>
+</blockquote>
+<blockquote>
+<p dir="auto"><strong>Hardware-verification status.</strong> The images below are built from official Raspberry Pi OS<br>
+releases and automatically verified before publishing — but <strong>they have never been booted on<br>
+a physical Pi.</strong> Read <a href="#what-is-not-verified">What is not verified</a> before you rely on this.</p>
+</blockquote>
+<hr>
+<h2 dir="auto">Download</h2>
+<p dir="auto">Built from <code class="notranslate">v0.2.0</code>, on <strong>Raspberry Pi OS Lite (Debian 13 "trixie"), 2026-09-15</strong>, kernel<br>
+<code class="notranslate">6.18.50+rpt-rpi</code>.</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Image</th>
+<th>Size</th>
+<th>Boards</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">P4wnP1-ALOA-v0.2.0-armhf.img.xz</code></td>
+<td>656M</td>
+<td>Pi Zero, <strong>Pi Zero W</strong>, Pi 1</td>
+</tr>
+<tr>
+<td><code class="notranslate">P4wnP1-ALOA-v0.2.0-arm64.img.xz</code></td>
+<td>592M</td>
+<td><strong>Pi Zero 2 W</strong>, Pi 3, Pi 4, Pi 5</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<pre class="notranslate"><code class="notranslate">armhf  sha256  e87ef407db652e71b1d7b77112a627def080559ac7664b9c31728534a3591d93
+arm64  sha256  85b59a6c41f8786f6dca3f8e94c1fab5b90c07c12ee605b1b351e1967746cbc6
+</code></pre>
+<p dir="auto">Verify, flash, and boot with the cable in the <strong>data</strong> port (the inner one on a Zero):</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">sha256sum -c P4wnP1-ALOA-v0.2.0-armhf.img.xz.sha256
+xz -d P4wnP1-ALOA-v0.2.0-armhf.img.xz
+sudo dd if=P4wnP1-ALOA-v0.2.0-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress</pre></div>
+<p dir="auto">Then, over the USB ethernet link the device brings up:</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">ssh p4wnp1@172.16.0.1                      <span class="pl-c"><span class="pl-c">#</span> forced password change on first login</span>
+sudo cat /root/INITIAL_CREDENTIALS.txt     <span class="pl-c"><span class="pl-c">#</span> console password and WiFi PSK for THIS device</span></pre></div>
+<p dir="auto">Open <strong><a href="http://172.16.0.1:8000" rel="nofollow">http://172.16.0.1:8000</a></strong>.</p>
+<p dir="auto">Nothing is shared between devices: the SSH password must be changed at first login, host keys<br>
+are generated per device, and the console password and WiFi PSK are random per device. That is<br>
+why the first login has to come over USB or serial — the WiFi key is not knowable until you<br>
+have read it off the device.</p>
+<hr>
+<h2 dir="auto">The console</h2>
+<p align="center" dir="auto">
+  <themed-picture data-catalyst-inline="true"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/img/console-cable-dark.jpg">
+    <img src="docs/img/console-cable-light.jpg" alt="The Cable view: a live strip of the USB functions the target host enumerates" width="100%">
+  </picture></themed-picture>
+</p>
+<p dir="auto">The first thing it shows you is <strong>what the cable presents</strong> — a live picture of the USB functions<br>
+the machine on the other end actually enumerates, each segment carrying its device path or host<br>
+address, with the attach state driven by real gadget events.</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>View</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Cable</strong></td>
+<td>USB composition and the identity the device claims — vendor, product, serial</td>
+</tr>
+<tr>
+<td><strong>Radio</strong></td>
+<td>WiFi state, the Bluetooth controller, and the interface table</td>
+</tr>
+<tr>
+<td><strong>Keystrokes</strong></td>
+<td>HIDScript editor, runner, and job control</td>
+</tr>
+<tr>
+<td><strong>Reflexes</strong></td>
+<td>The trigger/action rules the device acts on by itself</td>
+</tr>
+<tr>
+<td><strong>Loadouts</strong></td>
+<td>Whole-device configurations, backup, reboot, shutdown</td>
+</tr>
+<tr>
+<td><strong>Journal</strong></td>
+<td>Everything the device reports, live</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p align="center" dir="auto">
+  <a target="_blank" rel="noopener noreferrer" href="docs/img/console-reflexes-dark.jpg"><img src="docs/img/console-reflexes-dark.jpg" alt="The Reflexes view, listing trigger and action pairs" width="49%" style="max-width: 100%;"></a>
+  <a target="_blank" rel="noopener noreferrer" href="docs/img/console-journal-dark.jpg"><img src="docs/img/console-journal-dark.jpg" alt="The Journal view, streaming device events live" width="49%" style="max-width: 100%;"></a>
+</p>
+<p dir="auto"><strong>196KB total, 9 files, no framework and no build step</strong> — 120KB of that is two variable<br>
+webfonts, served from the device because this appliance is routinely operated with no internet<br>
+route at all. The smallest supported target is a Pi Zero W: one 1GHz ARM11 core and 512MB of<br>
+RAM. Light and dark themes, and all 18 text and UI colour pairings are checked against WCAG AA<br>
+in both by <code class="notranslate">make contrast</code>.</p>
+<hr>
+<h2 dir="auto">What it does</h2>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>USB functions</strong></td>
+<td>HID keyboard, HID mouse, raw HID, RNDIS, CDC ECM, mass storage (disk or CD-ROM), serial — individually or as one composite device, reconfigurable at runtime</td>
+</tr>
+<tr>
+<td><strong>HIDScript</strong></td>
+<td>24 functions exposed into a JavaScript VM running on the device; 15 keyboard layouts; human-cadence typing; absolute mouse positioning; LED-state branching; up to 8 parallel jobs</td>
+</tr>
+<tr>
+<td><strong>DuckyScript</strong></td>
+<td>Converts to HIDScript, 66 key names recognised</td>
+</tr>
+<tr>
+<td><strong>Triggers</strong></td>
+<td>9 event types — USB host attach/detach, AP started, joined WiFi, SSH login, DHCP lease, GPIO, group values</td>
+</tr>
+<tr>
+<td><strong>Control</strong></td>
+<td>82 RPCs over gRPC and JSON, plus a live event stream</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p dir="auto">Existing DuckyScript payloads run here:</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">P4wnP1_cli ducky convert payload.txt -o payload.js --layout gb --speed 80 --jitter 20</pre></div>
+<p dir="auto">DuckyScript 1.0 converts in full. Later Hak5 dialects and Bash Bunny directives are reported as<br>
+warnings <strong>and</strong> left in the output as <code class="notranslate">// UNCONVERTED:</code> comments — a payload that converts<br>
+cleanly while silently losing a third of its logic is worse than one that refuses.</p>
+<hr>
+<h2 dir="auto">Hardware</h2>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Board</th>
+<th>Image</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Pi Zero W</strong></td>
+<td><code class="notranslate">armhf</code></td>
+<td>The classic target. The only board with a Nexmon-patched firmware, so the only one where KARMA and multi-SSID can work.</td>
+</tr>
+<tr>
+<td><strong>Pi Zero</strong></td>
+<td><code class="notranslate">armhf</code></td>
+<td>No WiFi or Bluetooth. USB surface only.</td>
+</tr>
+<tr>
+<td><strong>Pi Zero 2 W</strong></td>
+<td><code class="notranslate">arm64</code></td>
+<td>USB, normal AP and Bluetooth all build. No Nexmon for its BCM43436, so no KARMA.</td>
+</tr>
+<tr>
+<td><strong>Pi 3 / 4 / 5</strong></td>
+<td><code class="notranslate">arm64</code></td>
+<td>On a Pi 4/5 the USB-C port is the one that does peripheral mode.</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<blockquote>
+<p dir="auto">Upstream and earlier versions of this README said the Pi Zero 2 W was unsupported and blamed<br>
+the WiFi chipset. That was not the reason. The core service was gated to 32-bit ARM by build<br>
+tags (<code class="notranslate">+build linux,arm</code>) that turned out to be incidental rather than a genuine dependency —<br>
+removing them builds arm64 with no code changes. The chipset only limits KARMA, not the device.</p>
+</blockquote>
+<p dir="auto">You also need a microSD card (8GB minimum), a USB cable or OTG adapter, and ideally an external<br>
+5V supply so the Pi can stay powered while detached from the target.</p>
+<hr>
+<h2 dir="auto">Building</h2>
+<p dir="auto">Everything cross-compiles from macOS or Linux. No Pi required to build.</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">make build-armv6     <span class="pl-c"><span class="pl-c">#</span> binaries for Pi Zero / Zero W</span>
+make build-arm64     <span class="pl-c"><span class="pl-c">#</span> binaries for Pi Zero 2 W / 3 / 4 / 5</span>
+make image           <span class="pl-c"><span class="pl-c">#</span> flashable .img.xz for both, via Docker</span>
+make <span class="pl-c1">test</span>            <span class="pl-c"><span class="pl-c">#</span> unit tests</span>
+make contrast        <span class="pl-c"><span class="pl-c">#</span> WCAG check on the console palette</span></pre></div>
+<p dir="auto">Image building is documented in <strong><a href="image/README.md">image/README.md</a></strong>. Every built image is<br>
+<strong>mounted and verified before it is published</strong>: MBR signature, both partitions, that the<br>
+partition table fits inside the file, that both filesystems mount, the payload and the console,<br>
+that the units are enabled, that <code class="notranslate">config.txt</code> carries the dwc2 overlay and <code class="notranslate">cmdline.txt</code> loads it<br>
+as a single line, that <code class="notranslate">root=PARTUUID</code> still matches the disk identifier, that no SSH host keys<br>
+were baked in, and that the binaries are the right architecture. A failure refuses to publish.</p>
+<p dir="auto">That check exists because a build once produced 2.6GB of zeros, compressed it to 410KB, wrote a<br>
+checksum for it and reported success.</p>
+<p dir="auto">Installing onto a Pi you already have:</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">sudo ./install.sh --ssid MyAP --wifi-country GB</pre></div>
+<hr>
+<h2 dir="auto">Security posture</h2>
+<p dir="auto">This is a tool for attacking systems, which makes its own security worth stating plainly.</p>
+<ul dir="auto">
+<li><strong>The API authenticates.</strong> Every gRPC method and every JSON endpoint requires a bearer token.<br>
+Tokens are opaque, random, expire on a sliding window, and can be revoked.</li>
+<li><strong>Per-device secrets.</strong> Nothing meaningful is shared between two flashed devices, and the<br>
+access point refuses to broadcast on a PSK published in this repository.</li>
+<li><strong>Path handling is allowlisted</strong>, and reads are bounds-checked.</li>
+<li><strong>The console is same-origin only.</strong> It emits no CORS headers and rejects foreign origins,<br>
+because this device is often reached from a browser that is simultaneously visiting untrusted<br>
+pages.</li>
+<li><strong>Payload text cannot become code.</strong> The DuckyScript converter escapes its output so a crafted<br>
+payload cannot close the generated JavaScript literal and run as root.</li>
+</ul>
+<p dir="auto"><strong>Still open:</strong> there is no TLS. The console is served over plain HTTP, so a bearer token rides<br>
+in cleartext over whatever link you reach it on. On the device's own WPA2 access point or a USB<br>
+cable that is survivable; over anything else it is not. Treat this as a device you reach<br>
+directly, not one you expose.</p>
+<hr>
+<h2 dir="auto">What is not verified</h2>
+<p dir="auto">Being specific about this matters more than the feature list.</p>
+<p dir="auto"><strong>No physical Raspberry Pi was used at any point.</strong></p>
+<p dir="auto"><em>Verified by automation:</em> both architectures cross-compile and <code class="notranslate">go vet</code> is clean for both;<br>
+81 test functions across the auth, JSON-bridge, PSK-guard and DuckyScript packages pass on<br>
+linux/arm64; images build from official Raspberry Pi OS releases and pass the mount-and-inspect<br>
+check above; the console was exercised in a browser against a mock implementing the real API<br>
+shapes — sign-in, all six views, the live event stream, both themes and a phone viewport — with<br>
+no console errors.</p>
+<p dir="auto"><em>Not verified at all:</em> that an image boots. That USB gadget mode initialises on real silicon and<br>
+a host enumerates the functions. That keystroke injection types correctly into a real machine.<br>
+That hostapd brings up the access point. That Bluetooth pairs. That the trigger engine fires on<br>
+real events. That any of this survives having the cable pulled out mid-write.</p>
+<p dir="auto">If you are evaluating this for real work, <strong>boot it on a Pi first and check those yourself.</strong><br>
+<a href="KNOWN_ISSUES.md">KNOWN_ISSUES.md</a> tracks what is fixed and what is still open, including the<br>
+cold-boot panic that made every freshly flashed device dead on arrival until this release.</p>
+<hr>
+<h2 dir="auto">Licence and selling this</h2>
+<p dir="auto">P4wnP1 A.L.O.A. is <strong>GPL-3.0</strong> (see <a href="LICENSE">LICENSE</a>), inherited from<br>
+<a href="https://github.com/mame82/P4wnP1_aloa">MaMe82's original</a>.</p>
+<p dir="auto">GPL-3.0 <strong>permits selling</strong> devices with this software on them. What it requires is that every<br>
+buyer gets the complete corresponding source for the version on their device, under GPL-3.0,<br>
+including your modifications, and that you do not add restrictions on their right to use, modify<br>
+and redistribute it. You cannot keep changes to this codebase proprietary while shipping them.</p>
+<p dir="auto">In practice the viable commercial shape is hardware, assembly, support, documentation, training<br>
+and engagement services — not licence fees for the code. If you intend to build a business on<br>
+this, get the position reviewed by someone qualified; the paragraph above describes what the<br>
+licence says, it is not legal advice.</p>
+<hr>
+<h2 dir="auto">Documentation</h2>
+<ul dir="auto">
+<li><strong><a href="INSTALL.md">INSTALL.md</a></strong> — installing onto an existing Raspberry Pi OS</li>
+<li><strong><a href="image/README.md">image/README.md</a></strong> — building flashable images</li>
+<li><strong><a href="docs/TUTORIAL.md">docs/TUTORIAL.md</a></strong> — HIDScript, the CLI, and trigger actions</li>
+<li><strong><a href="KNOWN_ISSUES.md">KNOWN_ISSUES.md</a></strong> — the defect backlog, prioritised</li>
+<li><strong><a href="CHANGELOG.md">CHANGELOG.md</a></strong> — what changed and why</li>
+</ul>
+<h2 dir="auto">Credits</h2>
+<p dir="auto">Created by <strong><a href="https://github.com/mame82">MaMe82</a></strong> (Marcus Mengs), whose design — the composite<br>
+gadget, HIDScript, and the trigger/action engine — is what this is. Maintained upstream at<br>
+<a href="https://github.com/RoganDawes/P4wnP1_aloa">RoganDawes/P4wnP1_aloa</a>. Kali Linux ship a prebuilt<br>
+image for the Pi Zero W.</p>
+<p dir="auto">This fork modernises the toolchain, adds authentication, a JSON API, arm64 support, a new<br>
+console, DuckyScript conversion and a verified image pipeline — and fixes the reason a flashed<br>
+device never worked.</p>
+<p align="center" dir="auto"><sub>
+Fraunces for identity and figures · Inter for interface text · system monospace for measured values<br>
+Warm paper with two golds; dark mode is true black
+</sub></p></article></body></html>
