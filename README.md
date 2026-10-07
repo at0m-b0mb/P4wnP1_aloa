@@ -34,7 +34,7 @@
 
 ## Download
 
-Built from `v0.3.1`, on **Raspberry Pi OS Lite (Debian 13 "trixie"), 2026-09-15**, kernel
+Built from `v0.4.0`, on **Raspberry Pi OS Lite (Debian 13 "trixie"), 2026-09-15**, kernel
 `6.18.50+rpt-rpi`.
 
 > **If you are running v0.3.0 or earlier, replace it.** Every image up to and including
@@ -44,20 +44,20 @@ Built from `v0.3.1`, on **Raspberry Pi OS Lite (Debian 13 "trixie"), 2026-09-15*
 
 | Image | Size | Boards |
 |---|---|---|
-| `P4wnP1-ALOA-v0.3.1-armhf.img.xz` | 640M | Pi Zero, **Pi Zero W**, Pi 1 |
-| `P4wnP1-ALOA-v0.3.1-arm64.img.xz` | 592M | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 |
+| `P4wnP1-ALOA-v0.4.0-armhf.img.xz` | 656M | Pi Zero, **Pi Zero W**, Pi 1 |
+| `P4wnP1-ALOA-v0.4.0-arm64.img.xz` | 608M | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 |
 
 ```
-armhf  sha256  7c06dc881c9bb3ad09f2adaf3c4a8d5225c7004625d63a055013499987a6b901
-arm64  sha256  c4c56374657febf93905ed2e25b6bf797fb92bfa6df1a9ec5da0577062295cbc
+armhf  sha256  b38240a35b56afebccc193cda4859056f43a2982140f72077a84e8ca69875e24
+arm64  sha256  e10f76236d87d53903f736c6336fe370b74110e01b21075405b56a59bae2a355
 ```
 
 Verify, flash, and boot with the cable in the **data** port (the inner one on a Zero):
 
 ```bash
-sha256sum -c P4wnP1-ALOA-v0.3.1-armhf.img.xz.sha256
-xz -d P4wnP1-ALOA-v0.3.1-armhf.img.xz
-sudo dd if=P4wnP1-ALOA-v0.3.1-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
+sha256sum -c P4wnP1-ALOA-v0.4.0-armhf.img.xz.sha256
+xz -d P4wnP1-ALOA-v0.4.0-armhf.img.xz
+sudo dd if=P4wnP1-ALOA-v0.4.0-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
 **Before you flash**, set a username and password in Raspberry Pi Imager ("Set username and

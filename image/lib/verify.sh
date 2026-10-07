@@ -73,6 +73,7 @@ check() {
 check /usr/local/bin/P4wnP1_service
 check /usr/local/bin/P4wnP1_cli
 check /usr/local/bin/p4wnp1-hashpw
+check /usr/local/bin/p4wnp1-oled
 check /usr/local/P4wnP1/keymaps
 check /usr/local/P4wnP1/HIDScripts
 check /usr/local/P4wnP1/www/app/index.html
@@ -84,6 +85,17 @@ check /etc/systemd/system/P4wnP1.service
 check /etc/systemd/system/p4wnp1-firstboot.service
 check /etc/systemd/system/multi-user.target.wants/P4wnP1.service
 check /etc/systemd/system/multi-user.target.wants/p4wnp1-firstboot.service
+check /etc/systemd/system/p4wnp1-oled.service
+check /etc/systemd/system/multi-user.target.wants/p4wnp1-oled.service
+
+# SPI, without which a correctly wired OLED HAT stays dark. Checked here
+# rather than trusted, because the symptom is a blank panel and the first
+# thing anyone blames is their soldering.
+if grep -q '^dtparam=spi=on' "$MNT/boot/firmware/config.txt"; then
+    ok "config.txt enables SPI for the OLED HAT"
+else
+    printf '\033[1;31m[verify:FAIL]\033[0m config.txt does not enable SPI; an OLED HAT will not light\n' >&2; fail=1
+fi
 
 # Boot configuration -- without these the entire USB feature set is dead.
 if grep -q '^dtoverlay=dwc2' "$MNT/boot/firmware/config.txt"; then
