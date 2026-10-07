@@ -34,25 +34,30 @@
 
 ## Download
 
-Built from `v0.3.0`, on **Raspberry Pi OS Lite (Debian 13 "trixie"), 2026-09-15**, kernel
+Built from `v0.3.1`, on **Raspberry Pi OS Lite (Debian 13 "trixie"), 2026-09-15**, kernel
 `6.18.50+rpt-rpi`.
+
+> **If you are running v0.3.0 or earlier, replace it.** Every image up to and including
+> v0.3.0 shipped the same SSH password (`p4wnp1:p4wnp1`) with passwordless sudo, so anyone
+> who could reach the device — including the host it was plugged into — could take root on
+> it. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md). v0.3.1 ships no usable account at all.
 
 | Image | Size | Boards |
 |---|---|---|
-| `P4wnP1-ALOA-v0.3.0-armhf.img.xz` | 640M | Pi Zero, **Pi Zero W**, Pi 1 |
-| `P4wnP1-ALOA-v0.3.0-arm64.img.xz` | 592M | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 |
+| `P4wnP1-ALOA-v0.3.1-armhf.img.xz` | 640M | Pi Zero, **Pi Zero W**, Pi 1 |
+| `P4wnP1-ALOA-v0.3.1-arm64.img.xz` | 592M | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 |
 
 ```
-armhf  sha256  ebeeab79b044b7a6ecb36f43b0293f1aea2a9434020aa1e2bb926bef6053edfd
-arm64  sha256  70b0bd84b000e8aa77399ab4e3553b0abb614a8ef8e0c21fe6ee95a934f03fa0
+armhf  sha256  7c06dc881c9bb3ad09f2adaf3c4a8d5225c7004625d63a055013499987a6b901
+arm64  sha256  c4c56374657febf93905ed2e25b6bf797fb92bfa6df1a9ec5da0577062295cbc
 ```
 
 Verify, flash, and boot with the cable in the **data** port (the inner one on a Zero):
 
 ```bash
-sha256sum -c P4wnP1-ALOA-v0.3.0-armhf.img.xz.sha256
-xz -d P4wnP1-ALOA-v0.3.0-armhf.img.xz
-sudo dd if=P4wnP1-ALOA-v0.3.0-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
+sha256sum -c P4wnP1-ALOA-v0.3.1-armhf.img.xz.sha256
+xz -d P4wnP1-ALOA-v0.3.1-armhf.img.xz
+sudo dd if=P4wnP1-ALOA-v0.3.1-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
 **Before you flash**, set a username and password in Raspberry Pi Imager ("Set username and
