@@ -32,8 +32,26 @@ permissions:
   contents: write
 
 jobs:
+  prepare:
+    name: Create the draft release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create an empty draft for the builds to upload into
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "release ${{ inputs.version }} already exists; reusing it"
+          else
+            gh release create "${{ inputs.version }}" \
+              --title "${{ inputs.version }}" --notes "Build in progress..." --draft
+          fi
+
   build:
     name: ${{ matrix.arch }} / ${{ matrix.variant }}
+    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
@@ -74,16 +92,30 @@ jobs:
             --arch "${{ matrix.arch }}" \
             --variant "${{ matrix.variant }}"
 
-      # Named per matrix cell so the collecting job can pick them all up.
-      - name: Upload the image
+      # Straight to the release, NOT to a workflow artifact.
+      #
+      # Release assets on a public repo are free and unmetered. Workflow
+      # artifacts are not: they come out of the 500MB (2GB on Pro) storage
+      # allowance, and four images at ~650MB each would exceed even the Pro
+      # quota on a single run. Uploading here also means a failure in one
+      # matrix cell does not cost the other three their work.
+      - name: Upload this image to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd image/out
+          ls -la ./*.img.xz
+          gh release upload "${{ inputs.version }}" ./*.img.xz ./*.img.xz.sha256 --clobber
+
+      # The checksum file is a few hundred bytes, so collecting these as
+      # artifacts to assemble the notes costs essentially nothing.
+      - name: Keep the checksum for the notes
         uses: actions/upload-artifact@v4
         with:
-          name: image-${{ matrix.arch }}-${{ matrix.variant }}
-          path: |
-            image/out/*.img.xz
-            image/out/*.img.xz.sha256
+          name: sha-${{ matrix.arch }}-${{ matrix.variant }}
+          path: image/out/*.img.xz.sha256
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   release:
     name: Publish
@@ -93,40 +125,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Collect every image
+      - name: Collect the checksums
         uses: actions/download-artifact@v4
         with:
-          pattern: image-*
+          pattern: sha-*
           merge-multiple: true
           path: dist-images
 
       # A release that silently shipped three of four images would be worse
-      # than a failed one, and a checksum that does not match its file is
-      # worse still. Both are cheap to check and neither is obvious by eye.
-      - name: Check the set is complete and the checksums match
+      # than a failed one. Checked against what is ACTUALLY attached to the
+      # release, not against what this job happens to have on disk.
+      - name: Check the set is complete
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          cd dist-images
-          ls -la
+          attached=$(gh release view "${{ inputs.version }}" \
+            --json assets --jq '.assets[].name')
+          echo "attached to the release:"; echo "$attached" | sed 's/^/  /'
           missing=0
           for arch in armhf arm64; do
             for suffix in "" "-oled"; do
               f="P4wnP1-ALOA-${{ inputs.version }}${suffix}-${arch}.img.xz"
-              if [ ! -f "$f" ]; then
-                echo "MISSING: $f"; missing=1
+              if ! echo "$attached" | grep -qx "$f"; then
+                echo "MISSING FROM THE RELEASE: $f"; missing=1
+              fi
+              if ! echo "$attached" | grep -qx "$f.sha256"; then
+                echo "MISSING CHECKSUM: $f.sha256"; missing=1
               fi
             done
           done
           [ "$missing" -eq 0 ] || { echo "the image set is incomplete"; exit 1; }
-          # Recompute rather than trust the .sha256 that travelled with it.
-          for f in *.img.xz; do
-            want=$(cut -d' ' -f1 < "$f.sha256")
-            got=$(sha256sum "$f" | cut -d' ' -f1)
-            if [ "$want" != "$got" ]; then
-              echo "CHECKSUM MISMATCH for $f"; echo "  recorded: $want"; echo "  actual:   $got"
-              exit 1
-            fi
-            echo "ok  $f  $got"
-          done
 
       - name: Write the release notes
         run: |
@@ -146,25 +174,25 @@ jobs:
             echo "artifact rather than of its filename."
             echo
             echo '```'
-            cd dist-images && sha256sum *.img.xz
+            cd dist-images && cat ./*.sha256
             echo '```'
             echo
-            echo "Built by GitHub Actions from \`${GITHUB_SHA}\`. Every image was mounted and"
-            echo "inspected before upload, and the checksums above were recomputed from the"
-            echo "uploaded files rather than copied from the build."
+            echo "Built by GitHub Actions from \`${GITHUB_SHA}\`. Every image was mounted"
+            echo "and inspected by image/lib/verify.sh before it was uploaded."
             echo
             echo "**Before you flash**, set a username and password in Raspberry Pi Imager:"
             echo "the image ships no usable account."
           } > NOTES.md
           cat NOTES.md
 
-      - name: Publish
+      - name: Write the notes onto the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ inputs.version }}" \
-            --title "${{ inputs.version }}" \
+          gh release edit "${{ inputs.version }}" \
             --notes-file NOTES.md \
-            ${{ inputs.draft && '--draft' || '' }} \
-            ${{ inputs.prerelease && '--prerelease' || '' }} \
-            dist-images/*.img.xz dist-images/*.img.xz.sha256
+            --draft=${{ inputs.draft }} \
+            --prerelease=${{ inputs.prerelease }}
+          echo
+          gh release view "${{ inputs.version }}" --json isDraft,assets \
+            --jq '"draft: \(.isDraft)", (.assets[] | "  \(.name)  \(.size) bytes")'
