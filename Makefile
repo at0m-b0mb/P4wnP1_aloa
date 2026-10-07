@@ -3,7 +3,7 @@ PATH := /usr/local/go/bin:$(PATH)
 
 .PHONY: all help compile build-armv6 build-service-armv6 build-cli-armv6 build-hashpw-armv6 \
         build-arm64 build-service-arm64 build-cli-arm64 build-hashpw-arm64 \
-        image image-armhf image-arm64 contrast smoke check-js mock dep install installkali remove lint test
+        image image-armhf image-arm64 contrast smoke check-js check-rpc mock dep install installkali remove lint test
 
 all: compile
 
@@ -22,6 +22,7 @@ help:
 	@echo "  make contrast      Check the web console palette against WCAG AA"
 	@echo "  make smoke         Run the service in a container and verify it works"
 	@echo "  make check-js      Syntax-check the web console JavaScript"
+	@echo "  make check-rpc     Check console RPC payloads against the .proto"
 	@echo "  make mock          Serve the console against a mock device (no Pi needed)"
 	@echo "  make test          Run unit tests (auth + jsonbridge)"
 	@echo "  make lint          Run shellcheck + golangci-lint (require both installed)"
@@ -82,6 +83,13 @@ contrast:
 check-js:
 	./tools/check-js.sh
 
+# Check every RPC payload the console sends against proto/grpc.proto. The JSON
+# bridge discards unknown fields, so a misspelled name is accepted and silently
+# dropped -- which is how five real bugs shipped, including one that ERASED the
+# boot configuration.
+check-rpc:
+	python3 tools/check-rpc-shapes.py
+
 # Serve the console against a mock device, for working on the UI with no Pi.
 mock:
 	python3 tools/mock-service.py
@@ -120,6 +128,7 @@ lint:
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint not installed; skipping go lint"; exit 0; }
 	golangci-lint run ./...
 	./tools/check-js.sh
+	python3 tools/check-rpc-shapes.py
 
 # make dep runs without sudo
 dep:

@@ -50,7 +50,7 @@ var (
 // marshalOpts keeps zero values in the output. A frontend rendering a form
 // needs to know a boolean is false, not have the field vanish; EmitUnpopulated
 // makes the JSON shape stable and lets the UI bind directly to it.
-var marshalOpts = protojson.MarshalOptions{EmitUnpopulated: true, UseProtoNames: true}
+var marshalOpts = protojson.MarshalOptions{EmitUnpopulated: true}
 
 // unmarshalOpts tolerates fields the server does not know. Without this a
 // frontend echoing back a response body it had augmented (or one built against

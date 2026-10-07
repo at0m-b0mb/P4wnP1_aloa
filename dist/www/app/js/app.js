@@ -1095,7 +1095,7 @@ Views.loadouts = async function () {
     guard(() => Api.rpc('GetStartupMasterTemplate'), 'read startup loadout'),
   ]);
   const names = (list && list.msgArray) || [];
-  const startupName = startup && (startup.templateName || startup.msg) || null;
+  const startupName = (startup && startup.msg) || null;
 
   main.append(h('div.card',
     h('h2.card-title', 'Stored loadouts'),
@@ -1121,7 +1121,11 @@ Views.loadouts = async function () {
           ' ',
           h('button.btn.btn-sm', {
             onclick: async () => {
-              const r = await guard(() => Api.rpc('SetStartupMasterTemplate', { templateName: n }), 'set the boot default');
+              /* StringMessage's field is `msg`. Sending `templateName` was
+                 accepted and silently discarded by the bridge, so this set the
+                 boot default to an EMPTY string -- clicking "Use at boot"
+                 erased the boot configuration instead of setting it. */
+              const r = await guard(() => Api.rpc('SetStartupMasterTemplate', { msg: n }), 'set the boot default');
               if (r !== undefined) { toast('"' + n + '" will load at boot.'); Views.loadouts(); }
             },
           }, 'Use at boot'))))))
