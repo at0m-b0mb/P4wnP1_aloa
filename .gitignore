@@ -21,3 +21,7 @@ INITIAL_CREDENTIALS.txt
 
 # Go cache
 vendor/
+
+# image build artifacts
+image/out/
+image/cache/

@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package service
@@ -30,19 +31,18 @@ var (
 )
 
 const (
-	cSTORE_PREFIX_WIFI_SETTINGS      = "ws_"
-	cSTORE_PREFIX_USB_SETTINGS      = "usbs_"
-	cSTORE_PREFIX_ETHERNET_INTERFACE_SETTINGS      = "eis_"
-	cSTORE_PREFIX_TRIGGER_ACTION_SET = "tas_"
-	cSTORE_PREFIX_BLUETOOTH_SETTINGS = "bt_"
-	cSTORE_PREFIX_MASTER_TEMPLATE = "master_"
-	cSTORE_STARTUP_MASTER_TEMPLATE = "startup_master"
+	cSTORE_PREFIX_WIFI_SETTINGS               = "ws_"
+	cSTORE_PREFIX_USB_SETTINGS                = "usbs_"
+	cSTORE_PREFIX_ETHERNET_INTERFACE_SETTINGS = "eis_"
+	cSTORE_PREFIX_TRIGGER_ACTION_SET          = "tas_"
+	cSTORE_PREFIX_BLUETOOTH_SETTINGS          = "bt_"
+	cSTORE_PREFIX_MASTER_TEMPLATE             = "master_"
+	cSTORE_STARTUP_MASTER_TEMPLATE            = "startup_master"
 )
-
 
 func NewRpcServerService(root *Service) *server {
 	return &server{
-		rootSvc:root,
+		rootSvc: root,
 	}
 }
 
@@ -50,25 +50,28 @@ type server struct {
 	rootSvc *Service
 
 	listenAddrGrpc string
-	listenAddrWeb string
+	listenAddrWeb  string
 }
 
 func (s *server) ListUmsImageFlashdrive(ctx context.Context, e *pb.Empty) (sa *pb.StringMessageArray, err error) {
 	sa = &pb.StringMessageArray{}
-	scripts,err := ListFilesOfFolder(common.PATH_IMAGE_FLASHDRIVE, ".img", ".bin")
-	if err != nil { return sa,err }
+	scripts, err := ListFilesOfFolder(common.PATH_IMAGE_FLASHDRIVE, ".img", ".bin")
+	if err != nil {
+		return sa, err
+	}
 	sa.MsgArray = scripts
 	return
 }
 
 func (s *server) ListUmsImageCdrom(ctx context.Context, e *pb.Empty) (sa *pb.StringMessageArray, err error) {
 	sa = &pb.StringMessageArray{}
-	scripts,err := ListFilesOfFolder(common.PATH_IMAGE_CDROM, ".iso")
-	if err != nil { return sa,err }
+	scripts, err := ListFilesOfFolder(common.PATH_IMAGE_CDROM, ".iso")
+	if err != nil {
+		return sa, err
+	}
 	sa.MsgArray = scripts
 	return
 }
-
 
 func (s *server) GetStartupMasterTemplate(ctx context.Context, e *pb.Empty) (msg *pb.StringMessage, err error) {
 	msg = &pb.StringMessage{}
@@ -104,7 +107,7 @@ func (s *server) DeployTriggerActionSetUpdate(ctx context.Context, updateTas *pb
 		if s.rootSvc.SubSysTriggerActions.UpdateTriggerAction(updateTa, false) != nil {
 			fmt.Printf("Updating TriggerAction %d failed: %v\n", updateTa.Id, err)
 			// coudln't find the given action, return with error
-			return &s.rootSvc.SubSysTriggerActions.registeredTriggerActions,errors.New(fmt.Sprintf("Couldn't find trigger action with id %d", updateTa.Id))
+			return &s.rootSvc.SubSysTriggerActions.registeredTriggerActions, errors.New(fmt.Sprintf("Couldn't find trigger action with id %d", updateTa.Id))
 		}
 		fmt.Printf("Updating TriggerAction %d succeeded\n", updateTa.Id)
 	}
@@ -115,7 +118,7 @@ func (s *server) DeployTriggerActionSetUpdate(ctx context.Context, updateTas *pb
 
 func (s *server) GetAvailableGpios(context.Context, *pb.Empty) (res *pb.StringMessageArray, err error) {
 	res = &pb.StringMessageArray{}
-	res.MsgArray,err = s.rootSvc.SubSysGpio.GetAvailableGpioNames()
+	res.MsgArray, err = s.rootSvc.SubSysGpio.GetAvailableGpioNames()
 	return
 }
 
@@ -127,7 +130,7 @@ func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate
 	//ignore templates with name of length 0
 	if len(mt.TemplateNameTriggerActions) > 0 {
 		fmt.Printf("... deploying TriggerActions '%s' ...\n", mt.TemplateNameTriggerActions)
-		_,err = s.DeployStoredTriggerActionSetReplace(ctx, &pb.StringMessage{Msg: mt.TemplateNameTriggerActions})
+		_, err = s.DeployStoredTriggerActionSetReplace(ctx, &pb.StringMessage{Msg: mt.TemplateNameTriggerActions})
 		if err != nil {
 			fmt.Printf("... error deploying TriggerActions '%s'\n", mt.TemplateNameTriggerActions)
 			return
@@ -135,9 +138,9 @@ func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate
 		fmt.Printf("... succeeded deploying TriggerActions '%s'\n", mt.TemplateNameTriggerActions)
 	}
 
-	for _,nnw := range mt.TemplateNamesNetwork {
+	for _, nnw := range mt.TemplateNamesNetwork {
 		fmt.Printf("... deploying Network Interface Settings '%s' ...\n", nnw)
-		_,err = s.DeployStoredEthernetInterfaceSettings(ctx, &pb.StringMessage{Msg: nnw})
+		_, err = s.DeployStoredEthernetInterfaceSettings(ctx, &pb.StringMessage{Msg: nnw})
 		if err != nil {
 			fmt.Printf("... error deploying Network Interface Settings '%s'\n", nnw)
 			return
@@ -187,21 +190,23 @@ func (s *server) StoreMasterTemplate(ctx context.Context, r *pb.RequestMasterTem
 	e = &pb.Empty{}
 
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_STORED_GLOBAL_SETTINGS_LIST))
-	err = s.rootSvc.SubSysDataStore.Put(cSTORE_PREFIX_MASTER_TEMPLATE + r.TemplateName, r.Template, true)
+	err = s.rootSvc.SubSysDataStore.Put(cSTORE_PREFIX_MASTER_TEMPLATE+r.TemplateName, r.Template, true)
 	return
 
 }
 
 func (s *server) GetStoredMasterTemplate(ctx context.Context, templateName *pb.StringMessage) (result *pb.MasterTemplate, err error) {
 	result = &pb.MasterTemplate{}
-	err = s.rootSvc.SubSysDataStore.Get(cSTORE_PREFIX_MASTER_TEMPLATE + templateName.Msg, result)
+	err = s.rootSvc.SubSysDataStore.Get(cSTORE_PREFIX_MASTER_TEMPLATE+templateName.Msg, result)
 	return
 }
 
 func (s *server) DeployStoredMasterTemplate(ctx context.Context, templateName *pb.StringMessage) (re *pb.MasterTemplate, err error) {
-	re,err = s.GetStoredMasterTemplate(ctx,templateName)
-	if err != nil { return }
-	_,err = s.DeployMasterTemplate(ctx, re)
+	re, err = s.GetStoredMasterTemplate(ctx, templateName)
+	if err != nil {
+		return
+	}
+	_, err = s.DeployMasterTemplate(ctx, re)
 	return
 }
 
@@ -214,8 +219,10 @@ func (s *server) DeleteStoredMasterTemplate(ctx context.Context, templateName *p
 
 func (s *server) ListStoredMasterTemplate(ctx context.Context, e *pb.Empty) (sa *pb.StringMessageArray, err error) {
 	sa = &pb.StringMessageArray{}
-	res,err := s.rootSvc.SubSysDataStore.KeysPrefix(cSTORE_PREFIX_MASTER_TEMPLATE, true)
-	if err != nil { return sa,err }
+	res, err := s.rootSvc.SubSysDataStore.KeysPrefix(cSTORE_PREFIX_MASTER_TEMPLATE, true)
+	if err != nil {
+		return sa, err
+	}
 	sa.MsgArray = res
 	return
 }
@@ -232,14 +239,14 @@ func (s *server) WaitTriggerGroupReceive(rpcCtx context.Context, triggerGR *pb.T
 Outer:
 	for {
 		select {
-		case evt := <- evtRcv.EventQueue:
+		case evt := <-evtRcv.EventQueue:
 			// avoid consuming empty messages, because channel is closed
 			if evt == nil {
 				break Outer // abort loop on "nil" event, as this indicates the EventQueue channel has been closed
 			}
 			// check if received trigger event applies to TriggerGroupReceive
 			if ttEvt := common_web.EvtTriggerType(evt.Values[0].GetTint64()); ttEvt == common_web.TRIGGER_EVT_TYPE_GROUP_RECEIVE {
-				evGroupName,evValue,err := DeconstructEventTriggerGroupReceive(evt)
+				evGroupName, evValue, err := DeconstructEventTriggerGroupReceive(evt)
 				if err != nil {
 					continue // error parsing as groupReceiveEvent --> ignore
 				}
@@ -258,22 +265,22 @@ Outer:
 				// if here, we have a hit and exit the loop without error
 				break Outer
 			}
-		case <- evtRcv.Ctx.Done():
+		case <-evtRcv.Ctx.Done():
 			// evvent Receiver cancelled or unregistered
 			err = errors.New("EventListener for WaitTriggerGroupReceive aborted")
 			break Outer
-		case <- rpcCtx.Done():
+		case <-rpcCtx.Done():
 			// evvent Receiver cancelled or unregistered
 			err = errors.New("RPC call to WaitTriggerGroupReceive aborted")
 			break Outer
 		}
 	}
 
-/*
-	if err != nil {
-		fmt.Println("Aborted")
-	}
-*/
+	/*
+		if err != nil {
+			fmt.Println("Aborted")
+		}
+	*/
 	return
 }
 
@@ -291,32 +298,34 @@ func (s *server) DeployBluetoothSettings(ctx context.Context, settings *pb.Bluet
 	as := settings.As
 	ci := settings.Ci
 	resultSettings = &pb.BluetoothSettings{}
-	resultSettings.Ci,err = s.DeployBluetoothControllerInformation(ctx, ci)
+	resultSettings.Ci, err = s.DeployBluetoothControllerInformation(ctx, ci)
 	if err != nil {
-		resultSettings.As,_ = s.GetBluetoothAgentSettings(ctx,&pb.Empty{})
+		resultSettings.As, _ = s.GetBluetoothAgentSettings(ctx, &pb.Empty{})
 		return
 	}
-	resultSettings.As,err = s.DeployBluetoothAgentSettings(ctx, as)
+	resultSettings.As, err = s.DeployBluetoothAgentSettings(ctx, as)
 	return
 }
 
 func (s *server) StoreBluetoothSettings(ctx context.Context, req *pb.BluetoothRequestSettingsStorage) (e *pb.Empty, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_STORED_BLUETOOTH_SETTINGS_LIST))
 	e = &pb.Empty{}
-	err = s.rootSvc.SubSysDataStore.Put(cSTORE_PREFIX_BLUETOOTH_SETTINGS + req.TemplateName, req.Settings, true)
+	err = s.rootSvc.SubSysDataStore.Put(cSTORE_PREFIX_BLUETOOTH_SETTINGS+req.TemplateName, req.Settings, true)
 	return
 }
 
 func (s *server) GetStoredBluetoothSettings(ctx context.Context, templateName *pb.StringMessage) (result *pb.BluetoothSettings, err error) {
 	result = &pb.BluetoothSettings{}
-	err = s.rootSvc.SubSysDataStore.Get(cSTORE_PREFIX_BLUETOOTH_SETTINGS + templateName.Msg, result)
+	err = s.rootSvc.SubSysDataStore.Get(cSTORE_PREFIX_BLUETOOTH_SETTINGS+templateName.Msg, result)
 	return
 }
 
 func (s *server) DeployStoredBluetoothSettings(ctx context.Context, templateName *pb.StringMessage) (e *pb.BluetoothSettings, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_BLUETOOTH))
-	bts,err := s.GetStoredBluetoothSettings(ctx,templateName)
-	if err != nil { return bts,err }
+	bts, err := s.GetStoredBluetoothSettings(ctx, templateName)
+	if err != nil {
+		return bts, err
+	}
 	return s.DeployBluetoothSettings(ctx, bts)
 }
 
@@ -331,21 +340,27 @@ func (s *server) StoreDeployedBluetoothSettings(ctx context.Context, templateNam
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_STORED_BLUETOOTH_SETTINGS_LIST))
 	e = &pb.Empty{}
 	currentSettings := &pb.BluetoothSettings{}
-	currentSettings.Ci,err = s.GetBluetoothControllerInformation(ctx, e)
-	if err != nil { return e,err }
-	currentSettings.As,err = s.GetBluetoothAgentSettings(ctx,e)
-	if err != nil { return e,err }
+	currentSettings.Ci, err = s.GetBluetoothControllerInformation(ctx, e)
+	if err != nil {
+		return e, err
+	}
+	currentSettings.As, err = s.GetBluetoothAgentSettings(ctx, e)
+	if err != nil {
+		return e, err
+	}
 
 	return s.StoreBluetoothSettings(ctx, &pb.BluetoothRequestSettingsStorage{
-		Settings: currentSettings,
+		Settings:     currentSettings,
 		TemplateName: templateName.Msg,
 	})
 }
 
 func (s *server) ListStoredBluetoothSettings(ctx context.Context, e *pb.Empty) (sa *pb.StringMessageArray, err error) {
 	sa = &pb.StringMessageArray{}
-	res,err := s.rootSvc.SubSysDataStore.KeysPrefix(cSTORE_PREFIX_BLUETOOTH_SETTINGS, true)
-	if err != nil { return sa,err }
+	res, err := s.rootSvc.SubSysDataStore.KeysPrefix(cSTORE_PREFIX_BLUETOOTH_SETTINGS, true)
+	if err != nil {
+		return sa, err
+	}
 	sa.MsgArray = res
 	return
 }
@@ -398,19 +413,19 @@ func (s *server) DBRestore(ctx context.Context, filename *pb.StringMessage) (e *
 	if lext := strings.ToLower(ext); lext != ".db" {
 		fname = fname + ".db"
 	}
-	err = s.rootSvc.SubSysDataStore.Restore(common.PATH_DATA_STORE_BACKUP + "/" + fname, true)
+	err = s.rootSvc.SubSysDataStore.Restore(common.PATH_DATA_STORE_BACKUP+"/"+fname, true)
 	return
 }
 
 func (s *server) ListStoredDBBackups(ctx context.Context, e *pb.Empty) (ma *pb.StringMessageArray, err error) {
 	ma = &pb.StringMessageArray{}
-	scripts,err := ListFilesOfFolder(common.PATH_DATA_STORE_BACKUP, ".db")
-	if err != nil { return ma,err }
+	scripts, err := ListFilesOfFolder(common.PATH_DATA_STORE_BACKUP, ".db")
+	if err != nil {
+		return ma, err
+	}
 	ma.MsgArray = scripts
 	return
 }
-
-
 
 func (s *server) GetBluetoothAgentSettings(ctx context.Context, e *pb.Empty) (as *pb.BluetoothAgentSettings, err error) {
 	return s.rootSvc.SubSysBluetooth.GetBluetoothAgentSettings()
@@ -442,54 +457,64 @@ func (s *server) GetBluetoothControllerInformation(ctx context.Context, e *pb.Em
 func (s *server) StoreUSBSettings(ctx context.Context, r *pb.USBRequestSettingsStorage) (e *pb.Empty, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_STORED_USB_SETTINGS_LIST))
 	e = &pb.Empty{}
-	err = s.rootSvc.SubSysDataStore.Put(cSTORE_PREFIX_USB_SETTINGS + r.TemplateName, r.Settings, true)
+	err = s.rootSvc.SubSysDataStore.Put(cSTORE_PREFIX_USB_SETTINGS+r.TemplateName, r.Settings, true)
 	return
 }
 
 func (s *server) GetStoredUSBSettings(ctx context.Context, m *pb.StringMessage) (gs *pb.GadgetSettings, err error) {
 	gs = &pb.GadgetSettings{}
-	err = s.rootSvc.SubSysDataStore.Get(cSTORE_PREFIX_USB_SETTINGS + m.Msg, gs)
+	err = s.rootSvc.SubSysDataStore.Get(cSTORE_PREFIX_USB_SETTINGS+m.Msg, gs)
 	return
 }
 
 func (s *server) DeployStoredUSBSettings(ctx context.Context, m *pb.StringMessage) (st *pb.GadgetSettings, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_USB))
-	ws,err := s.GetStoredUSBSettings(ctx,m)
-	if err != nil { return &pb.GadgetSettings{},err }
-	st,err = s.DeployGadgetSetting(ctx, ws)
+	ws, err := s.GetStoredUSBSettings(ctx, m)
+	if err != nil {
+		return &pb.GadgetSettings{}, err
+	}
+	st, err = s.DeployGadgetSetting(ctx, ws)
 	return
 }
 
 func (s *server) StoreDeployedUSBSettings(ctx context.Context, m *pb.StringMessage) (e *pb.Empty, err error) {
 	gstate, err := s.rootSvc.SubSysUSB.ParseGadgetState(USB_GADGET_NAME)
-	if err != nil { return &pb.Empty{},err }
+	if err != nil {
+		return &pb.Empty{}, err
+	}
 
 	return s.StoreUSBSettings(ctx, &pb.USBRequestSettingsStorage{
-		Settings: gstate,
+		Settings:     gstate,
 		TemplateName: m.Msg,
 	})
 }
 
 func (s *server) ListStoredUSBSettings(ctx context.Context, e *pb.Empty) (sa *pb.StringMessageArray, err error) {
 	sa = &pb.StringMessageArray{}
-	res,err := s.rootSvc.SubSysDataStore.KeysPrefix(cSTORE_PREFIX_USB_SETTINGS, true)
-	if err != nil { return sa,err }
+	res, err := s.rootSvc.SubSysDataStore.KeysPrefix(cSTORE_PREFIX_USB_SETTINGS, true)
+	if err != nil {
+		return sa, err
+	}
 	sa.MsgArray = res
 	return
 }
 
 func (s *server) ListStoredHIDScripts(context.Context, *pb.Empty) (sa *pb.StringMessageArray, err error) {
 	sa = &pb.StringMessageArray{}
-	scripts,err := ListFilesOfFolder(common.PATH_HID_SCRIPTS, ".js", ".javascript")
-	if err != nil { return sa,err }
+	scripts, err := ListFilesOfFolder(common.PATH_HID_SCRIPTS, ".js", ".javascript")
+	if err != nil {
+		return sa, err
+	}
 	sa.MsgArray = scripts
 	return
 }
 
 func (s *server) ListStoredBashScripts(context.Context, *pb.Empty) (sa *pb.StringMessageArray, err error) {
 	sa = &pb.StringMessageArray{}
-	scripts,err := ListFilesOfFolder(common.PATH_BASH_SCRIPTS, ".sh", ".bash")
-	if err != nil { return sa,err }
+	scripts, err := ListFilesOfFolder(common.PATH_BASH_SCRIPTS, ".sh", ".bash")
+	if err != nil {
+		return sa, err
+	}
 	sa.MsgArray = scripts
 	return
 }
@@ -498,26 +523,30 @@ func (s *server) DeployStoredTriggerActionSetReplace(ctx context.Context, msg *p
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_TRIGGER_ACTIONS))
 	// load set from store
 	tas = &pb.TriggerActionSet{}
-	err = s.rootSvc.SubSysDataStore.Get(cSTORE_PREFIX_TRIGGER_ACTION_SET + msg.Msg, tas)
-	if err != nil { return }
+	err = s.rootSvc.SubSysDataStore.Get(cSTORE_PREFIX_TRIGGER_ACTION_SET+msg.Msg, tas)
+	if err != nil {
+		return
+	}
 
-	return s.DeployTriggerActionSetReplace(ctx,tas)
+	return s.DeployTriggerActionSetReplace(ctx, tas)
 }
 
 func (s *server) DeployStoredTriggerActionSetAdd(ctx context.Context, msg *pb.StringMessage) (tas *pb.TriggerActionSet, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_TRIGGER_ACTIONS))
 	// load set from store
 	tas = &pb.TriggerActionSet{}
-	err = s.rootSvc.SubSysDataStore.Get(cSTORE_PREFIX_TRIGGER_ACTION_SET + msg.Msg, tas)
-	if err != nil { return }
+	err = s.rootSvc.SubSysDataStore.Get(cSTORE_PREFIX_TRIGGER_ACTION_SET+msg.Msg, tas)
+	if err != nil {
+		return
+	}
 
-	return s.DeployTriggerActionSetAdd(ctx,tas)
+	return s.DeployTriggerActionSetAdd(ctx, tas)
 }
 
 func (s *server) StoreTriggerActionSet(ctx context.Context, set *pb.TriggerActionSet) (e *pb.Empty, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_STORED_TRIGGER_ACTION_SETS_LIST))
 	e = &pb.Empty{}
-	err = s.rootSvc.SubSysDataStore.Put(cSTORE_PREFIX_TRIGGER_ACTION_SET+ set.Name, set, true)
+	err = s.rootSvc.SubSysDataStore.Put(cSTORE_PREFIX_TRIGGER_ACTION_SET+set.Name, set, true)
 	return
 }
 
@@ -540,37 +569,43 @@ func (s *server) DeployTriggerActionSetReplace(ctx context.Context, tas *pb.Trig
 	// Clear old set, but keep immutables
 	s.rootSvc.SubSysTriggerActions.ClearTriggerActions(true)
 	// Add the new set
-	_,err = s.DeployTriggerActionSetAdd(ctx, tas)
-	if err != nil { return s.rootSvc.SubSysTriggerActions.GetCurrentTriggerActionSet(),err }
+	_, err = s.DeployTriggerActionSetAdd(ctx, tas)
+	if err != nil {
+		return s.rootSvc.SubSysTriggerActions.GetCurrentTriggerActionSet(), err
+	}
 	return s.GetDeployedTriggerActionSet(ctx, &pb.Empty{})
 }
 
 func (s *server) DeployTriggerActionSetAdd(ctx context.Context, tas *pb.TriggerActionSet) (resTas *pb.TriggerActionSet, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_TRIGGER_ACTIONS))
 	addedTA := make([]*pb.TriggerAction, 0)
-	for _,ta := range tas.TriggerActions {
+	for _, ta := range tas.TriggerActions {
 		// we don't allow adding immutable settings via RPC call
 		if !ta.Immutable {
-			added,err := s.rootSvc.SubSysTriggerActions.AddTriggerAction(ta)
-			if err != nil { return s.rootSvc.SubSysTriggerActions.GetCurrentTriggerActionSet(),err }
+			added, err := s.rootSvc.SubSysTriggerActions.AddTriggerAction(ta)
+			if err != nil {
+				return s.rootSvc.SubSysTriggerActions.GetCurrentTriggerActionSet(), err
+			}
 			addedTA = append(addedTA, added)
 		}
 	}
 
-	resTas = &pb.TriggerActionSet{TriggerActions:addedTA, Name: "Added TriggerActions"}
+	resTas = &pb.TriggerActionSet{TriggerActions: addedTA, Name: "Added TriggerActions"}
 	return
 }
 
 func (s *server) DeployTriggerActionSetRemove(ctx context.Context, removeTas *pb.TriggerActionSet) (removedTas *pb.TriggerActionSet, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_TRIGGER_ACTIONS))
-	removedOnes := make([]*pb.TriggerAction,0)
-	for _,removeTa := range removeTas.TriggerActions {
-		removed,err := s.rootSvc.SubSysTriggerActions.RemoveTriggerAction(removeTa)
-		if err != nil { return s.rootSvc.SubSysTriggerActions.GetCurrentTriggerActionSet(),err }
+	removedOnes := make([]*pb.TriggerAction, 0)
+	for _, removeTa := range removeTas.TriggerActions {
+		removed, err := s.rootSvc.SubSysTriggerActions.RemoveTriggerAction(removeTa)
+		if err != nil {
+			return s.rootSvc.SubSysTriggerActions.GetCurrentTriggerActionSet(), err
+		}
 		removedOnes = append(removedOnes, removed)
 	}
 
-	removedTas = &pb.TriggerActionSet{TriggerActions:removedOnes, Name:"removed TriggerActions"}
+	removedTas = &pb.TriggerActionSet{TriggerActions: removedOnes, Name: "removed TriggerActions"}
 	return
 }
 
@@ -585,35 +620,39 @@ func (s *server) Stop() error {
 func (s *server) StoreDeployedWifiSettings(ctx context.Context, m *pb.StringMessage) (e *pb.Empty, err error) {
 	//defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_STORED_WIFI_SETTINGS_LIST))
 	return s.StoreWifiSettings(ctx, &pb.WifiRequestSettingsStorage{
-		Settings: s.rootSvc.SubSysWifi.State.CurrentSettings,
+		Settings:     s.rootSvc.SubSysWifi.State.CurrentSettings,
 		TemplateName: m.Msg,
 	})
 }
 
 func (s *server) DeployStoredWifiSettings(ctx context.Context, m *pb.StringMessage) (st *pb.WiFiState, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_WIFI))
-	ws,err := s.GetStoredWifiSettings(ctx,m)
-	if err != nil { return &pb.WiFiState{},err }
+	ws, err := s.GetStoredWifiSettings(ctx, m)
+	if err != nil {
+		return &pb.WiFiState{}, err
+	}
 	return s.DeployWiFiSettings(ctx, ws)
 }
 
 func (s *server) StoreWifiSettings(ctx context.Context, r *pb.WifiRequestSettingsStorage) (e *pb.Empty, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_STORED_WIFI_SETTINGS_LIST))
 	e = &pb.Empty{}
-	err = s.rootSvc.SubSysDataStore.Put(cSTORE_PREFIX_WIFI_SETTINGS + r.TemplateName, r.Settings, true)
+	err = s.rootSvc.SubSysDataStore.Put(cSTORE_PREFIX_WIFI_SETTINGS+r.TemplateName, r.Settings, true)
 	return
 }
 
 func (s *server) GetStoredWifiSettings(ctx context.Context, m *pb.StringMessage) (ws *pb.WiFiSettings, err error) {
 	ws = &pb.WiFiSettings{}
-	err = s.rootSvc.SubSysDataStore.Get(cSTORE_PREFIX_WIFI_SETTINGS + m.Msg, ws)
+	err = s.rootSvc.SubSysDataStore.Get(cSTORE_PREFIX_WIFI_SETTINGS+m.Msg, ws)
 	return
 }
 
 func (s *server) ListStoredWifiSettings(ctx context.Context, e *pb.Empty) (sa *pb.StringMessageArray, err error) {
 	sa = &pb.StringMessageArray{}
-	res,err := s.rootSvc.SubSysDataStore.KeysPrefix(cSTORE_PREFIX_WIFI_SETTINGS, true)
-	if err != nil { return sa,err }
+	res, err := s.rootSvc.SubSysDataStore.KeysPrefix(cSTORE_PREFIX_WIFI_SETTINGS, true)
+	if err != nil {
+		return sa, err
+	}
 	sa.MsgArray = res
 	return
 }
@@ -636,7 +675,7 @@ func (s *server) ListenWiFiStateChanges(ctx context.Context, empty *pb.Empty) (w
 }
 
 func (s *server) EchoRequest(ctx context.Context, req *pb.StringMessage) (resp *pb.StringMessage, err error) {
-	return &pb.StringMessage{Msg:req.Msg}, nil
+	return &pb.StringMessage{Msg: req.Msg}, nil
 }
 
 func (s *server) EventListen(eReq *pb.EventRequest, eStream pb.P4WNP1_EventListenServer) (err error) {
@@ -645,23 +684,23 @@ func (s *server) EventListen(eReq *pb.EventRequest, eStream pb.P4WNP1_EventListe
 
 	for {
 		select {
-			case ev := <- rcv.EventQueue:
-				//fmt.Printf("Event dequed to send: %+v\n", ev)
+		case ev := <-rcv.EventQueue:
+			//fmt.Printf("Event dequed to send: %+v\n", ev)
 
-				//send Event to stream
-				err = eStream.Send(ev)
-				if err != nil {
-					rcv.Cancel()
-					log.Println(err)
-					return err
-				}
-
-			case <-eStream.Context().Done():
-				fmt.Println("Receiver aborted ...")
+			//send Event to stream
+			err = eStream.Send(ev)
+			if err != nil {
 				rcv.Cancel()
-				return errors.New("Event listening request aborted")
-			case <-rcv.Ctx.Done():
-				return errors.New("Service stopped event manager")
+				log.Println(err)
+				return err
+			}
+
+		case <-eStream.Context().Done():
+			fmt.Println("Receiver aborted ...")
+			rcv.Cancel()
+			return errors.New("Event listening request aborted")
+		case <-rcv.Ctx.Done():
+			return errors.New("Service stopped event manager")
 		}
 	}
 }
@@ -704,9 +743,13 @@ func (s *server) FSReadFile(ctx context.Context, req *pb.ReadFileRequest) (resp 
 	}
 
 	chunk := make([]byte, req.Len)
-	n,err := common.ReadFile(filePath, req.Start, chunk, perm)
-	if err == io.EOF { err = nil } //we ignore eof error, as eof is indicated by n = 0
-	if err != nil {	return nil,err	}
+	n, err := common.ReadFile(filePath, req.Start, chunk, perm)
+	if err == io.EOF {
+		err = nil
+	} //we ignore eof error, as eof is indicated by n = 0
+	if err != nil {
+		return nil, err
+	}
 	resp = &pb.ReadFileResponse{ReadCount: int64(n), Data: chunk[:n]}
 	return
 }
@@ -722,7 +765,9 @@ func (s *server) FSGetFileInfo(ctx context.Context, req *pb.FileInfoRequest) (re
 	}
 	fi, err := os.Stat(safePath)
 	resp = &pb.FileInfoResponse{}
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	resp.Name = fi.Name()
 	resp.IsDir = fi.IsDir()
 	resp.Mode = uint32(fi.Mode())
@@ -735,13 +780,17 @@ func (s *server) FSCreateTempDirOrFile(ctx context.Context, req *pb.TempDirOrFil
 	resp = &pb.TempDirOrFileResponse{}
 	if req.OnlyFolder {
 		name, err := os.MkdirTemp(req.Dir, req.Prefix)
-		if err != nil { return resp, err }
+		if err != nil {
+			return resp, err
+		}
 		resp.ResultPath = name
 		return resp, err
 	} else {
 		var f *os.File
-		f,err = os.CreateTemp(req.Dir, req.Prefix)
-		if err != nil { return resp,err }
+		f, err = os.CreateTemp(req.Dir, req.Prefix)
+		if err != nil {
+			return resp, err
+		}
 		defer f.Close()
 		resp.ResultPath = f.Name()
 		return resp, err
@@ -749,26 +798,32 @@ func (s *server) FSCreateTempDirOrFile(ctx context.Context, req *pb.TempDirOrFil
 }
 
 func (s *server) HIDGetRunningJobState(ctx context.Context, req *pb.HIDScriptJob) (res *pb.HIDRunningJobStateResult, err error) {
-	targetJob,err := s.rootSvc.SubSysUSB.HidScriptGetBackgroundJobByID(int(req.Id))
-	if err != nil { return nil, err }
+	targetJob, err := s.rootSvc.SubSysUSB.HidScriptGetBackgroundJobByID(int(req.Id))
+	if err != nil {
+		return nil, err
+	}
 
-	vmID,_ := targetJob.GetVMId() // ignore error, as VM ID would be -1 in error case
+	vmID, _ := targetJob.GetVMId() // ignore error, as VM ID would be -1 in error case
 
 	//try to convert source to string
-	source,ok := targetJob.Source.(string)
-	if !ok { source = "Couldn't retrieve job's script source" }
+	source, ok := targetJob.Source.(string)
+	if !ok {
+		source = "Couldn't retrieve job's script source"
+	}
 
 	return &pb.HIDRunningJobStateResult{
-		Id: int64(targetJob.Id),
-		VmId: int64(vmID),
+		Id:     int64(targetJob.Id),
+		VmId:   int64(vmID),
 		Source: source,
 	}, nil
 
 }
 
 func (s *server) HIDGetRunningScriptJobs(ctx context.Context, rEmpty *pb.Empty) (jobs *pb.HIDScriptJobList, err error) {
-	retJobs,err := s.rootSvc.SubSysUSB.HidScriptGetAllRunningBackgroundJobs()
-	if err != nil { return nil, err }
+	retJobs, err := s.rootSvc.SubSysUSB.HidScriptGetAllRunningBackgroundJobs()
+	if err != nil {
+		return nil, err
+	}
 	jobs = &pb.HIDScriptJobList{}
 	for _, aJob := range retJobs {
 		jobs.Ids = append(jobs.Ids, uint32(aJob.Id))
@@ -785,8 +840,10 @@ func (s *server) HIDCancelAllScriptJobs(ctx context.Context, rEmpty *pb.Empty) (
 func (s *server) HIDCancelScriptJob(ctx context.Context, sJob *pb.HIDScriptJob) (empty *pb.Empty, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_HID))
 	empty = &pb.Empty{}
-	job,err := s.rootSvc.SubSysUSB.HidScriptGetBackgroundJobByID(int(sJob.Id))
-	if err != nil { return empty, err }
+	job, err := s.rootSvc.SubSysUSB.HidScriptGetBackgroundJobByID(int(sJob.Id))
+	if err != nil {
+		return empty, err
+	}
 
 	job.Cancel()
 	return
@@ -795,7 +852,9 @@ func (s *server) HIDCancelScriptJob(ctx context.Context, sJob *pb.HIDScriptJob) 
 func (s *server) HIDRunScript(ctx context.Context, scriptReq *pb.HIDScriptRequest) (scriptRes *pb.HIDScriptResult, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_HID))
 	err = s.rootSvc.SubSysUSB.HidScriptUsable()
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 
 	safePath, err := safePathInAllowlist(scriptReq.ScriptPath, common.PATH_HID_SCRIPTS, "/tmp")
 	if err != nil {
@@ -812,16 +871,18 @@ func (s *server) HIDRunScript(ctx context.Context, scriptReq *pb.HIDScriptReques
 		defer cancel()
 	}
 
-	val,err := s.rootSvc.SubSysUSB.HidScriptRun(ctx, string(scriptFile))
-	if err != nil { return nil,err }
+	val, err := s.rootSvc.SubSysUSB.HidScriptRun(ctx, string(scriptFile))
+	if err != nil {
+		return nil, err
+	}
 
-	if jsonVal,err := json.Marshal(val); err == nil {
+	if jsonVal, err := json.Marshal(val); err == nil {
 		scriptRes = &pb.HIDScriptResult{
 			IsFinished: true,
-			Job: &pb.HIDScriptJob{Id:0},
+			Job:        &pb.HIDScriptJob{Id: 0},
 			ResultJson: string(jsonVal),
 		}
-		return scriptRes,nil
+		return scriptRes, nil
 	} else {
 		return nil, errors.New(fmt.Sprintf("Script seems to have succeeded but result couldn't be converted to JSON: %v\n", err))
 	}
@@ -831,7 +892,9 @@ func (s *server) HIDRunScript(ctx context.Context, scriptReq *pb.HIDScriptReques
 func (s *server) HIDRunScriptJob(ctx context.Context, scriptReq *pb.HIDScriptRequest) (rJob *pb.HIDScriptJob, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_HID))
 	err = s.rootSvc.SubSysUSB.HidScriptUsable()
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 
 	safePath, err := safePathInAllowlist(scriptReq.ScriptPath, common.PATH_HID_SCRIPTS, "/tmp")
 	if err != nil {
@@ -856,55 +919,63 @@ func (s *server) HIDRunScriptJob(ctx context.Context, scriptReq *pb.HIDScriptReq
 			cancel()
 		}()
 	}
-	job,err := s.rootSvc.SubSysUSB.HidScriptStartBackground(jobCtx, string(scriptFile))
-	if err != nil { return nil,err }
+	job, err := s.rootSvc.SubSysUSB.HidScriptStartBackground(jobCtx, string(scriptFile))
+	if err != nil {
+		return nil, err
+	}
 
 	rJob = &pb.HIDScriptJob{
 		Id: uint32(job.Id),
 	}
-	return rJob,nil
+	return rJob, nil
 }
 
 func (s *server) HIDGetScriptJobResult(ctx context.Context, sJob *pb.HIDScriptJob) (scriptRes *pb.HIDScriptResult, err error) {
 	// Try to find script
-	job,err := s.rootSvc.SubSysUSB.HidScriptGetBackgroundJobByID(int(sJob.Id))
-	if err != nil { return nil, err }
+	job, err := s.rootSvc.SubSysUSB.HidScriptGetBackgroundJobByID(int(sJob.Id))
+	if err != nil {
+		return nil, err
+	}
 
-	val,err := s.rootSvc.SubSysUSB.HidScriptWaitBackgroundJobResult(ctx, job)
-	if err != nil { return nil,err }
-	jsonVal,err := json.Marshal(val)
+	val, err := s.rootSvc.SubSysUSB.HidScriptWaitBackgroundJobResult(ctx, job)
+	if err != nil {
+		return nil, err
+	}
+	jsonVal, err := json.Marshal(val)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Script seems to have succeeded but result couldn't be converted to JSON: %v\n", err))
 	}
 	scriptRes = &pb.HIDScriptResult{
 		IsFinished: true,
-		Job: &pb.HIDScriptJob{Id:0},
+		Job:        &pb.HIDScriptJob{Id: 0},
 		ResultJson: string(jsonVal),
 	}
-	return scriptRes,nil
+	return scriptRes, nil
 }
 
 func (s *server) GetDeployedEthernetInterfaceSettings(ctx context.Context, req *pb.StringMessage) (resp *pb.EthernetInterfaceSettings, err error) {
-	if mi,err := s.rootSvc.SubSysNetwork.GetManagedInterface(req.Msg); err == nil {
+	if mi, err := s.rootSvc.SubSysNetwork.GetManagedInterface(req.Msg); err == nil {
 		return mi.GetState().CurrentSettings, nil
 	} else {
 		return nil, errors.New(fmt.Sprintf("No stored (or used) settings for ethernet interface '%s'", req.Msg))
 	}
 	/*
-	if settings,exist := ServiceState.StoredNetworkSettings[req.Msg]; exist && settings.SettingsInUse {
-		return settings, nil
-	} else {
-		return nil, errors.New(fmt.Sprintf("No stored (or used) settings for ethernet interface '%s'", req.Msg))
-	}
+		if settings,exist := ServiceState.StoredNetworkSettings[req.Msg]; exist && settings.SettingsInUse {
+			return settings, nil
+		} else {
+			return nil, errors.New(fmt.Sprintf("No stored (or used) settings for ethernet interface '%s'", req.Msg))
+		}
 	*/
 }
 
 func (s *server) GetAllDeployedEthernetInterfaceSettings(ctx context.Context, empty *pb.Empty) (resp *pb.DeployedEthernetInterfaceSettings, err error) {
 	miList := s.rootSvc.SubSysNetwork.GetManagedInterfaceNames()
-	deployed := make([]*pb.EthernetInterfaceSettings,len(miList))
-	for idx,name := range miList {
-		mi,err := s.rootSvc.SubSysNetwork.GetManagedInterface(name)
-		if err != nil { return nil,err }
+	deployed := make([]*pb.EthernetInterfaceSettings, len(miList))
+	for idx, name := range miList {
+		mi, err := s.rootSvc.SubSysNetwork.GetManagedInterface(name)
+		if err != nil {
+			return nil, err
+		}
 		deployed[idx] = mi.GetState().CurrentSettings
 	}
 	resp = &pb.DeployedEthernetInterfaceSettings{
@@ -919,8 +990,10 @@ func (s *server) DeployEthernetInterfaceSettings(ctx context.Context, es *pb.Eth
 
 	empty = &pb.Empty{}
 	iname := es.Name
-	nim,err := s.rootSvc.SubSysNetwork.GetManagedInterface(iname)
-	if err != nil { return empty,err }
+	nim, err := s.rootSvc.SubSysNetwork.GetManagedInterface(iname)
+	if err != nil {
+		return empty, err
+	}
 
 	err = nim.DeploySettings(es)
 	if err != nil {
@@ -940,21 +1013,25 @@ func (s *server) StoreEthernetInterfaceSettings(ctx context.Context, req *pb.Eth
 
 func (s *server) GetStoredEthernetInterfaceSettings(ctx context.Context, m *pb.StringMessage) (eis *pb.EthernetInterfaceSettings, err error) {
 	eis = &pb.EthernetInterfaceSettings{}
-	err = s.rootSvc.SubSysDataStore.Get(cSTORE_PREFIX_ETHERNET_INTERFACE_SETTINGS + m.Msg, eis)
+	err = s.rootSvc.SubSysDataStore.Get(cSTORE_PREFIX_ETHERNET_INTERFACE_SETTINGS+m.Msg, eis)
 	return
 }
 
 func (s *server) DeployStoredEthernetInterfaceSettings(ctx context.Context, msg *pb.StringMessage) (empty *pb.Empty, err error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_HID))
-	eis,err := s.GetStoredEthernetInterfaceSettings(ctx, msg)
-	if err != nil { return empty,err }
+	eis, err := s.GetStoredEthernetInterfaceSettings(ctx, msg)
+	if err != nil {
+		return empty, err
+	}
 	return s.DeployEthernetInterfaceSettings(ctx, eis)
 }
 
 func (s *server) ListStoredEthernetInterfaceSettings(ctx context.Context, empty *pb.Empty) (messages *pb.StringMessageArray, err error) {
 	messages = &pb.StringMessageArray{}
-	res,err := s.rootSvc.SubSysDataStore.KeysPrefix(cSTORE_PREFIX_ETHERNET_INTERFACE_SETTINGS, true)
-	if err != nil { return messages,err }
+	res, err := s.rootSvc.SubSysDataStore.KeysPrefix(cSTORE_PREFIX_ETHERNET_INTERFACE_SETTINGS, true)
+	if err != nil {
+		return messages, err
+	}
 	messages.MsgArray = res
 	return
 }
@@ -985,9 +1062,7 @@ func (s *server) GetDeployedGadgetSetting(ctx context.Context, e *pb.Empty) (gs 
 func (s *server) DeployGadgetSetting(ctx context.Context, newGs *pb.GadgetSettings) (gs *pb.GadgetSettings, err error) {
 	log.Printf("Called DeployGadgetSettings\n")
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_USB))
-	gs_backup,_ := s.rootSvc.SubSysUSB.ParseGadgetState(USB_GADGET_NAME)
-
-
+	gs_backup, _ := s.rootSvc.SubSysUSB.ParseGadgetState(USB_GADGET_NAME)
 
 	errg := s.rootSvc.SubSysUSB.DeployGadgetSettings(newGs)
 	err = nil
@@ -1001,7 +1076,7 @@ func (s *server) DeployGadgetSetting(ctx context.Context, newGs *pb.GadgetSettin
 }
 
 func (s *server) GetLEDSettings(context.Context, *pb.Empty) (res *pb.LEDSettings, err error) {
-//	res, err = ServiceState.Led.GetLed()
+	//	res, err = ServiceState.Led.GetLed()
 	state := s.rootSvc.SubSysLed.GetState()
 	res = &pb.LEDSettings{
 		BlinkCount: *state.BlinkCount,
@@ -1074,7 +1149,7 @@ func StartRpcWebServer(host string, port string) {
 }
 */
 
-func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort string, absWebRoot string) () {
+func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort string, absWebRoot string) {
 	//ToDo: Return servers/TCP listener to allow closing from caller
 	listen_address_grpc := host + ":" + gRPCPort
 	listen_address_web := host + ":" + webPort
@@ -1103,7 +1178,7 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 			log.Fatalf("Failed to serve: %v", err)
 		}
 	}()
-	log.Printf("P4wnP1 gRPC server listening on " + listen_address_grpc)
+	log.Printf("P4wnP1 gRPC server listening on %s", listen_address_grpc)
 
 	//Wrap the server into a gRPC-web server
 	grpc_web_srv := grpcweb.WrapServer(s, grpcweb.WithWebsockets(true))
@@ -1114,10 +1189,21 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 	// need them.
 	authHTTPHandler := auth.HTTPHandler(authMgr)
 
-	// Master HTTP router. Three buckets:
-	//   1. /api/auth/* -> auth HTTP handler (login, whoami, ...)
-	//   2. gRPC / gRPC-web (Content-Type or websocket header) -> grpc_web_srv
-	//   3. everything else -> static SPA files (loginscreen.html etc.)
+	// JSON API (see rest_api.go). This is what the modern web client talks to.
+	// It is a peer of the gRPC-web surface, not a replacement: the CLI still
+	// uses gRPC directly. Build failure here is non-fatal -- the device should
+	// still boot and be reachable over gRPC/CLI even if the JSON face is
+	// broken, because that is the operator's route to fixing it.
+	apiHandler, apiErr := NewAPIHandler(srv, authMgr)
+	if apiErr != nil {
+		log.Printf("WARNING: JSON API unavailable: %v", apiErr)
+	}
+
+	// Master HTTP router. Four buckets, in order:
+	//   1. /api/auth/* -> auth HTTP handler (login, whoami, changepw, health)
+	//   2. /api/v1/*   -> JSON API (rest_api.go); what the web client uses
+	//   3. gRPC / gRPC-web (Content-Type or websocket header) -> grpc_web_srv
+	//   4. everything else -> static files from the web root
 	//
 	// The static file server is intentionally unauthenticated: the SPA
 	// needs to load BEFORE the user can log in. JS code in the SPA is
@@ -1126,6 +1212,10 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 	http_handler := func(resp http.ResponseWriter, req *http.Request) {
 		if strings.HasPrefix(req.URL.Path, auth.HTTPPrefix) {
 			authHTTPHandler.ServeHTTP(resp, req)
+			return
+		}
+		if apiHandler != nil && strings.HasPrefix(req.URL.Path, APIPrefix) {
+			apiHandler.ServeHTTP(resp, req)
 			return
 		}
 		if strings.Contains(req.Header.Get("Content-Type"), "application/grpc") ||
@@ -1139,10 +1229,10 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 
 	//Setup our HTTP server
 	http_srv := &http.Server{
-		Addr: listen_address_web, //listen on port 80 with webservice
-		Handler: http.HandlerFunc(http_handler),
-		ReadHeaderTimeout: 5*time.Second,
-		IdleTimeout: 120*time.Second,
+		Addr:              listen_address_web, //listen on port 80 with webservice
+		Handler:           http.HandlerFunc(http_handler),
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {
@@ -1150,5 +1240,5 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 			log.Fatal(err)
 		}
 	}()
-	log.Printf("P4wnP1 gRPC-web server listening on " + http_srv.Addr)
+	log.Printf("P4wnP1 gRPC-web server listening on %s", http_srv.Addr)
 }

@@ -1,30 +1,31 @@
+//go:build linux
 // +build linux
 
 package service
 
 import (
+	"errors"
+	"fmt"
 	"github.com/mame82/P4wnP1_aloa/common_web"
 	"github.com/mame82/P4wnP1_aloa/netlink"
 	pb "github.com/mame82/P4wnP1_aloa/proto"
-	"sync"
-	"os/exec"
 	"github.com/mame82/P4wnP1_aloa/service/util"
-	"errors"
-	"fmt"
-	"strings"
 	"log"
-	"time"
-	"syscall"
 	"net"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
 )
 
 const (
 	wifi_if_name                   string = "wlan0"
 	WPA_SUPPLICANT_CONNECT_TIMEOUT        = time.Second * 20
-	HOSTAPD_WAIT_AP_UP_TIMEOUT        = time.Second * 8
+	HOSTAPD_WAIT_AP_UP_TIMEOUT            = time.Second * 8
 )
 
 func wifiCheckExternalBinaries() error {
@@ -63,7 +64,7 @@ type WiFiService struct {
 	LoggerHostapd           *util.TeeLogger          //logger for hostapd
 	LoggerWpaSupplicant     *util.TeeLogger          //logger for WPA supplicant
 	OutMonitorWpaSupplicant *wpaSupplicantOutMonitor //Monitors wpa_supplicant output and sets signals where needed
-	OutMonitorHostapd       *hostapdOutMonitor //Monitors hostapd output and sets signals where needed
+	OutMonitorHostapd       *hostapdOutMonitor       //Monitors hostapd output and sets signals where needed
 }
 
 func (wSvc *WiFiService) StartHostapd(timeout time.Duration) (err error) {
@@ -116,8 +117,6 @@ func (wSvc *WiFiService) StartHostapd(timeout time.Duration) (err error) {
 		log.Println("... hostapd terminated")
 		return errors.New("Hostapd failed to bring up Access Point")
 	}
-
-	return nil
 }
 
 func (wSvc *WiFiService) StopHostapd() (err error) {
@@ -134,27 +133,28 @@ func (wSvc *WiFiService) StopHostapd() (err error) {
 	}
 
 	/*
-	wSvc.CmdHostapd.Process.Signal(syscall.SIGTERM)
-	time.Sleep(time.Millisecond * 500)
-	if wSvc.CmdHostapd.ProcessState == nil || !wSvc.CmdHostapd.ProcessState.Exited() {
-		wSvc.CmdHostapd.Process.Kill()
-		wSvc.CmdHostapd.Wait()
+		wSvc.CmdHostapd.Process.Signal(syscall.SIGTERM)
+		time.Sleep(time.Millisecond * 500)
+		if wSvc.CmdHostapd.ProcessState == nil || !wSvc.CmdHostapd.ProcessState.Exited() {
+			wSvc.CmdHostapd.Process.Kill()
+			wSvc.CmdHostapd.Wait()
 
-		//wSvc.CmdHostapd.Process.Kill()
-		if wSvc.CmdHostapd.ProcessState.Exited() {
-			wSvc.CmdHostapd = nil
-			log.Println(eSuccess)
-			return nil
-		} else {
-			log.Println(eCantStop)
-			return errors.New(eCantStop)
+			//wSvc.CmdHostapd.Process.Kill()
+			if wSvc.CmdHostapd.ProcessState.Exited() {
+				wSvc.CmdHostapd = nil
+				log.Println(eSuccess)
+				return nil
+			} else {
+				log.Println(eCantStop)
+				return errors.New(eCantStop)
+			}
+
 		}
-
-	}
 	*/
 	err = ProcSoftKill(wSvc.CmdHostapd, time.Second)
-	if err != nil { return errors.New(eCantStop) }
-
+	if err != nil {
+		return errors.New(eCantStop)
+	}
 
 	wSvc.CmdHostapd = nil
 	log.Println(eSuccess)
@@ -176,27 +176,29 @@ func (wSvc *WiFiService) StopWpaSupplicant() (err error) {
 	}
 
 	/*
-	log.Printf("... sending SIGTERM for wpa_supplicant on interface '%s' with PID\n", wSvc.IfaceName, wSvc.CmdWpaSupplicant.Process.Pid)
-	wSvc.CmdWpaSupplicant.Process.Signal(syscall.SIGTERM)
-	wSvc.CmdWpaSupplicant.Wait()
-	if !wSvc.CmdWpaSupplicant.ProcessState.Exited() {
-		log.Printf("... wpa_supplicant didn't react on SIGTERM for interface '%s', trying SIGKILL\n", wSvc.IfaceName)
-		wSvc.CmdWpaSupplicant.Process.Kill()
+		log.Printf("... sending SIGTERM for wpa_supplicant on interface '%s' with PID\n", wSvc.IfaceName, wSvc.CmdWpaSupplicant.Process.Pid)
+		wSvc.CmdWpaSupplicant.Process.Signal(syscall.SIGTERM)
+		wSvc.CmdWpaSupplicant.Wait()
+		if !wSvc.CmdWpaSupplicant.ProcessState.Exited() {
+			log.Printf("... wpa_supplicant didn't react on SIGTERM for interface '%s', trying SIGKILL\n", wSvc.IfaceName)
+			wSvc.CmdWpaSupplicant.Process.Kill()
 
-		time.Sleep(500 * time.Millisecond)
-		if wSvc.CmdWpaSupplicant.ProcessState.Exited() {
-			wSvc.CmdWpaSupplicant = nil
-			log.Println(eSuccess)
-			return nil
-		} else {
-			log.Println(eCantStop)
-			return errors.New(eCantStop)
+			time.Sleep(500 * time.Millisecond)
+			if wSvc.CmdWpaSupplicant.ProcessState.Exited() {
+				wSvc.CmdWpaSupplicant = nil
+				log.Println(eSuccess)
+				return nil
+			} else {
+				log.Println(eCantStop)
+				return errors.New(eCantStop)
+			}
 		}
-	}
 	*/
-	log.Printf("... stopping wpa_supplicant\n", wSvc.IfaceName, wSvc.CmdWpaSupplicant.Process.Pid)
+	log.Printf("... stopping wpa_supplicant for %s (pid %d)\n", wSvc.IfaceName, wSvc.CmdWpaSupplicant.Process.Pid)
 	err = ProcSoftKill(wSvc.CmdWpaSupplicant, time.Second*2)
-	if err != nil { return errors.New(eCantStop) }
+	if err != nil {
+		return errors.New(eCantStop)
+	}
 
 	wSvc.CmdWpaSupplicant = nil
 	log.Println(eSuccess)
@@ -255,10 +257,7 @@ func (wSvc *WiFiService) StartWpaSupplicant(timeout time.Duration) (err error) {
 		wSvc.mutexWpaSupplicant.Lock()
 		return errors.New("Wrong PSK")
 	}
-
-	return nil
 }
-
 
 func MatchGivenBBSToScanResult(scanRes []BSS, targets []*pb.WiFiBSSCfg) (matches []*pb.WiFiBSSCfg) {
 	for _, bssCfgTarget := range targets {
@@ -312,7 +311,6 @@ func (wSvc *WiFiService) runStaMode(newWifiSettings *pb.WiFiSettings) (err error
 		return err
 	}
 
-
 	return nil
 }
 
@@ -342,7 +340,6 @@ func (wSvc *WiFiService) DeploySettings(newWifiSettings *pb.WiFiSettings) (wstat
 	wSvc.mutexSettings.Lock()
 	defer wSvc.mutexSettings.Unlock()
 
-
 	//ToDo: Dis/Enable nexmon if needed
 
 	//stop wpa_supplicant if needed
@@ -370,7 +367,7 @@ func (wSvc *WiFiService) DeploySettings(newWifiSettings *pb.WiFiSettings) (wstat
 	// Set proper regulatory domain
 	errReg := wifiSetReg(newWifiSettings.Regulatory)
 	if errReg != nil {
-		log.Printf("Error setting WiFi regulatory domain '%s': %v\n", newWifiSettings.Regulatory	, err) //we don't abort on error here
+		log.Printf("Error setting WiFi regulatory domain '%s': %v\n", newWifiSettings.Regulatory, err) //we don't abort on error here
 	}
 
 	var triggerEvent *pb.Event = nil
@@ -414,11 +411,9 @@ func (wSvc *WiFiService) DeploySettings(newWifiSettings *pb.WiFiSettings) (wstat
 
 	// At this point, we reestablish the interface settings
 	//ReInitNetworkInterface(wSvc.IfaceName)
-	if nim,err := wSvc.RootSvc.SubSysNetwork.GetManagedInterface(wSvc.IfaceName); err == nil {
+	if nim, err := wSvc.RootSvc.SubSysNetwork.GetManagedInterface(wSvc.IfaceName); err == nil {
 		nim.ReDeploy()
 	}
-
-
 
 	// update settings (wSvc is updated by runAPMode/runStaMode)
 	wSvc.State.CurrentSettings = newWifiSettings
@@ -436,7 +431,6 @@ func (wSvc *WiFiService) DeploySettings(newWifiSettings *pb.WiFiSettings) (wstat
 		wSvc.RootSvc.SubSysEvent.Emit(triggerEvent)
 	}
 
-
 	return wSvc.State, nil
 }
 
@@ -449,11 +443,11 @@ func NewWifiService(rootSvc *Service) (res *WiFiService) {
 
 	//Check interface existence
 	if exists := CheckInterfaceExistence(ifName); !exists {
-		panic(errors.New(fmt.Sprintf("WiFi interface '%s' not present")))
+		panic(fmt.Errorf("WiFi interface '%s' not present", ifName))
 	}
 
 	res = &WiFiService{
-		RootSvc: rootSvc,
+		RootSvc:               rootSvc,
 		mutexSettings:         &sync.Mutex{},
 		CmdWpaSupplicant:      nil,
 		mutexWpaSupplicant:    &sync.Mutex{},
@@ -478,15 +472,15 @@ func NewWifiService(rootSvc *Service) (res *WiFiService) {
 	// Initial settings and state on service start
 
 	res.State = &pb.WiFiState{
-		Mode: pb.WiFiStateMode_STA_NOT_CONNECTED,
+		Mode:    pb.WiFiStateMode_STA_NOT_CONNECTED,
 		Channel: 0,
-		Ssid: "",
+		Ssid:    "",
 	}
 
 	res.State.CurrentSettings = &pb.WiFiSettings{
 		Disabled:       false,
 		WorkingMode:    pb.WiFiWorkingMode_AP,
-		Client_BSSList: []*pb.WiFiBSSCfg{&pb.WiFiBSSCfg{SSID:"", PSK:""}},
+		Client_BSSList: []*pb.WiFiBSSCfg{&pb.WiFiBSSCfg{SSID: "", PSK: ""}},
 		Ap_BSS:         &pb.WiFiBSSCfg{},
 	}
 	return res
@@ -544,7 +538,7 @@ func NewHostapdOutMonitor() *hostapdOutMonitor {
 	return &hostapdOutMonitor{
 		resultReceived: util.NewSignal(false, false),
 		Mutex:          &sync.Mutex{},
-		result: false,
+		result:         false,
 	}
 }
 
@@ -717,7 +711,7 @@ func hostapdCreateConfigFile2(s *pb.WiFiSettings, filename string) (err error) {
 	return
 }
 
-//ToDo: Create netlink based implementation (not relying on 'iw'): low priority
+// ToDo: Create netlink based implementation (not relying on 'iw'): low priority
 func ParseIwScan(scanresult string) (bsslist []BSS, err error) {
 	//fmt.Printf("Parsing:\n%s\n", scanresult)
 
@@ -839,7 +833,7 @@ func ParseIwScan(scanresult string) (bsslist []BSS, err error) {
 	}
 
 	return bsslist, nil
-}//ToDo: Create netlink based implementation (not relying on 'iw'): low priority
+} //ToDo: Create netlink based implementation (not relying on 'iw'): low priority
 
 func (wsvc WiFiService) UpdateStateFromIw() (err error) {
 	proc := exec.Command("/sbin/iw", "dev", wsvc.IfaceName, "info")
@@ -848,45 +842,44 @@ func (wsvc WiFiService) UpdateStateFromIw() (err error) {
 		return errors.New(fmt.Sprintf("Error fetching wifi info: '%s'\niw output: %s", err, res))
 	}
 
-
 	/*
-	AP
-	--
-	Interface wlan0
-	ifindex 2
-	wdev 0x1
-	addr b8:27:eb:71:bb:bc
-	ssid \xf0\x9f\x92\xa5\xf0\x9f\x96\xa5\xf0\x9f\x92\xa5 \xe2\x93\x85\xe2\x9e\x83\xe2\x93\x8c\xe2\x93\x83\xf0\x9f\x85\x9f\xe2\x9d\xb6
-	type AP
-	wiphy 0
-	channel 2 (2417 MHz), width: 20 MHz, center1: 2417 MHz
-	txpower 31.00 dBm
+		AP
+		--
+		Interface wlan0
+		ifindex 2
+		wdev 0x1
+		addr b8:27:eb:71:bb:bc
+		ssid \xf0\x9f\x92\xa5\xf0\x9f\x96\xa5\xf0\x9f\x92\xa5 \xe2\x93\x85\xe2\x9e\x83\xe2\x93\x8c\xe2\x93\x83\xf0\x9f\x85\x9f\xe2\x9d\xb6
+		type AP
+		wiphy 0
+		channel 2 (2417 MHz), width: 20 MHz, center1: 2417 MHz
+		txpower 31.00 dBm
 
-	NOT CONNECTED
-	-------------
-	Interface wlan0
-	ifindex 2
-	wdev 0x1
-	addr b8:27:eb:71:bb:bc
-	type managed
-	wiphy 0
-	channel 2 (2417 MHz), width: 20 MHz, center1: 2417 MHz
-	txpower 31.00 dBm
+		NOT CONNECTED
+		-------------
+		Interface wlan0
+		ifindex 2
+		wdev 0x1
+		addr b8:27:eb:71:bb:bc
+		type managed
+		wiphy 0
+		channel 2 (2417 MHz), width: 20 MHz, center1: 2417 MHz
+		txpower 31.00 dBm
 
-	CONNECTED
-	-----------
-	Interface wlan0
-	ifindex 2
-	wdev 0x1
-	addr b8:27:eb:71:bb:bc
-	ssid WLAN-579086
-	type managed
-	wiphy 0
-	channel 6 (2437 MHz), width: 20 MHz, center1: 2437 MHz
-	txpower 31.00 dBm
+		CONNECTED
+		-----------
+		Interface wlan0
+		ifindex 2
+		wdev 0x1
+		addr b8:27:eb:71:bb:bc
+		ssid WLAN-579086
+		type managed
+		wiphy 0
+		channel 6 (2437 MHz), width: 20 MHz, center1: 2437 MHz
+		txpower 31.00 dBm
 
 
-	 */
+	*/
 
 	output := string(res)
 
@@ -898,7 +891,7 @@ func (wsvc WiFiService) UpdateStateFromIw() (err error) {
 	strSsid_sub := reSsid.FindStringSubmatch(output)
 	strSsid := ""
 	if len(strSsid_sub) > 1 {
-		unSsid,uerr := strconv.Unquote(fmt.Sprintf("\"%s\"", strSsid_sub[1]))
+		unSsid, uerr := strconv.Unquote(fmt.Sprintf("\"%s\"", strSsid_sub[1]))
 		if uerr == nil {
 			strSsid = unSsid
 		} else {
@@ -906,14 +899,14 @@ func (wsvc WiFiService) UpdateStateFromIw() (err error) {
 		}
 
 	}
-//	fmt.Printf("SSID: %s\n", strSsid)
+	//	fmt.Printf("SSID: %s\n", strSsid)
 
 	strChannel_sub := reChannel.FindStringSubmatch(output)
 	strChannel := "0"
 	if len(strChannel_sub) > 1 {
 		strChannel = strChannel_sub[1]
 	}
-//	fmt.Printf("Channel: %s\n", strChannel)
+	//	fmt.Printf("Channel: %s\n", strChannel)
 
 	strMode_sub := reMode.FindStringSubmatch(output)
 	strMode := "0"
@@ -936,7 +929,7 @@ func (wsvc WiFiService) UpdateStateFromIw() (err error) {
 	}
 
 	intCh := 0
-	intCh,_ = strconv.Atoi(strChannel)
+	intCh, _ = strconv.Atoi(strChannel)
 	wsvc.State.Channel = uint32(intCh)
 
 	return nil
@@ -970,7 +963,7 @@ func ProcSoftKill(cmd *exec.Cmd, timeToKill time.Duration) (err error) {
 	cmd.Process.Signal(syscall.SIGTERM)
 
 	//we wait for process to exit or issue SIGKILL after timeout
-	hasExitted := make(chan interface{},0)
+	hasExitted := make(chan interface{}, 0)
 	go func() {
 		cmd.Process.Wait() // even if waite ends with error, the process should have died
 		//fmt.Println("WAIT RES ENDED")
@@ -978,7 +971,7 @@ func ProcSoftKill(cmd *exec.Cmd, timeToKill time.Duration) (err error) {
 	}()
 
 	select {
-	case <- hasExitted:
+	case <-hasExitted:
 		//fmt.Println("HAS EXITED")
 		return nil
 	case <-time.After(timeToKill):

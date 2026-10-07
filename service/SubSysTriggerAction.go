@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package service
@@ -15,12 +16,12 @@ import (
 )
 
 var (
-	ErrTaNotFound = errors.New("Couldn't find given TriggerAction")
+	ErrTaNotFound  = errors.New("Couldn't find given TriggerAction")
 	ErrTaImmutable = errors.New("Not allowed to change immutable TriggerAction")
 )
 
-
 type triggerType int
+
 const (
 	triggerTypeServiceStarted triggerType = iota
 	triggerTypeUsbGadgetConnected
@@ -33,7 +34,8 @@ const (
 	triggerTypeGroupReceiveMulti
 	triggerTypeGpioIn
 )
-var triggerTypeString = map[triggerType]string {
+
+var triggerTypeString = map[triggerType]string{
 	triggerTypeServiceStarted:        "TRIGGER_SERVICE_STARTED",
 	triggerTypeUsbGadgetConnected:    "TRIGGER_USB_GADGET_CONNECTED",
 	triggerTypeUsbGadgetDisconnected: "TRIGGER_USB_GADGET_DISCONNECTED",
@@ -47,6 +49,7 @@ var triggerTypeString = map[triggerType]string {
 }
 
 type actionType int
+
 const (
 	actionTypeBashScript actionType = iota
 	actionTypeHidScript
@@ -55,16 +58,15 @@ const (
 	actionTypeGpioOut
 	actionTypeGroupSend
 )
-var actionTypeString = map[actionType]string {
-	actionTypeBashScript: "ACTION_BASH_SCRIPT",
-	actionTypeHidScript: "ACTION_HID_SCRIPT",
+
+var actionTypeString = map[actionType]string{
+	actionTypeBashScript:             "ACTION_BASH_SCRIPT",
+	actionTypeHidScript:              "ACTION_HID_SCRIPT",
 	actionTypeDeploySettingsTemplate: "ACTION_DEPLOY_SETTINGS_TEMPLATE",
-	actionTypeLog: "ACTION_LOG",
-	actionTypeGpioOut: "ACTION_GPIO_OUT",
-	actionTypeGroupSend: "ACTION_GROUP_SEND",
-
+	actionTypeLog:                    "ACTION_LOG",
+	actionTypeGpioOut:                "ACTION_GPIO_OUT",
+	actionTypeGroupSend:              "ACTION_GROUP_SEND",
 }
-
 
 func retrieveTriggerActionTypes(ta *pb.TriggerAction) (ttype triggerType, atype actionType) {
 	// Trigger
@@ -117,37 +119,37 @@ func retrieveTriggerActionTypes(ta *pb.TriggerAction) (ttype triggerType, atype 
 
 type TriggerActionManager struct {
 	rootSvc *Service
-	evtRcv *EventReceiver
+	evtRcv  *EventReceiver
 
 	registeredTriggerActionMutex *sync.Mutex
 	//registeredTriggerAction      []*pb.TriggerAction
-	registeredTriggerActions      pb.TriggerActionSet
+	registeredTriggerActions pb.TriggerActionSet
 
-	groupReceiveSequenceCheckers map[*pb.TriggerAction]*util.ValueSequenceChecker
+	groupReceiveSequenceCheckers      map[*pb.TriggerAction]*util.ValueSequenceChecker
 	groupReceiveSequenceCheckersMutex *sync.Mutex
 
-	nextID                       uint32
+	nextID uint32
 }
 
 func (tam *TriggerActionManager) processing_loop() {
 
 	fmt.Println("TAM processing loop started")
-	Outer:
-		for {
-			select {
-			case evt := <- tam.evtRcv.EventQueue:
-				// avoid consuming empty messages, because channel is closed
-				if evt == nil {
-					break Outer // abort loop on "nil" event, as this indicates the EventQueue channel has been closed
-				}
-				//fmt.Println("TriggerActionManager received unfiltered event", evt)
-				tam.processTriggerEvent(evt)
-				// check if relevant and dispatch to triggers
-			case <- tam.evtRcv.Ctx.Done():
-				// evvent Receiver cancelled or unregistered
-				break Outer
+Outer:
+	for {
+		select {
+		case evt := <-tam.evtRcv.EventQueue:
+			// avoid consuming empty messages, because channel is closed
+			if evt == nil {
+				break Outer // abort loop on "nil" event, as this indicates the EventQueue channel has been closed
 			}
+			//fmt.Println("TriggerActionManager received unfiltered event", evt)
+			tam.processTriggerEvent(evt)
+			// check if relevant and dispatch to triggers
+		case <-tam.evtRcv.Ctx.Done():
+			// evvent Receiver cancelled or unregistered
+			break Outer
 		}
+	}
 	fmt.Println("TAM processing loop finished")
 }
 
@@ -156,23 +158,24 @@ func (tam *TriggerActionManager) processing_loop() {
 // from the respective events
 //
 // Tasks of on{event} method:
-// 	- decide if the given trigger fires, based on the event arguments
-//  - disable the TriggerAction, in case the trigger has fired
-//  - call the execute{Action} method, according to the Action defined in the trigger Action, in case the trigger fires
+//   - decide if the given trigger fires, based on the event arguments
+//   - disable the TriggerAction, in case the trigger has fired
+//   - call the execute{Action} method, according to the Action defined in the trigger Action, in case the trigger fires
 //
 // Note: a event doesn't necessarily map to a trigger (f.e. a TRIGGER_EVT_TYPE_GROUP_RECEIVE carries a single value to a
 // group, but a triggerTypeGroupReceive doesn't trigger if it is the wrong value)
-//
 func (tam *TriggerActionManager) processTriggerEvent(evt *pb.Event) {
 	//fmt.Printf("Remaining triggerActions: %+v\n", tam.registeredTriggerAction)
 	//fmt.Printf("TriggerActionManager Received event: %+v\n", evt)
 	tam.registeredTriggerActionMutex.Lock()
 	defer tam.registeredTriggerActionMutex.Unlock()
 
-	for _,ta := range tam.registeredTriggerActions.TriggerActions {
+	for _, ta := range tam.registeredTriggerActions.TriggerActions {
 		// skip disabled triggeractions
-		if !ta.IsActive { continue }
-		ttype,atype := retrieveTriggerActionTypes(ta)
+		if !ta.IsActive {
+			continue
+		}
+		ttype, atype := retrieveTriggerActionTypes(ta)
 		if taTriggerTypeMatchesEvtTriggerType(ttype, evt) {
 			switch ttEvt := common_web.EvtTriggerType(evt.Values[0].GetTint64()); ttEvt {
 			case common_web.TRIGGER_EVT_TYPE_SERVICE_STARTED:
@@ -209,7 +212,6 @@ func (tam *TriggerActionManager) onServiceStarted(evt *pb.Event, ta *pb.TriggerA
 	tam.executeAction(evt, ta, tt, at)
 	return nil
 }
-
 
 func (tam *TriggerActionManager) onSSHLogin(evt *pb.Event, ta *pb.TriggerAction, tt triggerType, at actionType) error {
 	//ToDo: allow filtering by login user
@@ -252,8 +254,10 @@ func (tam *TriggerActionManager) onUsbGadgetDisconnected(evt *pb.Event, ta *pb.T
 }
 
 func (tam *TriggerActionManager) onGpioIn(evt *pb.Event, ta *pb.TriggerAction, tt triggerType, at actionType) error {
-	evtGpioName, evtGpioLevel,err := DeconstructEventTriggerGpioIn(evt)
-	if err != nil { return err }
+	evtGpioName, evtGpioLevel, err := DeconstructEventTriggerGpioIn(evt)
+	if err != nil {
+		return err
+	}
 
 	taGpioName := ta.Trigger.(*pb.TriggerAction_GpioIn).GpioIn.GpioName
 
@@ -268,8 +272,10 @@ func (tam *TriggerActionManager) onGpioIn(evt *pb.Event, ta *pb.TriggerAction, t
 }
 
 func (tam *TriggerActionManager) onGroupReceive(evt *pb.Event, ta *pb.TriggerAction, tt triggerType, at actionType) error {
-	evGroupName,evValue,err := DeconstructEventTriggerGroupReceive(evt)
-	if err != nil { return err }
+	evGroupName, evValue, err := DeconstructEventTriggerGroupReceive(evt)
+	if err != nil {
+		return err
+	}
 
 	switch tt {
 	case triggerTypeGroupReceive:
@@ -284,33 +290,30 @@ func (tam *TriggerActionManager) onGroupReceive(evt *pb.Event, ta *pb.TriggerAct
 		tam.executeAction(evt, ta, tt, at) // fire action
 		return nil
 	case triggerTypeGroupReceiveMulti:
-	//	fmt.Println("### Processing GroupReceive event for trigger type GroupReceiveSequence")
+		//	fmt.Println("### Processing GroupReceive event for trigger type GroupReceiveSequence")
 		triggerGroupName := ta.Trigger.(*pb.TriggerAction_GroupReceiveMulti).GroupReceiveMulti.GroupName
 		if evGroupName != triggerGroupName {
 			return nil
 		}
 		// retrieve the sequence checker
-		if sc,exists := tam.groupReceiveSequenceCheckers[ta]; exists {
+		if sc, exists := tam.groupReceiveSequenceCheckers[ta]; exists {
 			if sc.Check(evValue) {
 				tam.executeAction(evt, ta, tt, at) // fire action
 			}
-		//	fmt.Printf("GrpRcvSeq '%s' received '%d': %s\n", triggerGroupName, evValue, sc)
+			//	fmt.Printf("GrpRcvSeq '%s' received '%d': %s\n", triggerGroupName, evValue, sc)
 		}
 
 		return nil // don't handle on group mismatch, but return without error
 
-
 	default:
 		return errors.New("Wrong trigger for onGroupReceive event")
 	}
-
-	return nil
 }
 
-
-
 func (tam *TriggerActionManager) executeAction(evt *pb.Event, ta *pb.TriggerAction, tt triggerType, at actionType) error {
-	if ta.OneShot { ta.IsActive = false }
+	if ta.OneShot {
+		ta.IsActive = false
+	}
 
 	switch actionType := ta.Action.(type) {
 	case *pb.TriggerAction_BashScript:
@@ -330,7 +333,6 @@ func (tam *TriggerActionManager) executeAction(evt *pb.Event, ta *pb.TriggerActi
 	return nil
 }
 
-
 func (tam *TriggerActionManager) executeActionDeploySettingsTemplate(evt *pb.Event, ta *pb.TriggerAction, tt triggerType, at actionType, action *pb.ActionDeploySettingsTemplate) {
 	triggerName := triggerTypeString[tt]
 	actionName := actionTypeString[at]
@@ -340,49 +342,48 @@ func (tam *TriggerActionManager) executeActionDeploySettingsTemplate(evt *pb.Eve
 
 	switch action.Type {
 	case pb.ActionDeploySettingsTemplate_FULL_SETTINGS:
-		_,err := tam.rootSvc.SubSysRPC.DeployStoredMasterTemplate(context.Background(), &pb.StringMessage{Msg: action.TemplateName})
+		_, err := tam.rootSvc.SubSysRPC.DeployStoredMasterTemplate(context.Background(), &pb.StringMessage{Msg: action.TemplateName})
 		if err == nil {
 			fmt.Println("... stored settings deployed")
 		} else {
 			fmt.Println("... deploying stored settings failed: ", err.Error())
 		}
 	case pb.ActionDeploySettingsTemplate_NETWORK:
-		_,err := tam.rootSvc.SubSysRPC.DeployStoredEthernetInterfaceSettings(context.Background(), &pb.StringMessage{Msg: action.TemplateName})
+		_, err := tam.rootSvc.SubSysRPC.DeployStoredEthernetInterfaceSettings(context.Background(), &pb.StringMessage{Msg: action.TemplateName})
 		if err == nil {
 			fmt.Println("... stored settings deployed")
 		} else {
 			fmt.Println("... deploying stored settings failed: ", err.Error())
 		}
 	case pb.ActionDeploySettingsTemplate_USB:
-		_,err := tam.rootSvc.SubSysRPC.DeployStoredUSBSettings(context.Background(), &pb.StringMessage{Msg: action.TemplateName})
+		_, err := tam.rootSvc.SubSysRPC.DeployStoredUSBSettings(context.Background(), &pb.StringMessage{Msg: action.TemplateName})
 		if err == nil {
 			fmt.Println("... stored settings deployed")
 		} else {
 			fmt.Println("... deploying stored settings failed: ", err.Error())
 		}
 	case pb.ActionDeploySettingsTemplate_WIFI:
-		_,err := tam.rootSvc.SubSysRPC.DeployStoredWifiSettings(context.Background(), &pb.StringMessage{Msg: action.TemplateName})
+		_, err := tam.rootSvc.SubSysRPC.DeployStoredWifiSettings(context.Background(), &pb.StringMessage{Msg: action.TemplateName})
 		if err == nil {
 			fmt.Println("... stored settings deployed")
 		} else {
 			fmt.Println("... deploying stored settings failed: ", err.Error())
 		}
 	case pb.ActionDeploySettingsTemplate_BLUETOOTH:
-		_,err := tam.rootSvc.SubSysRPC.DeployStoredBluetoothSettings(context.Background(), &pb.StringMessage{Msg: action.TemplateName})
+		_, err := tam.rootSvc.SubSysRPC.DeployStoredBluetoothSettings(context.Background(), &pb.StringMessage{Msg: action.TemplateName})
 		if err == nil {
 			fmt.Println("... stored settings deployed")
 		} else {
 			fmt.Println("... deploying stored settings failed: ", err.Error())
 		}
 	case pb.ActionDeploySettingsTemplate_TRIGGER_ACTIONS:
-		_,err := tam.rootSvc.SubSysRPC.DeployStoredTriggerActionSetReplace(context.Background(), &pb.StringMessage{Msg: action.TemplateName})
+		_, err := tam.rootSvc.SubSysRPC.DeployStoredTriggerActionSetReplace(context.Background(), &pb.StringMessage{Msg: action.TemplateName})
 		if err == nil {
 			fmt.Println("... stored settings deployed")
 		} else {
 			fmt.Println("... deploying stored settings failed: ", err.Error())
 		}
 	}
-
 
 }
 
@@ -420,7 +421,7 @@ func (tam *TriggerActionManager) executeActionStartHidScript(evt *pb.Event, ta *
 	case triggerTypeGpioIn:
 		gpioPinName := ta.Trigger.(*pb.TriggerAction_GpioIn).GpioIn.GpioName
 		preScript += fmt.Sprintf("var GPIO_PIN='%s';\n", gpioPinName)
-		_,level,_ := DeconstructEventTriggerGpioIn(evt)
+		_, level, _ := DeconstructEventTriggerGpioIn(evt)
 		if level {
 			preScript += fmt.Sprintf("var GPIO_LEVEL=true;\n")
 		} else {
@@ -432,8 +433,8 @@ func (tam *TriggerActionManager) executeActionStartHidScript(evt *pb.Event, ta *
 		rtype := ta.Trigger.(*pb.TriggerAction_GroupReceiveMulti).GroupReceiveMulti.Type
 		// create bash array of values
 		jsArray := "["
-		for idx,v := range values {
-			if idx >= len(values) - 1 {
+		for idx, v := range values {
+			if idx >= len(values)-1 {
 				jsArray += fmt.Sprintf("%d", v)
 			} else {
 				jsArray += fmt.Sprintf("%d, ", v)
@@ -477,7 +478,7 @@ func (tam *TriggerActionManager) executeActionStartHidScript(evt *pb.Event, ta *
 
 	newScriptFile := preScript + string(scriptFile)
 
-	_,err = tam.rootSvc.SubSysUSB.HidScriptStartBackground(context.Background(), newScriptFile)
+	_, err = tam.rootSvc.SubSysUSB.HidScriptStartBackground(context.Background(), newScriptFile)
 	if err != nil {
 		fmt.Printf("Couldn't start HIDScript as background job'%s': %v\n", action.ScriptName, err)
 		return
@@ -499,7 +500,7 @@ func (tam *TriggerActionManager) executeActionBashScript(evt *pb.Event, ta *pb.T
 	case triggerTypeGpioIn:
 		gpioPinName := ta.Trigger.(*pb.TriggerAction_GpioIn).GpioIn.GpioName
 		env = append(env, fmt.Sprintf("GPIO_PIN='%s'", gpioPinName))
-		_,level,_ := DeconstructEventTriggerGpioIn(evt)
+		_, level, _ := DeconstructEventTriggerGpioIn(evt)
 		if level {
 			env = append(env, fmt.Sprintf("GPIO_LEVEL=HIGH"))
 		} else {
@@ -511,7 +512,9 @@ func (tam *TriggerActionManager) executeActionBashScript(evt *pb.Event, ta *pb.T
 		rtype := ta.Trigger.(*pb.TriggerAction_GroupReceiveMulti).GroupReceiveMulti.Type
 		// create bash array of values
 		bashArray := "("
-		for _,v := range values { bashArray += fmt.Sprintf("%d ", v)}
+		for _, v := range values {
+			bashArray += fmt.Sprintf("%d ", v)
+		}
 		bashArray += ")"
 		env = append(env,
 			fmt.Sprintf("GROUP=%s", groupName),
@@ -553,21 +556,24 @@ func (tam *TriggerActionManager) executeActionLog(evt *pb.Event, ta *pb.TriggerA
 
 	logMessage := fmt.Sprintf("Trigger fired: %s", triggerName)
 
-
 	switch tt {
 	case triggerTypeGpioIn:
 		gpioPinName := ta.Trigger.(*pb.TriggerAction_GpioIn).GpioIn.GpioName
-		_,level,_ := DeconstructEventTriggerGpioIn(evt)
+		_, level, _ := DeconstructEventTriggerGpioIn(evt)
 		logMessage += fmt.Sprintf(" (GPIO_PIN=%s GPIO_HIGH=%v)", gpioPinName, level)
 	case triggerTypeGroupReceiveMulti:
-		groupName := ta.Trigger.(*pb.TriggerAction_GroupReceiveMulti).GroupReceiveMulti.GroupName
-		values := ta.Trigger.(*pb.TriggerAction_GroupReceiveMulti).GroupReceiveMulti.Values
-		logMessage += fmt.Sprintf(" (GROUP='%s', VALUES=%v)", groupName, values)
+		multi := ta.Trigger.(*pb.TriggerAction_GroupReceiveMulti).GroupReceiveMulti
+		typeName := pb.GroupReceiveMultiType_name[int32(multi.Type)]
+		logMessage += fmt.Sprintf(" (GROUP='%s', VALUES=%v, TYPE='%s')", multi.GroupName, multi.Values, typeName)
 	case triggerTypeGroupReceive:
-		groupName := ta.Trigger.(*pb.TriggerAction_GroupReceive).GroupReceive.GroupName
-		values := ta.Trigger.(*pb.TriggerAction_GroupReceive).GroupReceive.Value
-		typeName := pb.GroupReceiveMultiType_name[int32(ta.Trigger.(*pb.TriggerAction_GroupReceiveMulti).GroupReceiveMulti.Type)]
-		logMessage += fmt.Sprintf(" (GROUP='%s', VALUES=%+v, VALUE='%d')", groupName, values, typeName)
+		// NOTE: this used to read the Type field off a
+		// *TriggerAction_GroupReceiveMulti assertion, which is the WRONG
+		// variant in this branch -- a bare type assertion against a mismatched
+		// oneof panics, and nothing here recovers, so every firing of a
+		// group-receive trigger took the whole service down. TriggerGroupReceive
+		// carries only GroupName and a single Value; there is no Type to log.
+		single := ta.Trigger.(*pb.TriggerAction_GroupReceive).GroupReceive
+		logMessage += fmt.Sprintf(" (GROUP='%s', VALUE=%d)", single.GroupName, single.Value)
 	case triggerTypeDhcpLeaseGranted:
 		iface := evt.Values[1].GetTstring()
 		mac := evt.Values[2].GetTstring()
@@ -585,7 +591,9 @@ func (tam *TriggerActionManager) executeActionLog(evt *pb.Event, ta *pb.TriggerA
 
 // checks if the triggerType of the given event (if trigger event at all), matches the TriggerType of the TriggerAction
 func taTriggerTypeMatchesEvtTriggerType(ttype triggerType, evt *pb.Event) bool {
-	if evt.Type != common_web.EVT_TRIGGER { return false }
+	if evt.Type != common_web.EVT_TRIGGER {
+		return false
+	}
 	triggerTypeEvt := common_web.EvtTriggerType(evt.Values[0].GetTint64())
 	switch triggerTypeEvt {
 	case common_web.TRIGGER_EVT_TYPE_SERVICE_STARTED:
@@ -637,14 +645,13 @@ func (tam *TriggerActionManager) RemoveTriggerAction(removeTa *pb.TriggerAction)
 	tam.registeredTriggerActionMutex.Lock()
 	defer tam.registeredTriggerActionMutex.Unlock()
 
-
-	for idx,ta := range tam.registeredTriggerActions.TriggerActions {
+	for idx, ta := range tam.registeredTriggerActions.TriggerActions {
 		if ta.Id == removeTa.Id {
 			// remove element (not a problem for running `for`-loop, as it is interrupted here)
 			tam.registeredTriggerActions.TriggerActions = append(tam.registeredTriggerActions.TriggerActions[:idx], tam.registeredTriggerActions.TriggerActions[idx+1:]...)
 
 			//if target ta trigger had a sequenceChecker assigned, remove it
-			if _,match := ta.Trigger.(*pb.TriggerAction_GroupReceiveMulti); match {
+			if _, match := ta.Trigger.(*pb.TriggerAction_GroupReceiveMulti); match {
 				tam.groupReceiveSequenceCheckersMutex.Lock()
 				delete(tam.groupReceiveSequenceCheckers, ta)
 				tam.groupReceiveSequenceCheckersMutex.Unlock()
@@ -657,8 +664,8 @@ func (tam *TriggerActionManager) RemoveTriggerAction(removeTa *pb.TriggerAction)
 
 }
 
-func (tam *TriggerActionManager) GetTriggerActionByID(Id uint32) (ta *pb.TriggerAction ,err error) {
-	for _,ta = range tam.registeredTriggerActions.TriggerActions {
+func (tam *TriggerActionManager) GetTriggerActionByID(Id uint32) (ta *pb.TriggerAction, err error) {
+	for _, ta = range tam.registeredTriggerActions.TriggerActions {
 		if ta.Id == Id {
 			return ta, nil
 		}
@@ -676,7 +683,7 @@ func (tam *TriggerActionManager) AddTriggerAction(ta *pb.TriggerAction) (taAdded
 	taAdded = ta
 
 	//if new ta trigger is GroupReceiveSequence, add a SequenceChecker
-	if triggerGrpRcv,match := ta.Trigger.(*pb.TriggerAction_GroupReceiveMulti); match {
+	if triggerGrpRcv, match := ta.Trigger.(*pb.TriggerAction_GroupReceiveMulti); match {
 		tam.groupReceiveSequenceCheckersMutex.Lock()
 		//fmt.Printf("##### New val checker %+v\n", triggerGrpRcv.GroupReceiveSequence.Values)
 		switch triggerGrpRcv.GroupReceiveMulti.Type {
@@ -694,30 +701,31 @@ func (tam *TriggerActionManager) AddTriggerAction(ta *pb.TriggerAction) (taAdded
 	}
 
 	//if trigger is GpioIn, configure GPIO
-	if triggerGpioIn,match := ta.Trigger.(*pb.TriggerAction_GpioIn); match {
+	if triggerGpioIn, match := ta.Trigger.(*pb.TriggerAction_GpioIn); match {
 		tam.rootSvc.SubSysGpio.DeployGpioTrigger(triggerGpioIn.GpioIn)
 	}
 
-	return taAdded,nil
+	return taAdded, nil
 }
-
 
 func (tam *TriggerActionManager) UpdateTriggerAction(srcTa *pb.TriggerAction, addIfMissing bool) (err error) {
 	tam.registeredTriggerActionMutex.Lock()
 	defer tam.registeredTriggerActionMutex.Unlock()
 
-	if targetTA,err := tam.GetTriggerActionByID(srcTa.Id); err != nil {
+	if targetTA, err := tam.GetTriggerActionByID(srcTa.Id); err != nil {
 		if addIfMissing {
-			_,err = tam.AddTriggerAction(srcTa)
+			_, err = tam.AddTriggerAction(srcTa)
 			return err
 		} else {
 			return ErrTaNotFound
 		}
 	} else {
-		if targetTA.Immutable { return ErrTaImmutable }
+		if targetTA.Immutable {
+			return ErrTaImmutable
+		}
 
 		//if target ta trigger had a sequenceChecker assigned, remove it
-		if _,match := targetTA.Trigger.(*pb.TriggerAction_GroupReceiveMulti); match {
+		if _, match := targetTA.Trigger.(*pb.TriggerAction_GroupReceiveMulti); match {
 			tam.groupReceiveSequenceCheckersMutex.Lock()
 			delete(tam.groupReceiveSequenceCheckers, targetTA)
 			tam.groupReceiveSequenceCheckersMutex.Unlock()
@@ -730,7 +738,7 @@ func (tam *TriggerActionManager) UpdateTriggerAction(srcTa *pb.TriggerAction, ad
 		targetTA.Trigger = srcTa.Trigger
 
 		//if new ta trigger is GroupReceiveSequence, add a SequenceChecker
-		if triggerGrpRcv,match := targetTA.Trigger.(*pb.TriggerAction_GroupReceiveMulti); match {
+		if triggerGrpRcv, match := targetTA.Trigger.(*pb.TriggerAction_GroupReceiveMulti); match {
 			tam.groupReceiveSequenceCheckersMutex.Lock()
 
 			switch triggerGrpRcv.GroupReceiveMulti.Type {
@@ -747,14 +755,12 @@ func (tam *TriggerActionManager) UpdateTriggerAction(srcTa *pb.TriggerAction, ad
 		}
 
 		//if trigger is GpioIn, configure GPIO
-		if triggerGpioIn,match := targetTA.Trigger.(*pb.TriggerAction_GpioIn); match {
+		if triggerGpioIn, match := targetTA.Trigger.(*pb.TriggerAction_GpioIn); match {
 			tam.rootSvc.SubSysGpio.DeployGpioTrigger(triggerGpioIn.GpioIn)
 		}
 
 		return nil
 	}
-
-
 
 }
 
@@ -768,7 +774,7 @@ func (tam *TriggerActionManager) ClearTriggerActions(keepImmutable bool) (err er
 	}
 
 	newTas := []*pb.TriggerAction{}
-	for _,ta := range tam.registeredTriggerActions.TriggerActions {
+	for _, ta := range tam.registeredTriggerActions.TriggerActions {
 		if ta.Immutable {
 			newTas = append(newTas, ta)
 		}
@@ -784,12 +790,12 @@ func (tam *TriggerActionManager) ClearTriggerActions(keepImmutable bool) (err er
 
 func (tam *TriggerActionManager) GetCurrentTriggerActionSet() (ta *pb.TriggerActionSet) {
 	/*
-	tam.registeredTriggerActionMutex.Lock()
-	resTAs := make([]*pb.TriggerAction, len(tam.registeredTriggerActions.TriggerActions))
-	copy(resTAs, tam.registeredTriggerActions.TriggerActions)
-	tam.registeredTriggerActionMutex.Unlock()
+		tam.registeredTriggerActionMutex.Lock()
+		resTAs := make([]*pb.TriggerAction, len(tam.registeredTriggerActions.TriggerActions))
+		copy(resTAs, tam.registeredTriggerActions.TriggerActions)
+		tam.registeredTriggerActionMutex.Unlock()
 
-	return &pb.TriggerActionSet{ TriggerActions: resTAs }
+		return &pb.TriggerActionSet{ TriggerActions: resTAs }
 	*/
 	return &tam.registeredTriggerActions
 }
@@ -798,7 +804,7 @@ func (tam *TriggerActionManager) redeployGpioForAllTas() {
 	tam.registeredTriggerActionMutex.Lock()
 	defer tam.registeredTriggerActionMutex.Unlock()
 	tam.rootSvc.SubSysGpio.ResetPins()
-	for _,ta := range tam.registeredTriggerActions.TriggerActions {
+	for _, ta := range tam.registeredTriggerActions.TriggerActions {
 		ttype, _ := retrieveTriggerActionTypes(ta)
 		if ttype == triggerTypeGpioIn {
 			gpioIn := ta.Trigger.(*pb.TriggerAction_GpioIn).GpioIn
@@ -818,18 +824,16 @@ func (tam *TriggerActionManager) Stop() {
 
 func NewTriggerActionManager(rootService *Service) (tam *TriggerActionManager) {
 	tam = &TriggerActionManager{
-		registeredTriggerActions:      pb.TriggerActionSet{
-			Name: "DeployedTriggerActions",
+		registeredTriggerActions: pb.TriggerActionSet{
+			Name:           "DeployedTriggerActions",
 			TriggerActions: []*pb.TriggerAction{},
 		},
 		registeredTriggerActionMutex: &sync.Mutex{},
-		rootSvc: rootService,
+		rootSvc:                      rootService,
 
-
-		groupReceiveSequenceCheckers: make(map[*pb.TriggerAction]*util.ValueSequenceChecker),
+		groupReceiveSequenceCheckers:      make(map[*pb.TriggerAction]*util.ValueSequenceChecker),
 		groupReceiveSequenceCheckersMutex: &sync.Mutex{},
 	}
 
 	return tam
 }
-

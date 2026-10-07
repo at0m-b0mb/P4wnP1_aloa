@@ -1,4 +1,5 @@
-// +build linux,arm
+//go:build linux
+// +build linux
 
 package datastore
 
