@@ -163,7 +163,6 @@ func (p *panel) data(b []byte) error {
 }
 
 func (p *panel) Show(fb *Framebuffer) error {
-	off := p.cfg.Controller.colOffset()
 	for page := 0; page < Pages; page++ {
 		cur := fb.Page(page)
 		if !p.dirty && pageEqual(cur, p.prev.Page(page)) {
@@ -172,11 +171,7 @@ func (p *panel) Show(fb *Framebuffer) error {
 		// Position the cursor for this page. SH1106 has no addressing mode
 		// that would let the controller advance pages for us, so this runs
 		// per page for both controllers rather than branching.
-		if err := p.commands([]byte{
-			byte(cmdSetPageAddr | page),
-			byte(0x00 | (off & 0x0F)),
-			byte(0x10 | (off >> 4)),
-		}); err != nil {
+		if err := p.commands(pageCommands(p.cfg.Controller, page)); err != nil {
 			return err
 		}
 		if err := p.data(cur); err != nil {

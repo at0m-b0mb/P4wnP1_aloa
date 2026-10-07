@@ -104,14 +104,31 @@ func (c Controller) initSequence() []byte {
 	return seq
 }
 
+// pageCommands positions the controller's cursor at the start of one page.
+//
+// Extracted from the SPI driver so the part most likely to be silently wrong
+// can be tested on any machine. The SH1106 offset is the classic way to get
+// this board wrong: its RAM is 132 columns wide with the 128-pixel panel
+// centred, so the first visible column is RAM column 2. Drive it as an
+// SSD1306 and every frame is shifted two pixels and wraps at the edge --
+// which looks like a corrupt framebuffer rather than an addressing mistake.
+func pageCommands(c Controller, page int) []byte {
+	off := c.colOffset()
+	return []byte{
+		byte(cmdSetPageAddr | page),
+		byte(0x00 | (off & 0x0F)), // lower nibble of the column
+		byte(0x10 | (off >> 4)),   // upper nibble
+	}
+}
+
 // NullDisplay accepts frames and discards them. Used by the daemon when it is
 // asked to run headless (for a smoke test on a board with no HAT fitted) so
 // the whole stack above the panel still runs and can be exercised.
 type NullDisplay struct{ Frames int }
 
-func (n *NullDisplay) Show(*Framebuffer) error   { n.Frames++; return nil }
-func (n *NullDisplay) SetContrast(byte) error    { return nil }
-func (n *NullDisplay) Close() error              { return nil }
+func (n *NullDisplay) Show(*Framebuffer) error { n.Frames++; return nil }
+func (n *NullDisplay) SetContrast(byte) error  { return nil }
+func (n *NullDisplay) Close() error            { return nil }
 
 // RecordingDisplay keeps the last frame, so a test can assert on what would
 // have reached the panel.
