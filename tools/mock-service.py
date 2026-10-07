@@ -55,6 +55,14 @@ SCRIPTS = {
 }
 TMP = {}
 JOBS = [7]
+STARTUP = {"name": "initial"}
+
+
+def _set_startup(b):
+    if not isinstance(b.get("msg"), str):
+        err("malformed request body: StringMessage has no field other than 'msg'")
+    STARTUP["name"] = b["msg"]
+    return {}
 
 REFLEXES = [
     {"id": 1, "isActive": True, "oneShot": False, "immutable": True,
@@ -187,9 +195,13 @@ RPC = {
     "DeployTriggerActionSetRemove": lambda b: _remove_reflex(b),
     "DeployTriggerActionSetUpdate": lambda b: _update_reflex(b),
     "ListStoredMasterTemplate": lambda b: {"msgArray": ["initial", "hid_only", "rogue_ap", "usb_net"]},
-    "GetStartupMasterTemplate": lambda b: {"templateName": "initial"},
+    # StringMessage{msg}. Returning the real field name matters: the console
+    # previously SENT `templateName` here, which the bridge discarded, so this
+    # silently set the boot default to "". A mock that accepted it would have
+    # hidden the bug.
+    "GetStartupMasterTemplate": lambda b: {"msg": STARTUP["name"]},
     "DeployStoredMasterTemplate": lambda b: {},
-    "SetStartupMasterTemplate": lambda b: {},
+    "SetStartupMasterTemplate": lambda b: _set_startup(b),
     "DBBackup": lambda b: {},
     "Reboot": lambda b: {},
     "Shutdown": lambda b: {},
