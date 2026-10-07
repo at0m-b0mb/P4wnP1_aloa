@@ -206,6 +206,31 @@ echo "${SSH_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/010_${SSH_USER}-nopa
 chmod 0440 "/etc/sudoers.d/010_${SSH_USER}-nopasswd"
 
 # ---------------------------------------------------------------------------
+# 5b. OLED HAT support
+#
+# The Waveshare 1.3inch OLED HAT is on 4-wire SPI by default, and the SPI
+# controller is off in a stock Raspberry Pi OS image. Enabling it costs
+# nothing on a board with no HAT fitted, and not enabling it is the single
+# reason a correctly wired panel stays dark.
+# ---------------------------------------------------------------------------
+# The OLED daemon's unit. Enabled unconditionally: on a board with no HAT the
+# daemon exits 0 after one journal line, which costs nothing and means fitting
+# a HAT later needs no reconfiguration.
+if [ -f /usr/local/P4wnP1/dist/p4wnp1-oled.service ]; then
+    install -m 0644 /usr/local/P4wnP1/dist/p4wnp1-oled.service /etc/systemd/system/
+    ln -sf /etc/systemd/system/p4wnp1-oled.service \
+        /etc/systemd/system/multi-user.target.wants/p4wnp1-oled.service
+    log "installed p4wnp1-oled.service"
+fi
+
+BOOTCFG=/boot/firmware/config.txt
+[ -f "$BOOTCFG" ] || BOOTCFG=/boot/config.txt
+if [ -f "$BOOTCFG" ] && ! grep -q '^dtparam=spi=on' "$BOOTCFG"; then
+    log "enabling SPI for the OLED HAT"
+    printf '\n# P4wnP1: SPI for the Waveshare 1.3inch OLED HAT\ndtparam=spi=on\n' >> "$BOOTCFG"
+fi
+
+# ---------------------------------------------------------------------------
 # 6. regulatory domain
 #
 # On current Pi OS wlan0 is rfkill-soft-blocked until a country code is set,

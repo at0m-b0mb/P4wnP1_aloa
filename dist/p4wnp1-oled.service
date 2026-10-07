@@ -1,0 +1,26 @@
+[Unit]
+# The on-device OLED console for the Waveshare 1.3inch HAT.
+#
+# Wants, not Requires: a device with no HAT fitted must boot exactly as it did
+# before. The daemon detects the missing panel, says so once in the journal and
+# exits 0, and systemd leaves it alone.
+Description=P4wnP1 OLED console
+After=P4wnP1.service
+Wants=P4wnP1.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/p4wnp1-oled
+Restart=on-failure
+RestartSec=5
+# A clean exit means "no panel here". Restarting that forever would spin the
+# CPU on every board without the HAT.
+SuccessExitStatus=0
+
+# It needs SPI, GPIO and the credential under /run, and nothing else.
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

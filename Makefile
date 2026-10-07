@@ -3,7 +3,7 @@ PATH := /usr/local/go/bin:$(PATH)
 
 .PHONY: all help compile build-armv6 build-service-armv6 build-cli-armv6 build-hashpw-armv6 \
         build-arm64 build-service-arm64 build-cli-arm64 build-hashpw-arm64 \
-        image image-armhf image-arm64 contrast smoke feature-test access-control check-quoting verify check-js check-rpc check-render mock dep install installkali remove lint test
+        image image-armhf image-arm64 contrast smoke feature-test access-control check-quoting oled-sim oled-shots verify check-js check-rpc check-render mock dep install installkali remove lint test
 
 all: compile
 
@@ -26,6 +26,9 @@ help:
 	@echo "  make access-control  Attack the running service: every check is an"
 	@echo "                     attack that must FAIL"
 	@echo "  make check-quoting Values install.sh writes must survive being sourced"
+	@echo "  make oled-sim      Drive the OLED interface in a browser -- no Pi,"
+	@echo "                     no HAT and no SD card needed"
+	@echo "  make oled-shots    Render every OLED screen to one PNG"
 	@echo "  make verify        Run every gate: js, render, rpc shapes, contrast,"
 	@echo "                     unit tests, vet (both arches), smoke, feature-test"
 	@echo "  make check-js      Syntax-check the web console JavaScript"
@@ -137,6 +140,18 @@ access-control:
 check-quoting:
 	./tools/check-shell-quoting.sh
 
+# The OLED interface, in a browser, against a fake device. The UI, fonts,
+# menus and state machine are the same code the device runs; only the panel
+# and the joystick are swapped for a PNG and some buttons.
+oled-sim:
+	go run ./cmd/p4wnp1-oled-sim
+
+# Every OLED screen on one sheet, including the boot splash and an error
+# state. The fastest way to review a display nobody has in front of them.
+oled-shots:
+	OLED_SHEET=$(CURDIR)/image/out/oled-screens.png go test -count=1 -run TestContactSheet ./oled/
+	@echo "wrote image/out/oled-screens.png"
+
 # The whole suite, in the order that fails cheapest-first.
 verify:
 	./tools/check-js.sh
@@ -145,8 +160,8 @@ verify:
 	python3 tools/check-rpc-shapes.py
 	python3 tools/check_contrast.py
 	$(MAKE) test
-	GOOS=linux GOARCH=arm GOARM=6 go vet ./service/... ./cli_client/...
-	GOOS=linux GOARCH=arm64 go vet ./service/... ./cli_client/...
+	GOOS=linux GOARCH=arm GOARM=6 go vet ./service/... ./cli_client/... ./oled/... ./cmd/...
+	GOOS=linux GOARCH=arm64 go vet ./service/... ./cli_client/... ./oled/... ./cmd/...
 	$(MAKE) test-linux
 	$(MAKE) smoke
 	$(MAKE) feature-test
@@ -162,7 +177,7 @@ build-armv6: build-service-armv6 build-cli-armv6 build-hashpw-armv6
 # The service package only builds for linux (USB gadget, netlink, HID), so its
 # tests run in a container. jsonbridge and auth are portable and run anywhere.
 test:
-	go test -count=1 ./service/auth/... ./service/jsonbridge/...
+	go test -count=1 ./service/auth/... ./service/jsonbridge/... ./oled/...
 
 test-linux:
 	docker run --rm --platform linux/arm64 \

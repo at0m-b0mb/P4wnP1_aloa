@@ -119,7 +119,7 @@ for ARCH in $ARCHES; do
     c "[$ARCH] Cross-compiling P4wnP1 binaries  ($BOARDS)"
     BINDIR="$REPO_ROOT/image/out/bin/$ARCH"
     mkdir -p "$BINDIR"
-    for pkg in P4wnP1_service P4wnP1_cli p4wnp1-hashpw; do
+    for pkg in P4wnP1_service P4wnP1_cli p4wnp1-hashpw p4wnp1-oled; do
         info "building $pkg"
         env CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" ${GOARM:+GOARM=$GOARM} \
             go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \

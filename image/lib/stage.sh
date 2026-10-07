@@ -130,7 +130,7 @@ mkdir -p "$PAYLOAD"
 rsync -a --exclude '.git' \
       "$REPO/dist"    "$PAYLOAD/" 2>/dev/null || die "rsync dist failed"
 mkdir -p "$PAYLOAD/bin"
-for b in P4wnP1_service P4wnP1_cli p4wnp1-hashpw; do
+for b in P4wnP1_service P4wnP1_cli p4wnp1-hashpw p4wnp1-oled; do
     src="$REPO/image/out/bin/$ARCH/$b"
     [ -f "$src" ] || die "missing built binary $src (run image/build.sh, which cross-compiles first)"
     install -m 0755 "$src" "$PAYLOAD/bin/$b"
