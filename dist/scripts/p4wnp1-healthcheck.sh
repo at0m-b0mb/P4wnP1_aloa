@@ -18,6 +18,24 @@
 
 set -u   # no -e: we want every check to run even if earlier ones fail
 LOGIN_TEST=0
+
+# Scratch files for curl responses.
+#
+# These were /tmp/p4wnp1-health-$$ and /tmp/p4wnp1-login-$$: predictable names
+# in a world-writable directory, created with the default umask. Three problems
+# at once, on a script documented to be run with sudo:
+#
+#   * The login response holds a BEARER TOKEN, and 0644 in /tmp means any local
+#     account could read it.
+#   * A local user who pre-creates the path as a symlink gets root to write
+#     through it, because curl -o opens O_CREAT|O_TRUNC and follows symlinks.
+#   * The cleanup only ran on the success path, so failures left the token
+#     behind indefinitely.
+#
+# mktemp refuses to reuse an existing path and creates 0600, and the trap runs
+# however the script exits.
+SCRATCH=$(mktemp -t p4wnp1-health.XXXXXXXX) || { echo "cannot create a temp file" >&2; exit 1; }
+trap 'rm -f "${SCRATCH}"' EXIT INT TERM
 for arg in "$@"; do
     case "$arg" in
         --login-test) LOGIN_TEST=1 ;;
@@ -162,19 +180,18 @@ check_port tcp 22    "SSH"
 section "7. HTTP auth endpoint smoke test"
 # ---------------------------------------------------------------------------
 if command -v curl >/dev/null 2>&1; then
-    health_response=$(curl -s -o /tmp/p4wnp1-health-$$ -w '%{http_code}' \
+    health_response=$(curl -s -o "${SCRATCH}" -w '%{http_code}' \
         http://127.0.0.1:8000/api/auth/health 2>/dev/null)
     if [[ "$health_response" = "200" ]]; then
         say_pass "GET /api/auth/health -> 200"
-        if grep -q '"status":"ok"' /tmp/p4wnp1-health-$$; then
+        if grep -q '"status":"ok"' "${SCRATCH}"; then
             say_pass "/api/auth/health body looks healthy"
         else
-            say_warn "/api/auth/health body unexpected: $(cat /tmp/p4wnp1-health-$$)"
+            say_warn "/api/auth/health body unexpected: $(cat "${SCRATCH}")"
         fi
     else
         say_fail "GET /api/auth/health -> HTTP $health_response"
     fi
-    rm -f /tmp/p4wnp1-health-$$
 
     # Negative test: a gRPC-web call without an Authorization header must
     # be rejected (proves the interceptor is wired).
@@ -226,17 +243,20 @@ if (( LOGIN_TEST == 1 )); then
         if [[ -z "$admin_pw" ]]; then
             say_warn "couldn't parse admin password from INITIAL_CREDENTIALS.txt"
         else
-            login_response=$(curl -s -o /tmp/p4wnp1-login-$$ -w '%{http_code}' \
-                -H 'Content-Type: application/json' \
-                -X POST \
-                -d "{\"username\":\"admin\",\"password\":\"${admin_pw}\"}" \
-                http://127.0.0.1:8000/api/auth/login 2>/dev/null)
-            if [[ "$login_response" = "200" ]] && grep -q '"token"' /tmp/p4wnp1-login-$$; then
+            # The password goes in on STDIN, not on the command line. As an
+            # argument it sat in /proc/<pid>/cmdline for the life of the
+            # request, readable by any local account -- including the
+            # unprivileged p4wnp1 SSH user this device ships with.
+            login_response=$(printf '{"username":"admin","password":"%s"}' "${admin_pw}" \
+                | curl -s -o "${SCRATCH}" -w '%{http_code}' \
+                    -H 'Content-Type: application/json' \
+                    -X POST --data-binary @- \
+                    http://127.0.0.1:8000/api/auth/login 2>/dev/null)
+            if [[ "$login_response" = "200" ]] && grep -q '"token"' "${SCRATCH}"; then
                 say_pass "login round-trip succeeded; got a token"
             else
-                say_fail "login round-trip failed (HTTP $login_response): $(cat /tmp/p4wnp1-login-$$)"
+                say_fail "login round-trip failed (HTTP $login_response)"
             fi
-            rm -f /tmp/p4wnp1-login-$$
         fi
     fi
 fi
