@@ -8,46 +8,8 @@
  */
 'use strict';
 
-/* ---------------------------------------------------------------- utilities */
-
-/* Tiny hyperscript. `h('div.card', {onclick: f}, 'text', child)`. Text is
-   always set via textContent, never innerHTML, so device-supplied strings
-   (SSIDs, hostnames, log lines, script output) cannot inject markup. */
-function h(spec, props, ...children) {
-  const [tagAndId, ...classes] = String(spec).split('.');
-  const [tag, id] = tagAndId.split('#');
-  const el = document.createElement(tag || 'div');
-  if (id) el.id = id;
-  if (classes.length) el.className = classes.join(' ');
-  if (props && props.constructor === Object) {
-    for (const [k, v] of Object.entries(props)) {
-      if (v === null || v === undefined || v === false) continue;
-      if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
-      else if (k === 'class') el.className += (el.className ? ' ' : '') + v;
-      else if (k === 'value') el.value = v;
-      else if (k === 'checked') el.checked = !!v;
-      else if (k === 'disabled') el.disabled = !!v;
-      else el.setAttribute(k, v);
-    }
-  } else if (props !== undefined && props !== null) {
-    children.unshift(props);
-  }
-  for (const c of children.flat(4)) {
-    if (c === null || c === undefined || c === false) continue;
-    el.append(c instanceof Node ? c : document.createTextNode(String(c)));
-  }
-  return el;
-}
-
-const $ = sel => document.querySelector(sel);
-const clear = el => { while (el.firstChild) el.removeChild(el.firstChild); return el; };
-
-function toast(message, isError) {
-  const box = $('#toasts');
-  const t = h('div.toast' + (isError ? '.toast-err' : ''), message);
-  box.append(t);
-  setTimeout(() => t.remove(), isError ? 8000 : 4000);
-}
+/* Shared helpers -- h(), $, clear(), toast(), the dialogs, b64encode/b64decode
+ * and the formatters -- live in ui.js, which loads first. */
 
 /* Any RPC can fail because the operator just reconfigured the very interface
    they are talking over. Report it, never swallow it, and bounce to sign-in
@@ -60,9 +22,6 @@ async function guard(fn, what) {
     return undefined;
   }
 }
-
-const fmtTime = ms => new Date(Number(ms) || Date.now())
-  .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
 /* --------------------------------------------------------------- the theme */
 
@@ -223,10 +182,15 @@ Views.cable = async function () {
              normal case -- this request is what kills the connection it
              arrived on. Say so before doing it. */
           const overUsb = /^172\.16\.0\./.test(location.hostname);
-          const msg = overUsb
-            ? 'Re-composing USB will drop the USB ethernet link this console is using. You will need to reconnect. Continue?'
-            : 'Re-compose the USB gadget now? Any host currently attached will see every function disconnect and re-enumerate.';
-          if (!confirm(msg)) return;
+          const yes = await confirmAction({
+            title: 'Re-compose the USB gadget?',
+            body: 'The device tears down every USB function and rebuilds it with these settings.',
+            consequence: overUsb
+              ? 'You are reading this over the USB ethernet link, and that link is one of the functions being rebuilt. This console WILL disconnect. It normally comes back within a few seconds -- reload the page. If it does not, reach the device over WiFi or the serial console.'
+              : 'Any host currently attached sees every function disconnect and re-enumerate, exactly as if the cable had been pulled out and pushed back in.',
+            confirmLabel: 'Deploy',
+          });
+          if (!yes) return;
           e.target.disabled = true;
           const res = await guard(() => Api.rpc('DeployGadgetSetting', draft), 'deploy USB settings');
           e.target.disabled = false;
@@ -236,8 +200,16 @@ Views.cable = async function () {
       h('button.btn', { onclick: () => Views.cable() }, 'Discard changes'),
       h('button.btn.btn-quiet', {
         onclick: async () => {
-          const r = await guard(() => Api.rpc('StoreDeployedUSBSettings', { msg: prompt('Store current USB settings as:') || '' }), 'store');
-          if (r !== undefined) toast('Stored.');
+          const name = await promptValue({
+            title: 'Store this USB composition',
+            label: 'Template name',
+            placeholder: 'hid-and-storage',
+            hint: 'Reusable later from Loadouts, and as part of a whole-device template.',
+            validate: v => v ? null : 'Give the template a name.',
+          });
+          if (!name) return;
+          const r = await guard(() => Api.rpc('StoreDeployedUSBSettings', { msg: name }), 'store the template');
+          if (r !== undefined) toast('Stored as "' + name + '".');
         },
       }, 'Store as template')));
   main.append(form);
@@ -314,94 +286,232 @@ Views.radio = async function () {
 
 /* --- Keystrokes: HIDScript -------------------------------------------- */
 
-const SAMPLE_SCRIPT = `// HIDScript runs on the device and types into the attached host.
-// Nothing here executes until you press Run.
-layout('us');
-typingSpeed(80, 20);
+/* The complete HIDScript API, read off the vm.Set() calls in hid/controller.go.
+ *
+ * This exists because there was previously NO way to discover it. The functions
+ * are injected into an otto VM at runtime, so they appear in no file the
+ * operator can open, and nothing in the product named them. You had to read the
+ * Go source to find out that typingSpeed() or waitLED() existed at all. */
+const HID_API = [
+  { group: 'Keyboard', fns: [
+    { sig: `type("text")`, doc: 'Type a string through the emulated keyboard. \\n sends Return.' },
+    { sig: `press("CTRL ALT DELETE")`, doc: 'Press a key combination once. Space-separated key names.' },
+    { sig: `layout("US")`, doc: 'Select the keyboard layout the target host is using. Wrong layout means wrong characters.' },
+    { sig: `typingSpeed(ms, jitter)`, doc: 'Delay between keystrokes, plus a random variation. Constant-rate typing outruns some applications.' },
+  ]},
+  { group: 'Mouse', fns: [
+    { sig: `move(dx, dy)`, doc: 'Move the pointer by a relative offset.' },
+    { sig: `moveStepped(dx, dy)`, doc: 'Same, but in smaller interpolated steps.' },
+    { sig: `moveTo(x, y)`, doc: 'Move to an absolute position. Needs the absolute-mouse gadget and works best on Windows.' },
+    { sig: `button(BT1)`, doc: 'Hold a button down. BT1, BT2, BT3, or BTNONE to release.' },
+    { sig: `click(BT1)`, doc: 'Press and release.' },
+    { sig: `doubleClick(BT1)`, doc: 'Two clicks in quick succession.' },
+  ]},
+  { group: 'Timing and feedback', fns: [
+    { sig: `delay(ms)`, doc: 'Wait. The most common fix when a payload races the target.' },
+    { sig: `waitLED(mask)`, doc: 'Block until a keyboard LED changes. The host can signal back this way: NUM, CAPS, SCROLL, COMPOSE, KANA, ANY, ANY_OR_NONE.' },
+    { sig: `waitLEDRepeat(mask, count, maxPause, timeout)`, doc: 'Wait for the host to toggle an LED repeatedly, as a crude input channel.' },
+  ]},
+];
+
+const SAMPLE_SCRIPT = `// HIDScript runs ON the device and types into the attached host.
+// Nothing happens until you press Run.
+
+layout('US');            // must match the TARGET's keyboard layout
+typingSpeed(80, 20);     // 80ms between keys, +/- 20ms of jitter
+
+delay(500);              // give the host a moment to notice the keyboard
 type('hello from P4wnP1\\n');
 `;
+
+/* Decode a stored script. FSReadFile needs an explicit length -- with len
+ * unset it returns readCount 0 and no data -- so the size comes from
+ * FSGetFileInfo first. */
+async function readStoredScript(name) {
+  const info = await guard(
+    () => Api.rpc('FSGetFileInfo', { path: '/usr/local/P4wnP1/HIDScripts/' + name }),
+    'read script info');
+  if (!info) return null;
+  const size = Number(info.size) || 0;
+  if (size === 0) { toast('"' + name + '" is empty.', true); return ''; }
+  if (size > 512 * 1024) { toast('"' + name + '" is too large to open here (' + fmtBytes(size) + ').', true); return null; }
+  const res = await guard(
+    () => Api.rpc('FSReadFile', { folder: 2 /* HID_SCRIPTS */, filename: name, start: 0, len: size }),
+    'read script');
+  if (!res) return null;
+  try { return b64decode(res.data); }
+  catch (e) { toast('Could not decode "' + name + '": ' + e.message, true); return null; }
+}
+
+/* Write the editor contents to a temp file and start a job.
+ *
+ * Three calls, and every one of them was wrong before:
+ *   - FSCreateTempDirOrFile takes {dir, prefix, onlyFolder}; `dir` is a STRING
+ *     path, and passing a boolean made protojson reject the whole request.
+ *   - FSWriteFile's payload field is `data`, not `content`, and `filename` must
+ *     be RELATIVE to the chosen folder -- an absolute path is refused.
+ *   - the response field is `resultPath`.
+ * Verified against a running service before being written this way. */
+async function runScriptSource(src, timeoutSeconds) {
+  const tmp = await guard(
+    () => Api.rpc('FSCreateTempDirOrFile', { dir: '', prefix: 'console', onlyFolder: false }),
+    'create a temporary file');
+  if (!tmp || !tmp.resultPath) return null;
+
+  const absPath = tmp.resultPath;
+  const base = absPath.slice(absPath.lastIndexOf('/') + 1);
+
+  const wrote = await guard(() => Api.rpc('FSWriteFile', {
+    folder: 0 /* TMP */, filename: base, data: b64encode(src), append: false,
+  }), 'write the script');
+  if (wrote === undefined) return null;
+
+  return guard(() => Api.rpc('HIDRunScriptJob', {
+    scriptPath: absPath, timeoutSeconds: Number(timeoutSeconds) || 0,
+  }), 'start the script');
+}
 
 Views.keystrokes = async function () {
   const main = clear($('#view'));
   main.append(pageHead('Keystrokes',
-    'Run HIDScript on the device. Scripts drive the emulated keyboard and mouse against whatever host the cable is in.'));
+    'HIDScript runs on the device and drives the emulated keyboard and mouse against whatever host the cable is plugged into.'));
 
+  /* Running a script with no HID function enabled fails with a message from
+     deep in the HID layer. Say it here instead, where it is fixable. */
   if (State.usb && !State.usb.use_HID_KEYBOARD && !State.usb.use_HID_MOUSE) {
-    main.append(h('div.banner',
-      h('p.banner-title', 'No HID function is active'),
-      h('p', 'Neither the keyboard nor the mouse gadget is enabled, so a script has nothing to type into. Enable one under Cable and deploy.')));
+    main.append(h('div.banner.banner-danger',
+      h('p.banner-title', 'No keyboard or mouse is being presented'),
+      h('p', 'A script has nothing to type into. Enable the keyboard or mouse function under Cable and deploy, then come back.'),
+      h('button.btn.btn-sm', { style: 'margin-top:10px', onclick: () => go('cable') }, 'Open Cable')));
   }
 
-  const stored = await guard(() => Api.rpc('ListStoredHIDScripts'), 'list scripts');
+  const stored = await guard(() => Api.rpc('ListStoredHIDScripts'), 'list stored scripts');
   const names = (stored && stored.msgArray) || [];
 
-  const editor = h('textarea', { rows: '14', spellcheck: 'false' });
+  const editor = h('textarea', {
+    rows: '16', spellcheck: 'false', 'aria-label': 'HIDScript source',
+    wrap: 'off',
+  });
   editor.value = SAMPLE_SCRIPT;
 
-  const timeoutInput = h('input', { type: 'number', value: '30', min: '0' });
+  const timeoutInput = h('input', { type: 'number', value: '30', min: '0', max: '3600' });
+  const runBtn = h('button.btn.btn-primary', { type: 'button' }, 'Run on the host');
+
+  const picker = h('select', {
+    'aria-label': 'Load a stored script',
+    onchange: async e => {
+      const n = e.target.value;
+      if (!n) return;
+      const src = await readStoredScript(n);
+      if (src !== null) { editor.value = src; toast('Loaded "' + n + '".'); }
+      e.target.value = '';
+    },
+  }, h('option', { value: '' }, names.length ? 'Load a stored script...' : 'No stored scripts'),
+     ...names.map(n => h('option', { value: n }, n)));
+
+  runBtn.addEventListener('click', async () => {
+    const src = editor.value;
+    if (!src.trim()) { toast('There is nothing to run.', true); return; }
+    const t = Number(timeoutInput.value);
+    if (!Number.isFinite(t) || t < 0) { toast('Timeout must be zero or a positive number of seconds.', true); return; }
+
+    runBtn.disabled = true;
+    clear(runBtn).append(h('span.spinner'), ' Starting');
+    const job = await runScriptSource(src, t);
+    runBtn.disabled = false;
+    clear(runBtn).append('Run on the host');
+    if (job) { toast('Started job ' + job.id + '.'); refreshJobs(); }
+  });
 
   main.append(h('div.card',
-    h('h2.card-title', 'Script'),
-    names.length ? h('label.field',
-      h('span.field-label', 'Stored scripts'),
-      h('select', {
-        onchange: async e => {
-          const n = e.target.value;
-          if (!n) return;
-          const r = await guard(() => Api.rpc('FSReadFile', {
-            filename: n, folder: 2, /* HIDScripts folder */
-          }), 'read script');
-          if (r && r.content) {
-            try { editor.value = atob(r.content); }
-            catch (_) { toast('Script content was not valid base64.', true); }
-          }
-        },
-      }, h('option', { value: '' }, 'Load a stored script...'),
-        ...names.map(n => h('option', { value: n }, n)))) : null,
-    h('label.field',
+    h('div.card-head',
+      h('h2.card-title', { style: 'margin:0' }, 'Script'),
+      picker),
+    h('label.field', { style: 'margin-top:16px' },
       h('span.field-label', 'HIDScript source'),
-      editor),
+      editor,
+      h('span.field-hint', 'Plain JavaScript, plus the functions in the reference below.')),
     h('div.row',
-      h('label.field', { style: 'max-width:160px' },
+      h('label.field', { style: 'max-width:170px' },
         h('span.field-label', 'Timeout (seconds)'),
         timeoutInput,
-        h('span.field-hint', '0 means no timeout')),
+        h('span.field-hint', '0 runs with no time limit')),
       h('div.btn-row', { style: 'padding-top:26px' },
-        h('button.btn.btn-primary', {
-          onclick: async (e) => {
-            const src = editor.value;
-            if (!src.trim()) { toast('Nothing to run.', true); return; }
-            e.target.disabled = true;
-            /* The service runs scripts from a path, so the source is written to
-               a temp file first. FSCreateTempDirOrFile + FSWriteFile is the
-               same route the old client used. */
-            const tmp = await guard(() => Api.rpc('FSCreateTempDirOrFile', { dir: false, path: '', prefix: 'console' }), 'create temp file');
-            if (!tmp) { e.target.disabled = false; return; }
-            const wrote = await guard(() => Api.rpc('FSWriteFile', {
-              filename: tmp.resultPath || tmp.path || '', folder: 0,
-              content: btoa(unescape(encodeURIComponent(src))), append: false,
-            }), 'write script');
-            if (wrote === undefined) { e.target.disabled = false; return; }
-            const job = await guard(() => Api.rpc('HIDRunScriptJob', {
-              scriptPath: tmp.resultPath || tmp.path || '',
-              timeoutSeconds: Number(timeoutInput.value) || 0,
-            }), 'start script');
-            e.target.disabled = false;
-            if (job) { toast('Started job ' + job.id + '.'); refreshJobs(); }
-          },
-        }, 'Run'),
-        h('button.btn.btn-danger', {
+        runBtn,
+        h('button.btn', {
+          type: 'button',
           onclick: async () => {
-            if (!confirm('Cancel every running HIDScript job?')) return;
+            const name = await promptValue({
+              title: 'Save to the device',
+              label: 'File name',
+              value: 'payload.js',
+              hint: 'Stored in /usr/local/P4wnP1/HIDScripts and listed above.',
+              validate: v => {
+                if (!v) return 'Give the file a name.';
+                if (!/^[A-Za-z0-9._-]+$/.test(v)) return 'Letters, digits, dot, dash and underscore only.';
+                if (!v.endsWith('.js')) return 'Use a .js extension.';
+                if (v.startsWith('.')) return 'The name cannot start with a dot.';
+                return null;
+              },
+            });
+            if (!name) return;
+            const r = await guard(() => Api.rpc('FSWriteFile', {
+              folder: 2 /* HID_SCRIPTS */, filename: name,
+              data: b64encode(editor.value), append: false,
+            }), 'save the script');
+            if (r !== undefined) { toast('Saved as "' + name + '".'); Views.keystrokes(); }
+          },
+        }, 'Save to device'),
+        h('button.btn.btn-danger', {
+          type: 'button',
+          onclick: async () => {
+            if (!State.hidJobs.length) { toast('Nothing is running.'); return; }
+            const yes = await confirmAction({
+              title: 'Cancel every running script?',
+              body: 'There ' + (State.hidJobs.length === 1 ? 'is 1 job' : 'are ' + State.hidJobs.length + ' jobs') + ' running.',
+              consequence: 'Each stops wherever it has got to. Anything already typed into the host stays typed -- cancelling does not undo keystrokes.',
+              confirmLabel: 'Cancel all',
+              danger: true,
+            });
+            if (!yes) return;
             const r = await guard(() => Api.rpc('HIDCancelAllScriptJobs'), 'cancel jobs');
             if (r !== undefined) { toast('Cancelled.'); refreshJobs(); }
           },
         }, 'Cancel all')))));
 
-  const jobsCard = h('div.card', h('h2.card-title', 'Running jobs'), h('div#jobs', h('div.empty', 'None.')));
+  const jobsCard = h('div.card',
+    h('div.card-head',
+      h('h2.card-title', { style: 'margin:0' }, 'Jobs'),
+      h('button.btn.btn-sm.btn-quiet', { type: 'button', onclick: () => refreshJobs() }, 'Refresh')),
+    h('div#jobs', h('div.empty', 'None running.')));
   main.append(jobsCard);
   refreshJobs();
+
+  main.append(renderHidReference());
 };
+
+/* The function reference. Collapsed by default so it does not push the editor
+   off screen, but present on the same page -- the point is that you never have
+   to leave to find out what you can call. */
+function renderHidReference() {
+  const body = h('div', { style: 'margin-top:4px' },
+    ...HID_API.map(g => h('div', { style: 'margin-bottom:20px' },
+      h('h3.ref-group', g.group),
+      h('dl.ref-list',
+        ...g.fns.flatMap(f => [
+          h('dt', h('code', f.sig)),
+          h('dd', f.doc),
+        ])))),
+    h('p.field-hint',
+      'Key names for press(): CTRL ALT SHIFT GUI ENTER ESCAPE TAB SPACE BACKSPACE DELETE ' +
+      'INSERT HOME END PAGEUP PAGEDOWN UP DOWN LEFT RIGHT CAPSLOCK NUMLOCK SCROLLLOCK ' +
+      'PRINTSCR PAUSE F1-F24, and any single character.'),
+    h('p.field-hint',
+      'DuckyScript payloads convert with: P4wnP1_cli ducky convert payload.txt -o payload.js'));
+
+  const details = h('details.ref', h('summary', 'HIDScript reference'), body);
+  return h('div.card', details);
+}
 
 async function refreshJobs() {
   const host = $('#jobs');
@@ -409,25 +519,33 @@ async function refreshJobs() {
   const r = await guard(() => Api.rpc('HIDGetRunningScriptJobs'), 'list jobs');
   State.hidJobs = (r && r.ids) || [];
   clear(host);
-  if (!State.hidJobs.length) { host.append(h('div.empty', 'None.')); return; }
+  if (!State.hidJobs.length) { host.append(h('div.empty', 'None running.')); return; }
   host.append(h('table.data',
     h('thead', h('tr', h('th', 'Job'), h('th', 'Actions'))),
     h('tbody', ...State.hidJobs.map(id => h('tr',
       h('td.mono', String(id)),
-      h('td',
+      h('td', h('div.btn-row',
         h('button.btn.btn-sm', {
+          type: 'button',
           onclick: async () => {
-            const r = await guard(() => Api.rpc('HIDGetScriptJobResult', { id }), 'job result');
-            if (r) alert('Job ' + id + (r.isFinished ? ' finished' : ' running') + '\n\n' + (r.resultJson || '(no result)'));
+            const r = await guard(() => Api.rpc('HIDGetScriptJobResult', { id }), 'read the job result');
+            if (!r) return;
+            let pretty = r.resultJson || '';
+            try { pretty = JSON.stringify(JSON.parse(pretty), null, 2); } catch (_) { /* leave as-is */ }
+            await showDetail({
+              title: 'Job ' + id + (r.isFinished ? ' — finished' : ' — still running'),
+              body: pretty || '(the script produced no result)',
+              mono: true,
+            });
           },
         }, 'Result'),
-        ' ',
         h('button.btn.btn-sm.btn-danger', {
+          type: 'button',
           onclick: async () => {
-            const r = await guard(() => Api.rpc('HIDCancelScriptJob', { id }), 'cancel');
+            const r = await guard(() => Api.rpc('HIDCancelScriptJob', { id }), 'cancel the job');
             if (r !== undefined) { toast('Cancelled job ' + id + '.'); refreshJobs(); }
           },
-        }, 'Cancel'))))))); 
+        }, 'Cancel')))))))); 
 }
 
 /* --- Reflexes: trigger/action automation ------------------------------- */
@@ -520,7 +638,13 @@ Views.loadouts = async function () {
         h('td',
           h('button.btn.btn-sm.btn-primary', {
             onclick: async () => {
-              if (!confirm('Deploy "' + n + '" now?\n\nThis reconfigures USB, WiFi and networking together and will very likely drop the connection this console is using.')) return;
+              const yes = await confirmAction({
+                title: 'Deploy "' + n + '"?',
+                body: 'A loadout reconfigures USB, WiFi, Bluetooth and networking together, all at once.',
+                consequence: 'Whichever link you are reading this over -- USB, WiFi or Bluetooth -- is almost certainly reconfigured by this. Expect the console to disconnect. Reload after a few seconds; if the network details changed you may need to reconnect to a different SSID or address.',
+                confirmLabel: 'Deploy loadout',
+              });
+              if (!yes) return;
               const r = await guard(() => Api.rpc('DeployStoredMasterTemplate', { msg: n }), 'deploy loadout');
               if (r !== undefined) toast('Deployed "' + n + '".');
             },
@@ -528,7 +652,7 @@ Views.loadouts = async function () {
           ' ',
           h('button.btn.btn-sm', {
             onclick: async () => {
-              const r = await guard(() => Api.rpc('SetStartupMasterTemplate', { templateName: n }), 'set boot default');
+              const r = await guard(() => Api.rpc('SetStartupMasterTemplate', { templateName: n }), 'set the boot default');
               if (r !== undefined) { toast('"' + n + '" will load at boot.'); Views.loadouts(); }
             },
           }, 'Use at boot'))))))
@@ -539,23 +663,47 @@ Views.loadouts = async function () {
     h('div.btn-row',
       h('button.btn', {
         onclick: async () => {
-          const name = prompt('Back up the template database as:');
+          const name = await promptValue({
+            title: 'Back up the template database',
+            label: 'Backup name',
+            placeholder: 'before-engagement',
+            hint: 'Captures every stored template: USB, WiFi, Bluetooth, network and reflexes.',
+            validate: v => {
+              if (!v) return 'Give the backup a name.';
+              if (!/^[A-Za-z0-9._-]+$/.test(v)) return 'Letters, digits, dot, dash and underscore only.';
+              return null;
+            },
+          });
           if (!name) return;
-          const r = await guard(() => Api.rpc('DBBackup', { msg: name }), 'backup');
-          if (r !== undefined) toast('Backed up.');
+          const r = await guard(() => Api.rpc('DBBackup', { msg: name }), 'back up the database');
+          if (r !== undefined) toast('Backed up as "' + name + '".');
         },
       }, 'Back up database'),
       h('button.btn.btn-danger', {
         onclick: async () => {
-          if (!confirm('Reboot the device now?')) return;
-          await guard(() => Api.rpc('Reboot'), 'reboot');
-          toast('Reboot requested.');
+          const yes = await confirmAction({
+            title: 'Reboot the device?',
+            body: 'The service stops, the Pi restarts, and the boot-default loadout is applied again.',
+            consequence: 'Every connection drops, including this one. The device is unreachable for roughly 30 seconds. Anything you have deployed but not stored as a template is lost.',
+            confirmLabel: 'Reboot',
+            danger: true,
+          });
+          if (!yes) return;
+          await guard(() => Api.rpc('Reboot'), 'reboot the device');
+          toast('Reboot requested. This console will go quiet for about 30 seconds.');
         },
       }, 'Reboot'),
       h('button.btn.btn-danger', {
         onclick: async () => {
-          if (!confirm('Shut the device down?\n\nYou will have to remove and re-insert power to bring it back.')) return;
-          await guard(() => Api.rpc('Shutdown'), 'shutdown');
+          const yes = await confirmAction({
+            title: 'Shut the device down?',
+            body: 'The Pi powers off cleanly.',
+            consequence: 'There is no remote way to switch it back on. You have to physically unplug it and plug it back in. Do not do this to a device you cannot reach.',
+            confirmLabel: 'Shut down',
+            danger: true,
+          });
+          if (!yes) return;
+          await guard(() => Api.rpc('Shutdown'), 'shut the device down');
           toast('Shutdown requested.');
         },
       }, 'Shut down'))));
@@ -713,16 +861,7 @@ function renderConsole() {
           h('div.field-hint', { style: 'margin-bottom:8px' },
             'Signed in as ', h('span.mono', Api.currentUser() || 'operator')),
           h('button.btn.btn-sm.btn-quiet', {
-            onclick: async () => {
-              const u = Api.currentUser();
-              const oldp = prompt('Current password for ' + u + ':');
-              if (!oldp) return;
-              const newp = prompt('New password (12 characters or more):');
-              if (!newp) return;
-              if (newp.length < 12) { toast('Too short. Use 12 characters or more.', true); return; }
-              const r = await guard(() => Api.changePassword(u, oldp, newp), 'change password');
-              if (r !== undefined) { toast('Password changed. Sign in again.'); await Api.logout(); renderSignIn(); }
-            },
+            onclick: () => changePasswordFlow(),
           }, 'Change password'),
           h('button.btn.btn-sm.btn-quiet', {
             onclick: async () => { if (State.stopStream) State.stopStream(); await Api.logout(); renderSignIn(); },
@@ -731,6 +870,49 @@ function renderConsole() {
   renderThemeSwitch();
   startStream();
   go((location.hash || '#cable').slice(1));
+}
+
+/* Changing the console password.
+ *
+ * The server revokes every session on success, so the operator is signed out by
+ * design -- say that up front rather than letting it look like a failure. The
+ * 12-character minimum is the server's rule (service/auth), enforced here too so
+ * the user is not told about it only after a round trip. */
+async function changePasswordFlow() {
+  const user = Api.currentUser() || 'admin';
+  const values = await promptForm({
+    title: 'Change the console password',
+    intro: 'Every signed-in session is ended when the password changes, including this one. You will be asked to sign in again.',
+    confirmLabel: 'Change password',
+    fields: [
+      { key: 'old', label: 'Current password', type: 'password', autocomplete: 'current-password' },
+      { key: 'next', label: 'New password', type: 'password', autocomplete: 'new-password',
+        hint: 'At least 12 characters.' },
+      { key: 'again', label: 'New password again', type: 'password', autocomplete: 'new-password' },
+    ],
+    validate: v => {
+      if (!v.old) return 'Enter your current password.';
+      if (!v.next) return 'Enter a new password.';
+      if (v.next.length < 12) return 'The new password must be at least 12 characters.';
+      if (v.next !== v.again) return 'The two new passwords do not match.';
+      if (v.next === v.old) return 'The new password is the same as the current one.';
+      return null;
+    },
+  });
+  if (!values) return;
+
+  try {
+    await Api.changePassword(user, values.old, values.next);
+  } catch (e) {
+    toast(e.status === 401
+      ? 'That current password was rejected.'
+      : 'Could not change the password: ' + e.message, true);
+    return;
+  }
+  toast('Password changed. Sign in again with the new one.');
+  if (State.stopStream) { State.stopStream(); State.stopStream = null; }
+  Api.setToken(null);
+  renderSignIn('Your password changed, so every session was ended. Sign in again.');
 }
 
 /* ------------------------------------------------------------- sign-in view */

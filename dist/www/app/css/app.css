@@ -331,3 +331,114 @@ table.data td.mono { font-family: var(--font-mono); }
   .cable-strip { flex-wrap: wrap; }
   .fn { flex-basis: calc(50% - var(--s1)); }
 }
+
+/* --- modal -------------------------------------------------------------- */
+
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(26, 24, 21, 0.45);
+  display: grid; place-items: center;
+  padding: var(--s4);
+  overflow-y: auto;
+}
+[data-theme="dark"] .modal-backdrop { background: rgba(0, 0, 0, 0.72); }
+
+.modal {
+  width: 100%; max-width: 460px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+  padding: var(--s5);
+}
+.modal-title {
+  font-family: var(--font-display);
+  font-optical-sizing: none; font-variation-settings: 'opsz' 15;
+  font-size: var(--t-lead); font-weight: 600;
+  margin: 0 0 var(--s3);
+}
+.modal-body { color: var(--text-muted); }
+.modal-body p { margin: 0 0 var(--s3); }
+.modal-body p:last-child { margin-bottom: 0; }
+.modal-body .field { margin-bottom: 0; }
+
+/* The cost of the action, called out separately from the description so it
+   cannot be skimmed past. */
+.modal-consequence {
+  margin-top: var(--s4);
+  padding: var(--s3) var(--s4);
+  background: var(--surface-sunk);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius);
+}
+.modal-consequence-label {
+  display: block; font-size: var(--t-micro); font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-faint); margin-bottom: var(--s1);
+}
+.modal-consequence p { margin: 0; font-size: var(--t-small); color: var(--text); }
+
+.modal-actions {
+  display: flex; gap: var(--s2); justify-content: flex-end;
+  margin-top: var(--s5); flex-wrap: wrap;
+}
+
+.field-error {
+  color: var(--danger); font-size: var(--t-small);
+  margin-top: var(--s2); min-height: 1em;
+}
+
+pre.detail {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s3);
+  font-family: var(--font-mono); font-size: var(--t-small);
+  line-height: 1.55; color: var(--mono);
+  margin: 0; max-height: 46vh; overflow: auto;
+  white-space: pre-wrap; word-break: break-word;
+}
+
+@media (max-width: 820px) {
+  .modal-backdrop { place-items: end center; padding: 0; }
+  .modal {
+    max-width: none; border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: 0; padding-bottom: var(--s6);
+  }
+  .modal-actions { flex-direction: column-reverse; }
+  .modal-actions .btn { width: 100%; }
+}
+
+/* --- card header with an action on the right ---------------------------- */
+.card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s4); margin-bottom: var(--s4); flex-wrap: wrap;
+}
+.card-head select { width: auto; min-width: 190px; }
+
+/* --- the HIDScript reference -------------------------------------------- */
+details.ref > summary {
+  cursor: pointer; font-size: var(--t-small); font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint);
+  list-style: none;
+}
+details.ref > summary::-webkit-details-marker { display: none; }
+details.ref > summary::before { content: '+ '; font-family: var(--font-mono); }
+details.ref[open] > summary::before { content: '– '; }
+details.ref > summary:hover { color: var(--text); }
+
+.ref-group {
+  font-size: var(--t-small); font-weight: 600; color: var(--text);
+  margin: 0 0 var(--s2); padding-bottom: var(--s1);
+  border-bottom: 1px solid var(--border);
+}
+.ref-list { margin: 0; }
+.ref-list dt { margin-top: var(--s3); }
+.ref-list dt code {
+  font-family: var(--font-mono); font-size: var(--t-small);
+  color: var(--brass); font-weight: 500;
+}
+.ref-list dd {
+  margin: 2px 0 0; padding-left: 0;
+  font-size: var(--t-small); color: var(--text-muted);
+}
