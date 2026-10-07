@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>P4wnP1 A.L.O.A.</title>
+<meta name="description" content="A Raspberry Pi that pretends to be USB devices. Keyboard injection, network pivoting and automation, driven from a web console or an on-device OLED screen.">
+
+<link rel="icon" href="img/mark-light.svg" media="(prefers-color-scheme: light)">
+<link rel="icon" href="img/mark-dark.svg" media="(prefers-color-scheme: dark)">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="P4wnP1 A.L.O.A.">
+<meta property="og:description" content="A Raspberry Pi that pretends to be USB devices. Driven from a web console or an on-device OLED screen.">
+<meta property="og:image" content="https://at0m-b0mb.github.io/P4wnP1_aloa/img/social-card.png">
+<meta property="og:url" content="https://at0m-b0mb.github.io/P4wnP1_aloa/">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+/* ---------------------------------------------------------------------------
+   Tokens. Light is the default and dark is TRUE black, not charcoal: this is
+   a tool people use on a laptop at 3am in a room they do not control.
+   Two golds, and they are not interchangeable -- the deep brass is the only
+   one that clears AA as small text on paper, and the bright one is reserved
+   for marks and rules that carry no words.
+
+   --faint is #6B6459 rather than the #7D7569 used in the brand assets. The
+   lighter tone is fine on a banner at display size but measures 4.03:1 on
+   paper and 3.68:1 on the sunk surface, both under the 4.5 AA floor, and it
+   is used here for captions, table headers and the hero subtitle -- all of
+   them small. Checked, not eyeballed.
+   --------------------------------------------------------------------------- */
+:root{
+  --paper:#F3F1EC; --raised:#FFFFFF; --sunk:#EAE7DF;
+  --ink:#1A1815; --muted:#5F584D; --faint:#6B6459;
+  --brass:#7A5C14;      /* text-safe gold */
+  --gold:#AE851D;       /* marks, rules */
+  --line:#D8D3C8;
+  --panel:#0A0B0E;      /* the OLED itself */
+  --radius:12px;
+  --maxw:980px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#000000; --raised:#0C0C0D; --sunk:#141414;
+    --ink:#F3F1EC; --muted:#A9A296; --faint:#8F8882;
+    --brass:#E3B957; --gold:#E3B957;
+    --line:#262320;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#000000; --raised:#0C0C0D; --sunk:#141414;
+  --ink:#F3F1EC; --muted:#A9A296; --faint:#8F8882;
+  --brass:#E3B957; --gold:#E3B957;
+  --line:#262320;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font:400 16.5px/1.65 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:var(--maxw); margin:0 auto; padding:0 20px}
+h1,h2,h3{font-family:Fraunces,Georgia,serif; font-weight:600; line-height:1.15; margin:0}
+h2{font-size:clamp(25px,3.4vw,33px); letter-spacing:-.012em}
+h3{font-size:19px; letter-spacing:-.008em}
+p{margin:0 0 1em}
+a{color:var(--brass); text-decoration-thickness:1px; text-underline-offset:2px}
+a:hover{color:var(--ink)}
+a:focus-visible,button:focus-visible{outline:2px solid var(--gold); outline-offset:3px; border-radius:4px}
+code,kbd{font:0.875em/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+code{background:var(--sunk); padding:.12em .4em; border-radius:4px}
+hr{border:0; border-top:1px solid var(--line); margin:0}
+
+/* --- header --------------------------------------------------------------- */
+header{border-bottom:1px solid var(--line); background:var(--paper); position:sticky; top:0; z-index:10}
+.bar{display:flex; align-items:center; gap:12px; height:60px}
+.bar img{width:28px; height:28px; border-radius:7px; display:block}
+.bar .name{font-family:Fraunces,serif; font-weight:600; font-size:18px; letter-spacing:-.01em}
+.bar nav{margin-left:auto; display:flex; gap:20px; align-items:center}
+.bar nav a{color:var(--muted); text-decoration:none; font-size:14.5px}
+.bar nav a:hover{color:var(--ink)}
+#theme{
+  background:none; border:1px solid var(--line); color:var(--muted); cursor:pointer;
+  font:inherit; font-size:13px; padding:5px 11px; border-radius:999px;
+}
+#theme:hover{border-color:var(--gold); color:var(--brass)}
+
+/* --- hero ----------------------------------------------------------------- */
+.hero{padding:76px 0 60px; border-bottom:1px solid var(--line)}
+.hero h1{font-size:clamp(40px,7.2vw,68px); letter-spacing:-.03em}
+.hero .sub{
+  font-family:Inter,sans-serif; font-size:13px; letter-spacing:.26em;
+  text-transform:uppercase; color:var(--faint); margin:12px 0 22px;
+}
+.lede{font-size:clamp(18px,2.1vw,21px); line-height:1.55; color:var(--muted); max-width:62ch; margin:0 0 30px}
+.lede strong{color:var(--ink); font-weight:500}
+.cta{display:flex; flex-wrap:wrap; gap:12px; align-items:center}
+.btn{
+  display:inline-block; text-decoration:none; font-weight:500; font-size:15px;
+  padding:11px 20px; border-radius:9px; border:1px solid var(--line); color:var(--ink);
+}
+.btn:hover{border-color:var(--gold); color:var(--brass)}
+.btn.primary{background:var(--gold); border-color:var(--gold); color:#1A1815}
+.btn.primary:hover{filter:brightness(1.07); color:#1A1815}
+:root[data-theme="dark"] .btn.primary,
+:root:not([data-theme="light"]) .btn.primary{color:#000}
+
+/* --- sections ------------------------------------------------------------- */
+section{padding:64px 0; border-bottom:1px solid var(--line)}
+.eyebrow{
+  font-size:12px; letter-spacing:.2em; text-transform:uppercase;
+  color:var(--faint); margin:0 0 12px;
+}
+.lead{font-size:17.5px; color:var(--muted); max-width:66ch; margin:14px 0 0}
+
+.grid{display:grid; gap:22px; margin-top:34px}
+@media (min-width:760px){ .grid.two{grid-template-columns:1fr 1fr} }
+.card{
+  background:var(--raised); border:1px solid var(--line);
+  border-radius:var(--radius); padding:24px;
+}
+.card h3{margin-bottom:8px}
+.card p{color:var(--muted); margin-bottom:0; font-size:15.5px}
+.card p + p{margin-top:.8em}
+
+figure{margin:30px 0 0}
+figure img{
+  display:block; width:100%; height:auto; border-radius:var(--radius);
+  border:1px solid var(--line); background:var(--panel);
+}
+figcaption{font-size:14px; color:var(--faint); margin-top:10px}
+
+/* --- keys ----------------------------------------------------------------- */
+.keys{
+  display:grid; gap:0 26px; margin:22px 0 0; padding:0; list-style:none;
+  font-size:15px; grid-template-columns:1fr;
+}
+@media (min-width:620px){ .keys{grid-template-columns:1fr 1fr} }
+.keys li{display:flex; gap:14px; padding:7px 0; border-bottom:1px solid var(--line)}
+.keys b{font-weight:500; min-width:106px; color:var(--ink); font-family:ui-monospace,monospace; font-size:13.5px}
+.keys span{color:var(--muted)}
+
+/* --- table ---------------------------------------------------------------- */
+.tablewrap{overflow-x:auto; margin-top:28px; border:1px solid var(--line); border-radius:var(--radius)}
+table{border-collapse:collapse; width:100%; font-size:15px; min-width:560px}
+th,td{text-align:left; padding:12px 16px; border-bottom:1px solid var(--line)}
+th{font-weight:500; font-size:12.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--faint); background:var(--sunk)}
+tr:last-child td{border-bottom:0}
+td code{background:none; padding:0; font-size:13.5px}
+.yes{color:var(--brass); font-weight:500}
+.no{color:var(--faint)}
+
+/* --- code ----------------------------------------------------------------- */
+pre{
+  background:var(--sunk); border:1px solid var(--line); border-radius:var(--radius);
+  padding:16px 18px; overflow-x:auto; margin:22px 0 0;
+  font:13.5px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+pre .c{color:var(--faint)}
+
+/* --- honesty -------------------------------------------------------------- */
+.note{
+  border-left:3px solid var(--gold); background:var(--raised);
+  border-radius:0 var(--radius) var(--radius) 0;
+  padding:20px 22px; margin-top:30px;
+}
+.note h3{margin-bottom:8px}
+.note p{color:var(--muted); margin-bottom:0; font-size:15.5px}
+.note p + p{margin-top:.85em}
+.checks{margin:18px 0 0; padding-left:20px; color:var(--muted); font-size:15.5px}
+.checks li{margin:.3em 0}
+
+/* --- footer --------------------------------------------------------------- */
+footer{padding:44px 0 60px; color:var(--faint); font-size:14.5px}
+footer p{margin:0 0 .5em}
+footer a{color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap bar">
+    <img src="img/mark-light.svg" alt="" id="mark">
+    <span class="name">P4wnP1 A.L.O.A.</span>
+    <nav>
+      <a href="#consoles">Consoles</a>
+      <a href="#download">Download</a>
+      <a href="#verified">Verified</a>
+      <a href="https://github.com/at0m-b0mb/P4wnP1_aloa">GitHub</a>
+      <button id="theme" type="button" aria-label="Switch theme">Theme</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<div class="wrap hero">
+  <h1>P4wnP1 A.L.O.A.</h1>
+  <p class="sub">A Little Offensive Appliance</p>
+  <p class="lede">
+    A Raspberry Pi that <strong>pretends to be USB devices</strong>. Plug it into a computer and
+    that computer sets it up as a keyboard, a network adapter or a USB stick, without asking
+    anyone. Drive it from a web console, or from a screen and joystick on the device itself.
+  </p>
+  <div class="cta">
+    <a class="btn primary" href="https://github.com/at0m-b0mb/P4wnP1_aloa/releases/latest">Download an image</a>
+    <a class="btn" href="https://github.com/at0m-b0mb/P4wnP1_aloa">Source on GitHub</a>
+  </div>
+</div>
+
+<section id="consoles">
+  <div class="wrap">
+    <p class="eyebrow">Two ways to drive it</p>
+    <h2>A console in a browser, and one in your hand</h2>
+    <p class="lead">
+      The web console is reached over the USB cable the device is plugged into, or over the
+      access point it brings up. The OLED console needs neither — no laptop, no network.
+    </p>
+
+    <figure>
+      <img src="img/console-cable-light.jpg" alt="The Cable view of the web console, showing USB functions with toggles">
+      <figcaption>The web console. Cable, Radio, Keystrokes, Reflexes, Loadouts and a live Journal.</figcaption>
+    </figure>
+
+    <div class="grid two">
+      <div class="card">
+        <h3>Named for what it does</h3>
+        <p>
+          <b>Cable</b> is what the USB side presents. <b>Keystrokes</b> is what gets typed into the
+          host. <b>Reflexes</b> are the rules it follows with nobody at the keyboard. Not
+          “Dashboard” and “Settings”.
+        </p>
+      </div>
+      <div class="card">
+        <h3>It tells you what it cannot do</h3>
+        <p>
+          A board with no WiFi says so. A USB function that will not deploy explains why and
+          offers the page that fixes it. The device never claims a capability it does not have.
+        </p>
+      </div>
+    </div>
+
+    <figure>
+      <img src="img/oled-screens.png" alt="Every screen of the OLED interface, including the boot splash and an error state">
+      <figcaption>
+        Every screen of the OLED console, at actual resolution. Fit a Waveshare 1.3&quot; OLED HAT
+        and the device gains full control from its own screen: loadouts, the USB composition,
+        payloads, running jobs, radio and network, reflexes, reboot.
+      </figcaption>
+    </figure>
+
+    <ul class="keys">
+      <li><b>up / down</b><span>move the selection</span></li>
+      <li><b>KEY1</b><span>the action named on the bottom line</span></li>
+      <li><b>right, press</b><span>enter or confirm</span></li>
+      <li><b>KEY2</b><span>refresh</span></li>
+      <li><b>left</b><span>back</span></li>
+      <li><b>KEY3</b><span>home</span></li>
+    </ul>
+
+    <div class="note">
+      <h3>Try the OLED console with no hardware</h3>
+      <p>
+        <code>make oled-sim</code> runs the whole interface in a browser against a fake device —
+        the same UI, fonts, menus and state machine the hardware runs, with a PNG for the panel
+        and buttons for the stick. No Pi, no HAT, no SD card.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <p class="eyebrow">Images</p>
+    <h2>Four builds, two of them with a screen</h2>
+    <p class="lead">
+      Built from Raspberry Pi OS Lite (Debian 13) by GitHub Actions, mounted and inspected
+      before publishing. The plain images are verified to contain <em>no</em> OLED binary, unit
+      or SPI line, so the difference between the variants is a property of the file rather than
+      of its name.
+    </p>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Image</th><th>Boards</th><th>OLED</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>…-armhf.img.xz</code></td><td>Pi Zero, Pi Zero W, Pi 1</td><td class="no">no</td></tr>
+          <tr><td><code>…-arm64.img.xz</code></td><td>Pi Zero 2 W, Pi 3, Pi 4, Pi 5</td><td class="no">no</td></tr>
+          <tr><td><code>…-oled-armhf.img.xz</code></td><td>Pi Zero, Pi Zero W, Pi 1</td><td class="yes">yes</td></tr>
+          <tr><td><code>…-oled-arm64.img.xz</code></td><td>Pi Zero 2 W, Pi 3, Pi 4, Pi 5</td><td class="yes">yes</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <h3>Set a password before you flash</h3>
+      <p>
+        The image ships <strong>no usable account</strong>. Set a username and password in
+        Raspberry Pi Imager and the device uses that. Skip it and first boot generates a
+        per-device password, written to <code>p4wnp1-credentials.txt</code> on the boot
+        partition, where you can read it by putting the card back in your laptop.
+      </p>
+      <p>
+        Images up to v0.3.0 shipped a shared SSH password. If you flashed one of those, replace
+        it.
+      </p>
+    </div>
+
+<pre><span class="c"># verify, flash, then plug into the DATA port (the inner one on a Zero)</span>
+sha256sum -c P4wnP1-ALOA-&lt;version&gt;-armhf.img.xz.sha256
+xz -d P4wnP1-ALOA-&lt;version&gt;-armhf.img.xz
+sudo dd if=P4wnP1-ALOA-&lt;version&gt;-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
+
+<span class="c"># over the USB ethernet link the device brings up</span>
+ssh p4wnp1@172.16.0.1
+sudo cat /root/INITIAL_CREDENTIALS.txt   <span class="c"># console password + WiFi PSK, per device</span></pre>
+
+    <p class="lead" style="margin-top:22px">
+      Then open <code>http://172.16.0.1:8000</code>.
+    </p>
+  </div>
+</section>
+
+<section id="verified">
+  <div class="wrap">
+    <p class="eyebrow">Honesty</p>
+    <h2>What is tested, and what is not</h2>
+    <p class="lead">
+      Being specific about this matters more than a feature list. This is a security tool, and a
+      capability claimed but not checked is worse than one that is absent.
+    </p>
+
+    <div class="grid two">
+      <div class="card">
+        <h3>Checked by automation</h3>
+        <ul class="checks">
+          <li>60 access-control checks, each an attack that must fail</li>
+          <li>Every one of the 83 RPCs called against the real binary</li>
+          <li>The service started and exercised end to end, 29 checks</li>
+          <li>The console driven in a real browser against the real service</li>
+          <li>41 OLED tests: SH1106 addressing, debounce timing, 20,000 random button presses</li>
+          <li>Every image mounted and inspected before it is published</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Not verified at all</h3>
+        <p>
+          <strong>No physical Raspberry Pi has been used, and no OLED HAT has been connected.</strong>
+        </p>
+        <p>
+          That an image boots. That USB gadget mode initialises on real silicon and a host
+          enumerates the functions. That keystroke injection types correctly into a real machine.
+          That hostapd brings up the access point. That a pixel lights.
+        </p>
+        <p>
+          If you are evaluating this for real work, boot it on a Pi and check those yourself.
+        </p>
+      </div>
+    </div>
+
+    <p class="lead" style="margin-top:28px">
+      <a href="https://github.com/at0m-b0mb/P4wnP1_aloa/blob/master/KNOWN_ISSUES.md">KNOWN_ISSUES.md</a>
+      tracks every finding, what was fixed, and what is still open — including the shared SSH
+      password that shipped in earlier images, and the symlink escape that let the file API
+      write anywhere as root.
+    </p>
+  </div>
+</section>
+
+<section id="build">
+  <div class="wrap">
+    <p class="eyebrow">From source</p>
+    <h2>Build it yourself</h2>
+    <p class="lead">Everything cross-compiles from macOS or Linux. No Pi required to build.</p>
+<pre>make verify        <span class="c"># every gate: tests, attack suite, render, contrast, vet</span>
+make oled-sim      <span class="c"># the OLED console in a browser, no hardware</span>
+make image         <span class="c"># four flashable images, via Docker</span></pre>
+    <p class="lead" style="margin-top:22px">
+      Releases are built by GitHub Actions on a four-way matrix and uploaded straight to the
+      release, so what you download was produced by a machine you can read the configuration of.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>
+      GPL-3.0, inherited from <a href="https://github.com/mame82/P4wnP1_aloa">MaMe82's P4wnP1 A.L.O.A.</a>
+      Selling it is allowed; buyers get the source and modifications cannot stay proprietary.
+    </p>
+    <p>
+      This fork is maintained by <a href="https://github.com/at0m-b0mb">at0m-b0mb</a>.
+      Use it only on systems you are authorised to test.
+    </p>
+  </div>
+</footer>
+
+<script>
+// Theme: remembered per browser, defaulting to the OS. Wrapped because
+// storage throws in a private window and a page that cannot remember a
+// preference should still render.
+(function () {
+  var root = document.documentElement, mark = document.getElementById('mark');
+  function applyMark() {
+    var dark = root.getAttribute('data-theme') === 'dark' ||
+      (!root.hasAttribute('data-theme') &&
+        window.matchMedia('(prefers-color-scheme: dark)').matches);
+    mark.src = dark ? 'img/mark-dark.svg' : 'img/mark-light.svg';
+  }
+  try {
+    var saved = localStorage.getItem('p4wnp1.theme');
+    if (saved === 'dark' || saved === 'light') root.setAttribute('data-theme', saved);
+  } catch (e) {}
+  applyMark();
+  document.getElementById('theme').addEventListener('click', function () {
+    var dark = root.getAttribute('data-theme') === 'dark' ||
+      (!root.hasAttribute('data-theme') &&
+        window.matchMedia('(prefers-color-scheme: dark)').matches);
+    var next = dark ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('p4wnp1.theme', next); } catch (e) {}
+    applyMark();
+  });
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyMark);
+})();
+</script>
+</body>
+</html>
