@@ -621,8 +621,16 @@ func (s *server) Stop() error {
 
 func (s *server) StoreDeployedWifiSettings(ctx context.Context, m *pb.StringMessage) (e *pb.Empty, err error) {
 	//defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_STORED_WIFI_SETTINGS_LIST))
+	cur := wifiCurrentSettings(s)
+	if cur == nil {
+		// There is nothing deployed to store. Without this the nil travelled
+		// into the datastore and surfaced as "proto: Marshal called with nil",
+		// which tells an operator nothing. Says the real reason instead.
+		return &pb.Empty{}, status.Error(codes.Unavailable,
+			"there are no deployed WiFi settings to store; "+errWifiUnavailable)
+	}
 	return s.StoreWifiSettings(ctx, &pb.WifiRequestSettingsStorage{
-		Settings:     wifiCurrentSettings(s),
+		Settings:     cur,
 		TemplateName: m.Msg,
 	})
 }

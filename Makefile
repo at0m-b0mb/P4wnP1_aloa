@@ -3,7 +3,7 @@ PATH := /usr/local/go/bin:$(PATH)
 
 .PHONY: all help compile build-armv6 build-service-armv6 build-cli-armv6 build-hashpw-armv6 \
         build-arm64 build-service-arm64 build-cli-arm64 build-hashpw-arm64 \
-        image image-armhf image-arm64 contrast smoke check-js check-rpc check-render mock dep install installkali remove lint test
+        image image-armhf image-arm64 contrast smoke feature-test verify check-js check-rpc check-render mock dep install installkali remove lint test
 
 all: compile
 
@@ -21,6 +21,10 @@ help:
 	@echo "                     (see image/README.md). Needs Docker."
 	@echo "  make contrast      Check the web console palette against WCAG AA"
 	@echo "  make smoke         Run the service in a container and verify it works"
+	@echo "  make feature-test  Exercise all 83 RPCs against the real binary and"
+	@echo "                     report PASS / expected-without-hardware / FAIL"
+	@echo "  make verify        Run every gate: js, render, rpc shapes, contrast,"
+	@echo "                     unit tests, vet (both arches), smoke, feature-test"
 	@echo "  make check-js      Syntax-check the web console JavaScript"
 	@echo "  make check-rpc     Check console RPC payloads against the .proto"
 	@echo "  make check-render  Render every console view in jsdom"
@@ -108,6 +112,28 @@ mock:
 smoke:
 	./tools/smoke-test.sh arm64
 
+# Beyond "it starts": calls every unary RPC the service exposes and classifies
+# each answer. A failure that is CORRECT without a Pi attached (no USB gadget,
+# no WiFi) counts as expected; anything else is a real bug. This is the gate
+# that found StoreDeployedWifiSettings marshalling a nil message.
+feature-test:
+	./tools/feature-test.sh arm64
+
+# The whole suite, in the order that fails cheapest-first.
+verify:
+	./tools/check-js.sh
+	./tools/check-render.sh
+	python3 tools/check-rpc-shapes.py
+	python3 tools/check_contrast.py
+	$(MAKE) test
+	GOOS=linux GOARCH=arm GOARM=6 go vet ./service/... ./cli_client/...
+	GOOS=linux GOARCH=arm64 go vet ./service/... ./cli_client/...
+	$(MAKE) test-linux
+	$(MAKE) smoke
+	$(MAKE) feature-test
+	@echo
+	@echo "All gates passed."
+
 build-armv6: build-service-armv6 build-cli-armv6 build-hashpw-armv6
 	@echo
 	@echo "Built for Pi Zero W (linux/arm/6):"
@@ -132,7 +158,8 @@ lint:
 	          dist/scripts/wifi_covert_channel.sh dist/scripts/trigger-aware.sh \
 	          build_support/build.sh \
 	          image/build.sh image/lib/stage.sh image/lib/customize.sh image/lib/verify.sh \
-	          tools/smoke-test.sh tools/check-js.sh
+	          tools/smoke-test.sh tools/check-js.sh tools/check-render.sh \
+	          tools/feature-test.sh
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint not installed; skipping go lint"; exit 0; }
 	golangci-lint run ./...
 	./tools/check-js.sh
