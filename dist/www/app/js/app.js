@@ -1334,7 +1334,7 @@ function pageHead(title, note) {
    and scrollable in place. */
 function dataTable(...children) {
   return h('div.table-wrap', { tabindex: '0', role: 'region', 'aria-label': 'Table, scrollable horizontally' },
-    dataTable( ...children));
+    h('table.data', ...children));
 }
 
 function kvRow(k, v, hint) {

@@ -3,7 +3,7 @@ PATH := /usr/local/go/bin:$(PATH)
 
 .PHONY: all help compile build-armv6 build-service-armv6 build-cli-armv6 build-hashpw-armv6 \
         build-arm64 build-service-arm64 build-cli-arm64 build-hashpw-arm64 \
-        image image-armhf image-arm64 contrast smoke check-js check-rpc mock dep install installkali remove lint test
+        image image-armhf image-arm64 contrast smoke check-js check-rpc check-render mock dep install installkali remove lint test
 
 all: compile
 
@@ -23,6 +23,7 @@ help:
 	@echo "  make smoke         Run the service in a container and verify it works"
 	@echo "  make check-js      Syntax-check the web console JavaScript"
 	@echo "  make check-rpc     Check console RPC payloads against the .proto"
+	@echo "  make check-render  Render every console view in jsdom"
 	@echo "  make mock          Serve the console against a mock device (no Pi needed)"
 	@echo "  make test          Run unit tests (auth + jsonbridge)"
 	@echo "  make lint          Run shellcheck + golangci-lint (require both installed)"
@@ -90,6 +91,12 @@ check-js:
 check-rpc:
 	python3 tools/check-rpc-shapes.py
 
+# Render every console view in jsdom. node --check only parses: it happily
+# accepted a helper that called itself, which silently removed every table in
+# the console. This catches runtime failures inside a view.
+check-render:
+	./tools/check-render.sh
+
 # Serve the console against a mock device, for working on the UI with no Pi.
 mock:
 	python3 tools/mock-service.py
@@ -129,6 +136,7 @@ lint:
 	golangci-lint run ./...
 	./tools/check-js.sh
 	python3 tools/check-rpc-shapes.py
+	./tools/check-render.sh
 
 # make dep runs without sudo
 dep:
