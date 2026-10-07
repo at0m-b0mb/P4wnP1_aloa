@@ -60,7 +60,14 @@
 
   /* Shadows are nearly absent by design; one soft lift for overlays only. */
   --shadow-overlay: 0 18px 48px rgba(26, 24, 21, 0.18);
-  --ring: 0 0 0 3px rgba(199, 154, 43, 0.32);   /* focus */
+  /* Focus indicator. Solid, not alpha-blended: at 32% opacity this measured
+     1.27-1.32:1 against the surfaces it appears on, far below the 3:1 that
+     WCAG 1.4.11 requires of a focus indicator, and it was genuinely hard to
+     see. The inner ring in the surface colour separates it from the element's
+     own fill so it reads on buttons as well as inputs. Enforced by
+     tools/check_contrast.py via the --focus-ring token. */
+  --focus-ring: #7A5C14;
+  --ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--focus-ring);
 }
 
 [data-theme="dark"] {
@@ -106,5 +113,6 @@
   --radius-lg: 10px;
 
   --shadow-overlay: 0 18px 48px rgba(0, 0, 0, 0.7);
-  --ring: 0 0 0 3px rgba(227, 185, 87, 0.3);
+  --focus-ring: #E3B957;
+  --ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--focus-ring);
 }

@@ -67,6 +67,12 @@ PAIRINGS = [
     ("on-danger",       "danger",       AA_NORMAL, "label on a danger fill"),
     ("border-strong",   "surface",      AA_UI,     "emphasised border / divider"),
     ("border-strong",   "canvas",       AA_UI,     "emphasised border on the ground"),
+    # WCAG 1.4.11 requires 3:1 for a focus indicator. The original token was an
+    # alpha-blended gold that measured 1.27:1 on paper -- technically present,
+    # practically invisible.
+    ("focus-ring",      "surface",      AA_UI,     "focus indicator on a card"),
+    ("focus-ring",      "canvas",       AA_UI,     "focus indicator on the ground"),
+    ("focus-ring",      "surface-sunk", AA_UI,     "focus indicator on a sunken panel"),
     ("mono",            "surface-sunk", AA_NORMAL, "measured values in mono"),
 ]
 

@@ -193,7 +193,8 @@ const State = {
   usbAttached: null,     // null = unknown; the device cannot know until an event arrives
   log: [],               // newest last, capped
   stopStream: null,
-  view: 'cable',
+  view: 'overview',
+  formDirty: false,   // true while a form has unsaved edits; blocks auto-reload
 };
 
 const LOG_CAP = 600;
@@ -249,7 +250,7 @@ function renderCable() {
           s && s.enabled === false
             ? 'The composite gadget is disabled, so the host sees nothing.'
             : 'Every lit segment is a device the target machine enumerates.')),
-      h('span.cable-state', h('span', { class: 'dot ' + dot, style: 'margin-right:6px' }), stateText)),
+      h('span#cable-state.cable-state', h('span', { class: 'dot ' + dot, style: 'margin-right:6px' }), stateText)),
     strip,
     s ? h('div', { style: 'margin-top:16px', class: 'figures' },
       figure(s.vid || '--', 'vendor id'),
@@ -433,6 +434,8 @@ Views.cable = async function () {
   if (!s) return;
 
   const draft = JSON.parse(JSON.stringify(s));
+  State.formDirty = false;
+  const markDirty = () => { State.formDirty = true; };
   const form = h('div.card',
     h('h2.card-title', 'Composition'),
     h('div.grid-2',
@@ -443,22 +446,22 @@ Views.cable = async function () {
           h('label.check',
             h('input', {
               type: 'checkbox', checked: !!draft[fn.key],
-              onchange: e => { draft[fn.key] = e.target.checked; },
+              onchange: e => { draft[fn.key] = e.target.checked; markDirty(); },
             }),
             h('span.fn-choice-name', fn.name)),
           h('p.fn-choice-what', fn.what))),
         h('label.check',
           h('input', {
             type: 'checkbox', checked: draft.enabled !== false,
-            onchange: e => { draft.enabled = e.target.checked; },
+            onchange: e => { draft.enabled = e.target.checked; markDirty(); },
           }),
           h('span', 'Gadget enabled'))),
       h('div',
-        textField('Vendor ID', draft.vid, v => draft.vid = v, '0x1d6b'),
-        textField('Product ID', draft.pid, v => draft.pid = v, '0x0137'),
-        textField('Manufacturer', draft.manufacturer, v => draft.manufacturer = v),
-        textField('Product', draft.product, v => draft.product = v),
-        textField('Serial', draft.serial, v => draft.serial = v))),
+        textField('Vendor ID', draft.vid, v => { draft.vid = v; markDirty(); }, '0x1d6b'),
+        textField('Product ID', draft.pid, v => { draft.pid = v; markDirty(); }, '0x0137'),
+        textField('Manufacturer', draft.manufacturer, v => { draft.manufacturer = v; markDirty(); }),
+        textField('Product', draft.product, v => { draft.product = v; markDirty(); }),
+        textField('Serial', draft.serial, v => { draft.serial = v; markDirty(); }))),
     h('div.btn-row', { style: 'margin-top:8px' },
       h('button.btn.btn-primary', {
         onclick: async (e) => {
@@ -479,10 +482,10 @@ Views.cable = async function () {
           e.target.disabled = true;
           const res = await guard(() => Api.rpc('DeployGadgetSetting', draft), 'deploy USB settings');
           e.target.disabled = false;
-          if (res) { toast('USB composition deployed.'); Views.cable(); }
+          if (res) { State.formDirty = false; toast('USB composition deployed.'); Views.cable(); }
         },
       }, 'Deploy composition'),
-      h('button.btn', { onclick: () => Views.cable() }, 'Discard changes'),
+      h('button.btn', { onclick: () => { State.formDirty = false; Views.cable(); } }, 'Discard changes'),
       h('button.btn.btn-quiet', {
         onclick: async () => {
           const name = await promptValue({
@@ -1204,10 +1207,14 @@ Views.journal = function () {
     h('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px' },
       h('h2.card-title', { style: 'margin:0' }, 'Event stream'),
       h('div',
-        h('span#stream-pill.pill', h('span.dot.dot-idle'), 'connecting'),
+        h('span#stream-pill.pill', { role: 'status', 'aria-live': 'polite' },
+        h('span.dot.dot-idle'), 'connecting'),
         ' ',
         h('button.btn.btn-sm.btn-quiet', { onclick: () => { State.log = []; paintLog(); } }, 'Clear'))),
-    h('div#log.log')));
+    h('div#log.log', {
+      role: 'log', tabindex: '0',
+      'aria-label': 'Device event log, newest at the bottom',
+    })));
   paintLog();
   paintStreamPill();
 };
@@ -1257,7 +1264,7 @@ function handleEvent(ev) {
     // reload the view that shows it rather than displaying stale state.
     const sub = Number(vals[0]);
     const map = { 0: 'cable', 1: 'radio', 3: 'radio', 5: 'reflexes' };
-    if (map[sub] && State.view === map[sub]) Views[State.view]();
+    if (map[sub]) reloadViewOnStateChange(map[sub]);
   }
 }
 
@@ -1269,7 +1276,34 @@ function push(entry) {
   if (c) c.textContent = String(State.log.length);
 }
 
-function refreshCableIfVisible() { if (State.view === 'cable') Views.cable(); }
+/* Re-rendering a view from under the operator throws away whatever they were
+   typing. A USB attach or detach arrives exactly when someone is most likely to
+   be mid-edit -- they are plugging the thing in -- so the old behaviour of
+   calling Views.cable() on every such event silently wiped half-entered VIDs,
+   product strings and checkbox changes.
+   The attach indicator is updated in place instead, and a full reload is only
+   offered, never forced, when the form has unsaved changes. */
+function refreshCableIfVisible() {
+  if (State.view !== 'cable' && State.view !== 'overview') return;
+  const dot = $('#cable-state');
+  if (!dot) { if (!State.formDirty) Views[State.view](); return; }
+  const a = State.usbAttached;
+  clear(dot).append(
+    h('span', { class: 'dot ' + (a === true ? 'dot-ok' : a === false ? 'dot-idle' : 'dot-warn'),
+                style: 'margin-right:6px' }),
+    a === true ? 'host attached' : a === false ? 'no host' : 'attach state unknown');
+}
+
+/* A subsystem changed under us. Reload only if it is safe to do so. */
+function reloadViewOnStateChange(view) {
+  if (State.view !== view) return;
+  if (!State.formDirty) { Views[view](); return; }
+  toast(h('span', 'The device changed these settings. ',
+    h('button.btn.btn-sm.btn-quiet', {
+      type: 'button', style: 'margin-left:6px',
+      onclick: () => { State.formDirty = false; Views[view](); },
+    }, 'Reload')));
+}
 
 function startStream() {
   if (State.stopStream) State.stopStream();
@@ -1355,8 +1389,11 @@ function go(view) {
 function renderConsole() {
   const root = clear($('#root'));
   root.append(
+    h('a.skip-link', { href: '#main',
+      onclick: e => { e.preventDefault(); const m = $('#view'); if (m) m.focus(); } },
+      'Skip to content'),
     h('div.app',
-      h('nav.rail',
+      h('nav.rail', { 'aria-label': 'Sections' },
         h('div.brand',
           h('span', { class: 'brand-mark display display-lg' }, 'P4wnP1'),
           h('span.brand-sub', 'A.L.O.A.')),
@@ -1373,7 +1410,7 @@ function renderConsole() {
           h('button.btn.btn-sm.btn-quiet', {
             onclick: async () => { if (State.stopStream) State.stopStream(); await Api.logout(); renderSignIn(); },
           }, 'Sign out'))),
-      h('main.main', h('div#view'))));
+      h('main.main', { id: 'main' }, h('div#view', { tabindex: '-1' }))));
   renderThemeSwitch();
   startStream();
   go((location.hash || '#overview').slice(1));

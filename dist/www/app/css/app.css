@@ -571,3 +571,17 @@ details.builder > summary:hover { color: var(--text); }
   /* Stop long cells from collapsing into one character per line. */
   .table-wrap table.data { min-width: 440px; }
 }
+
+/* --- skip link ---------------------------------------------------------- */
+.skip-link {
+  position: absolute; left: var(--s4); top: -3em; z-index: 200;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  padding: var(--s2) var(--s4); text-decoration: none;
+  transition: top 120ms ease;
+}
+.skip-link:focus { top: var(--s4); box-shadow: var(--ring); }
+@media (prefers-reduced-motion: reduce) { .skip-link { transition: none; } }
+
+#view:focus { outline: none; }
+.log:focus-visible { box-shadow: var(--ring); }

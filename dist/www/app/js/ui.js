@@ -43,7 +43,8 @@ const clear = el => { while (el && el.firstChild) el.removeChild(el.firstChild);
 function toast(message, isError) {
   const box = $('#toasts');
   if (!box) return;
-  const t = h('div.toast' + (isError ? '.toast-err' : ''), String(message));
+  const t = h('div.toast' + (isError ? '.toast-err' : ''),
+    message instanceof Node ? message : String(message));
   box.append(t);
   setTimeout(() => t.remove(), isError ? 9000 : 4000);
 }
