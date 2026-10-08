@@ -144,6 +144,53 @@ someone_can_log_in() {
     return 1
 }
 
+# --- adopt an SSH public key left on the boot partition ----------------------
+#
+# The whole difficulty with a headless appliance is DELIVERY: it has to let
+# you in, and it has no way to tell you a secret. Every answer below this line
+# is a workaround for that. A public key is not a workaround -- it is the
+# problem not existing. A public key is not a secret, so leaving one on a FAT
+# partition that anyone holding the card can read costs nothing, where leaving
+# a generated password there costs everything.
+#
+# So: drop your authorized_keys on the boot partition after flashing, and this
+# device is reachable on first boot with no password anywhere, on the card or
+# in its own filesystem.
+#
+#     cp ~/.ssh/id_ed25519.pub /Volumes/bootfs/authorized_keys
+#
+# Keys are APPENDED, never replaced, and the card file is left alone. Both
+# matter: a device that silently discarded a key you added on it later, every
+# time it rebooted, would be worse than useless -- and the card file is how
+# you recover if you ever reset the root filesystem.
+OPERATOR_KEY_INSTALLED=0
+adopt_boot_keys() {
+    local src dest home_dir added=0 line
+    for src in "${BOOT_DIR}/authorized_keys" "${BOOT_DIR}/p4wnp1_authorized_keys"; do
+        [ -s "$src" ] || continue
+        if ! grep -qE '^[[:space:]]*(ssh-(rsa|ed25519|dss)|ecdsa-sha2-|sk-ssh-|sk-ecdsa-)' "$src"; then
+            log "WARNING: ${src} holds no OpenSSH public key; ignoring it"
+            continue
+        fi
+        home_dir=$(getent passwd "$OPERATOR_USER" | cut -d: -f6)
+        [ -n "$home_dir" ] || home_dir="/home/${OPERATOR_USER}"
+        dest="${home_dir}/.ssh/authorized_keys"
+        install -d -m 0700 -o "$OPERATOR_USER" -g "$OPERATOR_USER" "${home_dir}/.ssh"
+        [ -f "$dest" ] || install -m 0600 -o "$OPERATOR_USER" -g "$OPERATOR_USER" /dev/null "$dest"
+        while IFS= read -r line; do
+            case "$line" in ''|'#'*) continue ;; esac
+            grep -qxF -- "$line" "$dest" 2>/dev/null && continue
+            printf '%s\n' "$line" >> "$dest"
+            added=$((added+1))
+        done < "$src"
+        chown "$OPERATOR_USER:$OPERATOR_USER" "$dest"
+        chmod 0600 "$dest"
+        OPERATOR_KEY_INSTALLED=1
+        log "adopted ${added} new public key(s) from ${src} into ${dest}"
+    done
+    [ "$OPERATOR_KEY_INSTALLED" = "1" ]
+}
+
 # Leaving the account LOCKED is the honest outcome when the password cannot be
 # delivered. An account whose secret exists only inside the device -- in
 # /root/INITIAL_CREDENTIALS.txt, which you must already be root to read -- is
@@ -157,7 +204,11 @@ operator_delivery_failed() {
 }
 
 if id -u "$OPERATOR_USER" >/dev/null 2>&1; then
-    if someone_can_log_in; then
+    adopt_boot_keys || true
+    if [ "$OPERATOR_KEY_INSTALLED" = "1" ]; then
+        log "'${OPERATOR_USER}' is reachable by public key; leaving its password LOCKED"
+        log "no credential has been written to ${BOOT_DIR}"
+    elif someone_can_log_in; then
         log "another account can already log in; leaving '${OPERATOR_USER}' locked"
     elif [ "$(passwd -S "$OPERATOR_USER" 2>/dev/null | awk '{print $2}')" = "P" ]; then
         log "'${OPERATOR_USER}' already has a password; leaving it alone"
