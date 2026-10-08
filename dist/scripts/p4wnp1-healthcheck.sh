@@ -80,7 +80,14 @@ section "2. Data files"
 for d in /usr/local/P4wnP1/scripts /usr/local/P4wnP1/keymaps /usr/local/P4wnP1/www /usr/local/P4wnP1/db; do
     if [[ -d "$d" ]]; then say_pass "$d/"; else say_fail "$d/ (missing)"; fi
 done
-if [[ -f /usr/local/P4wnP1/www/webapp.js ]]; then say_pass "webapp.js"; else say_fail "webapp.js (missing)"; fi
+# The console's actual files. This used to look for www/webapp.js, which is
+# the name the ORIGINAL gopherjs console had and which nothing in this fork
+# has ever installed -- so the healthcheck shipped on every card reported a
+# failure on every healthy device. A check that cannot pass teaches the
+# operator to ignore the output, which costs more than having no check.
+for f in app/js/app.js app/js/api.js app/js/ui.js app/css/app.css; do
+    if [[ -f "/usr/local/P4wnP1/www/$f" ]]; then say_pass "console $f"; else say_fail "console $f (missing)"; fi
+done
 if [[ -x /usr/local/P4wnP1/scripts/firstboot-secure-defaults.sh ]]; then
     say_pass "firstboot-secure-defaults.sh (+x)"
 else

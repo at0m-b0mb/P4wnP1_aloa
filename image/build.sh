@@ -95,12 +95,14 @@ while [ $# -gt 0 ]; do
         --variant)
             case "$2" in
                 plain|oled) VARIANTS="$2" ;;
-                both)       VARIANTS="plain oled"
-# The operator's mark on the boot splash. Written to /etc/p4wnp1/brand.txt in
-# the image, so it can still be changed on a running device by editing one
-# line -- the build-time value is a default, not a weld.
-BRAND="at0m-b0mb"
-BRAND_TAGLINE="" ;;
+                # Sets the variant list and NOTHING else. A stray copy of
+                # the BRAND defaults had been spliced in here, so
+                #     --brand "Acme" --variant both
+                # silently threw the brand away while
+                #     --variant both --brand "Acme"
+                # kept it. An option whose effect depends on where it sits
+                # on the command line is worse than one that does not exist.
+                both)       VARIANTS="plain oled" ;;
                 *) die "unknown --variant '$2' (want plain, oled or both)" ;;
             esac
             shift 2 ;;

@@ -126,10 +126,18 @@ else
 fi
 
 # Boot configuration -- without these the entire USB feature set is dead.
-if grep -q '^dtoverlay=dwc2' "$MNT/boot/firmware/config.txt"; then
-    ok "config.txt enables the dwc2 overlay"
+# dr_mode=peripheral SPECIFICALLY, not just "a dwc2 overlay".
+#
+# Stock Raspberry Pi OS already ships `dtoverlay=dwc2,dr_mode=host` in
+# config.txt, so `grep '^dtoverlay=dwc2'` matched the BASE IMAGE and this
+# check passed on an image where P4wnP1's own line had never been added --
+# and host mode is the exact opposite of what gadget mode needs. A gate that
+# is satisfied by the thing it is supposed to be checking for the absence of
+# is not a gate.
+if grep -qE '^dtoverlay=dwc2,dr_mode=peripheral' "$MNT/boot/firmware/config.txt"; then
+    ok "config.txt enables dwc2 in peripheral mode"
 else
-    printf '\033[1;31m[verify:FAIL]\033[0m config.txt has no dwc2 overlay; USB gadget mode will not work\n' >&2; fail=1
+    printf '\033[1;31m[verify:FAIL]\033[0m config.txt has no dtoverlay=dwc2,dr_mode=peripheral; USB gadget mode will not work\n' >&2; fail=1
 fi
 if grep -q 'modules-load=dwc2' "$MNT/boot/firmware/cmdline.txt"; then
     ok "cmdline.txt loads dwc2"
