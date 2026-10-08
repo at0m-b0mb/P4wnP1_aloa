@@ -116,7 +116,12 @@ type Status struct {
 	Reflexes      int
 	ReflexesArmed int
 	RunningJobs   int
-	Err           string // set when part of the status could not be read
+	// ReflexesOK and JobsOK say whether those two numbers were actually
+	// read. Zero is a perfectly ordinary answer, so without these the
+	// screen cannot tell "nothing running" from "could not ask".
+	ReflexesOK bool
+	JobsOK     bool
+	Err        string // set when part of the status could not be read
 }
 
 type Iface struct {
@@ -485,6 +490,7 @@ func (c *APIClient) Shutdown() error { return c.call("Shutdown", nil, nil) }
 func (c *APIClient) Status() (Status, error) {
 	s := Status{USBHost: "unknown", WiFi: "unknown"}
 	var problems []string
+	reached := 0 // how many of the reads actually answered
 
 	var gs map[string]interface{}
 	if err := c.call("GetDeployedGadgetSetting", nil, &gs); err != nil {
@@ -497,6 +503,7 @@ func (c *APIClient) Status() (Status, error) {
 			}
 		}
 		s.USBHost = "composed"
+		reached++
 	}
 
 	var eth struct {
@@ -512,6 +519,7 @@ func (c *APIClient) Status() (Status, error) {
 		for _, i := range eth.List {
 			s.Interfaces = append(s.Interfaces, Iface{Name: i.Name, IP: i.IpAddress4, Mode: i.Mode})
 		}
+		reached++
 	}
 
 	var wifi struct {
@@ -522,6 +530,7 @@ func (c *APIClient) Status() (Status, error) {
 		s.WiFi = "unavailable"
 	} else {
 		s.WiFiOK = true
+		reached++
 		s.WiFi = strings.TrimSpace(wifi.Mode + " " + wifi.Ssid)
 		if s.WiFi == "" {
 			s.WiFi = "idle"
@@ -540,14 +549,31 @@ func (c *APIClient) Status() (Status, error) {
 				s.ReflexesArmed++
 			}
 		}
+		s.ReflexesOK = true
+		reached++
 	}
 
 	if jobs, err := c.RunningJobs(); err == nil {
 		s.RunningJobs = len(jobs)
+		s.JobsOK = true
+		reached++
 	}
 
 	if len(problems) > 0 {
 		s.Err = strings.Join(problems, ",") + " unavailable"
+	}
+	// If NOTHING answered, say so instead of returning a dashboard full of
+	// confident zeroes.
+	//
+	// This returned a nil error unconditionally, which had two consequences.
+	// The Status screen printed "Jobs 0 running" and "Reflex 0/0 armed" as
+	// facts when those reads had failed -- zeroes are indistinguishable from
+	// a quiet device. And waitForService, whose whole job is to hold the
+	// splash until the API answers, succeeded on its first attempt against a
+	// service that was not running at all, so the "NO SERVICE" screen it
+	// exists to show was unreachable.
+	if reached == 0 {
+		return s, fmt.Errorf("service not answering")
 	}
 	return s, nil
 }

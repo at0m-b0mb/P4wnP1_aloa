@@ -108,7 +108,13 @@ func main() {
 			"The P4wnP1 service did not answer. Check: systemctl status P4wnP1")
 		_ = disp.Show(fb)
 		time.Sleep(10 * time.Second)
-		return
+		// EXIT NON-ZERO. A clean exit means "no panel fitted" and the unit
+		// sets SuccessExitStatus=0 precisely so that case does not restart
+		// forever. Returning here borrowed that meaning for a completely
+		// different situation -- the service being slow to come up -- so
+		// Restart=on-failure never fired and the panel stayed dark until
+		// someone noticed and restarted it by hand.
+		os.Exit(1)
 	}
 
 	app := oled.NewApp(client, oled.NewRoot())
@@ -127,7 +133,9 @@ func main() {
 		oled.DrawFatal(fb, " NO BUTTONS ", err.Error())
 		_ = disp.Show(fb)
 		time.Sleep(10 * time.Second)
-		return
+		// Same reasoning: a panel whose controls could not be claimed is a
+		// failure to be retried, not a board without a HAT.
+		os.Exit(1)
 	}
 	defer in.Close()
 	// The button test screen reads the pins directly; nothing else uses this.

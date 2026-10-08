@@ -56,7 +56,19 @@ func (s *StatusView) Refresh(app *App) {
 	}
 	s.err = ""
 	s.st = st
+	// Keep the scroll position across the five-second poll. setLen clamps
+	// the window, and on a list that grew or shrank it would yank the view
+	// back towards the top -- so the rows at the bottom of a long status,
+	// which is where the WiFi state and the job count live, scrolled away
+	// under the operator every five seconds and could not be read at all.
+	first := s.cur.first
 	s.cur.setLen(len(s.lines()))
+	if first <= len(s.lines())-bodyRows {
+		s.cur.first = first
+	}
+	if s.cur.first < 0 {
+		s.cur.first = 0
+	}
 }
 
 // lines flattens the status into display rows, so scrolling is trivial and the
@@ -75,8 +87,20 @@ func (s *StatusView) lines() []string {
 		l = append(l, fmt.Sprintf("%s %s", Pad(Truncate(i.Name, 6), 6), ip))
 	}
 	l = append(l, "WiFi "+s.st.WiFi)
-	l = append(l, fmt.Sprintf("Reflex %d/%d armed", s.st.ReflexesArmed, s.st.Reflexes))
-	l = append(l, fmt.Sprintf("Jobs %d running", s.st.RunningJobs))
+	// "0" and "could not ask" are different answers, and a dashboard that
+	// renders the second as the first is worse than one that renders
+	// nothing: it is confidently wrong about whether a payload is typing
+	// into someone's machine right now.
+	if s.st.ReflexesOK {
+		l = append(l, fmt.Sprintf("Reflex %d/%d armed", s.st.ReflexesArmed, s.st.Reflexes))
+	} else {
+		l = append(l, "Reflex  unreadable")
+	}
+	if s.st.JobsOK {
+		l = append(l, fmt.Sprintf("Jobs %d running", s.st.RunningJobs))
+	} else {
+		l = append(l, "Jobs    unreadable")
+	}
 	if s.st.Err != "" {
 		l = append(l, "! "+s.st.Err)
 	}
@@ -317,6 +341,17 @@ func (u *USBView) Hint() string {
 }
 
 func (u *USBView) Refresh(app *App) {
+	// A BACKGROUND POLL MUST NOT DISCARD WHAT THE OPERATOR TYPED.
+	//
+	// This screen is a Refresher, so the daemon's five-second tick called
+	// it, and it overwrote u.toggles from the device and set u.dirty=false.
+	// Tick three boxes, pause to think, and five seconds later every one of
+	// them is clear again with nothing on screen to say why. The hint line
+	// even went back to "press toggles" from "KEY1 deploy changes", so the
+	// one clue that changes were pending removed itself too.
+	if u.dirty {
+		return
+	}
 	t, err := app.Client.USBFunctions()
 	u.loaded = true
 	if err != nil {
@@ -362,6 +397,14 @@ func (u *USBView) Handle(b Button, app *App) Action {
 		}
 		u.toggles[u.cur.sel].On = !u.toggles[u.cur.sel].On
 		u.dirty = true
+	case BtnRefresh:
+		// Reached only when there is something to lose: Refresh is a no-op
+		// while dirty, so without this the central handler would say
+		// "refreshed" over a screen it had deliberately not refreshed.
+		if u.dirty {
+			app.Toast("unsaved changes kept")
+			return ActNone
+		}
 	case BtnAction:
 		if !u.dirty {
 			app.Toast("no changes")

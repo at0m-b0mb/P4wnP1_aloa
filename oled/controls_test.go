@@ -1,6 +1,10 @@
 package oled
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -247,5 +251,136 @@ func TestRunningAPayloadNeverWaitsOnIt(t *testing.T) {
 	app2.Handle(BtnAction)
 	if !c2.Called("CancelAllJobs") {
 		t.Errorf("KEY1 did not stop the running payload: %v", c2.Calls)
+	}
+}
+
+// The five-second poll must not throw away what the operator typed.
+//
+// USBView is a Refresher, so the daemon's tick called Refresh on it, which
+// re-read the device and set dirty=false. Tick three boxes, pause to think,
+// and five seconds later they are all clear again -- and the hint line has
+// reverted from "KEY1 deploy changes" to "press toggles", removing the one
+// clue that anything was pending.
+func TestThePollDoesNotDiscardUnsavedUSBChanges(t *testing.T) {
+	c := NewFakeClient()
+	app := NewApp(c, NewRoot())
+	for _, b := range toCable {
+		app.Handle(b)
+	}
+	v, ok := app.Top().(*USBView)
+	if !ok {
+		t.Fatalf("top screen is %T, want the USB view", app.Top())
+	}
+
+	before := renderText(app)
+	app.Handle(BtnConfirm) // toggle the selected function
+	after := renderText(app)
+	if before == after {
+		t.Fatal("setup: the toggle did not change the screen")
+	}
+	if !v.dirty {
+		t.Fatal("setup: the view does not consider itself dirty")
+	}
+
+	// What the daemon's ticker does, three times over.
+	for i := 0; i < 3; i++ {
+		app.Refresh()
+	}
+	if !v.dirty {
+		t.Error("a background poll cleared the pending-changes flag")
+	}
+	if got := renderText(app); got != after {
+		t.Errorf("a background poll changed the screen under the operator:\nwas:\n%s\nnow:\n%s", after, got)
+	}
+	if !strings.Contains(renderText(app), "KEY1") {
+		t.Errorf("the screen stopped offering to deploy the pending changes:\n%s", renderText(app))
+	}
+
+	// Deploying must still send exactly what is on screen.
+	app.Handle(BtnAction)
+	app.Handle(BtnRight)
+	app.Handle(BtnConfirm)
+	if !c.Called("SetUSB(") {
+		t.Errorf("the pending changes were never deployed: %v", c.Calls)
+	}
+}
+
+// Zero and "could not ask" are different answers. A dashboard that renders
+// the second as the first is confidently wrong about whether a payload is
+// typing into someone's machine right now.
+func TestStatusDoesNotInventZeroes(t *testing.T) {
+	// Rendered directly, not pushed: StatusView is a Refresher, so pushing
+	// it through App would immediately overwrite this fixture with whatever
+	// the fake device says -- and the test would silently check the wrong
+	// data while still passing for the wrong reason.
+	st := Status{USBHost: "composed", WiFi: "idle"} // both OK flags false
+	s := &StatusView{st: st, loaded: true}
+	s.cur.setLen(len(s.lines()))
+	fb := NewFramebuffer()
+	s.Render(fb, nil)
+	out := ReadBack(fb)
+	for _, bad := range []string{"Jobs 0 running", "Reflex 0/0"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("the screen states %q for a number it never read:\n%s", bad, out)
+		}
+	}
+	if !strings.Contains(out, "unreadable") {
+		t.Errorf("the screen does not say the numbers are unreadable:\n%s", out)
+	}
+}
+
+// waitForService exists to hold the splash until the API answers. It could
+// not work, because Status() returned a nil error no matter what happened.
+func TestStatusFailsWhenNothingAnswers(t *testing.T) {
+	dir := t.TempDir()
+	tok := filepath.Join(dir, "t")
+	if err := os.WriteFile(tok, []byte("tok"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// A server that refuses everything, i.e. a service that is not up.
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"nope"}`, http.StatusServiceUnavailable)
+	}))
+	defer dead.Close()
+
+	c := NewAPIClient(dead.URL, tok)
+	if _, err := c.Status(); err == nil {
+		t.Fatal("Status() reported success against a service that answered nothing")
+	}
+
+	// And when something DOES answer, it must not fail.
+	alive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer alive.Close()
+	if _, err := NewAPIClient(alive.URL, tok).Status(); err != nil {
+		t.Errorf("Status() failed against a service that answered: %v", err)
+	}
+}
+
+// The poll must not scroll the screen out from under the operator. The rows
+// at the bottom of a long status -- the WiFi state and the job count -- were
+// unreadable, because every five seconds the window jumped back up.
+func TestStatusKeepsItsScrollPositionAcrossAPoll(t *testing.T) {
+	c := NewFakeClient()
+	app := NewApp(c, NewRoot())
+	for _, b := range toStatus {
+		app.Handle(b)
+	}
+	for i := 0; i < 3; i++ {
+		app.Handle(BtnDown)
+	}
+	v := app.Top().(*StatusView)
+	scrolled := v.cur.first
+	if scrolled == 0 {
+		t.Fatal("setup: the screen did not scroll")
+	}
+	before := renderText(app)
+	app.Refresh()
+	if v.cur.first != scrolled {
+		t.Errorf("the poll moved the window from row %d to %d", scrolled, v.cur.first)
+	}
+	if got := renderText(app); got != before {
+		t.Errorf("the poll changed what was on screen:\nwas:\n%s\nnow:\n%s", before, got)
 	}
 }
