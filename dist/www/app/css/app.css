@@ -580,3 +580,65 @@ details.builder > summary:hover { color: var(--text); }
 
 #view:focus { outline: none; }
 .log:focus-visible { box-shadow: var(--ring); }
+
+/* --- the mirrored OLED panel ---------------------------------------------
+ *
+ * The image arrives at its true 128x64 and is magnified here.
+ * image-rendering:pixelated is the whole trick: a 1bpp source has no
+ * intermediate tones to interpolate, so any resampler can only invent them,
+ * and the result is a blurred smear of what is a perfectly crisp bitmap.
+ * Scaling on the device instead would cost it six times the encode -- 59ms
+ * a frame against 10ms, measured on a Pi Zero W. */
+.panel-bezel {
+  background: #05080c;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  justify-content: center;
+}
+.panel-img {
+  width: 100%;
+  max-width: 512px;
+  height: auto;
+  aspect-ratio: 2 / 1;
+  image-rendering: pixelated;
+  display: block;
+}
+.panel-text {
+  background: #05080c;
+  color: #7ad3ff;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+  overflow-x: auto;
+  min-height: 8.5em;
+}
+/* A 3x3 grid so the joystick looks like a joystick. The blanks are real
+   elements rather than grid gaps so the centre stays centred at any width. */
+.panel-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 56px);
+  gap: 8px;
+  justify-content: center;
+  margin: 10px 0 16px;
+}
+.panel-key {
+  min-width: 56px;
+  padding: 10px 0;
+  font-variant-numeric: tabular-nums;
+}
+.panel-keys {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+@media (max-width: 560px) {
+  .panel-pad { grid-template-columns: repeat(3, 48px); }
+  .panel-key { min-width: 48px; }
+}

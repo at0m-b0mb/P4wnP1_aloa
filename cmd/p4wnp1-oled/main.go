@@ -39,6 +39,7 @@ func main() {
 		brand    = flag.String("brand", "", "operator name on the boot splash (default: read "+oled.BrandFile+")")
 		tagline  = flag.String("tagline", "", "second line under the operator name")
 		firstRun = flag.String("firstrun-creds", oled.FirstRunFile, "first-boot credentials handoff")
+		mirror   = flag.String("mirror-socket", oled.MirrorSocket, "serve the panel here; empty to disable")
 	)
 	flag.Parse()
 
@@ -132,8 +133,39 @@ func main() {
 	// The button test screen reads the pins directly; nothing else uses this.
 	app.Input = in
 
-	run(app, disp, fb, in, *poll)
+	// Mirror the panel for the web console. A failure here must not stop
+	// the device working: the panel in your hand is the primary interface
+	// and the remote copy is a convenience.
+	remote := make(chan oled.Button, 8)
+	if *mirror != "" {
+		mir := &oled.Mirror{
+			Frame: panel.Frame,
+			Text:  panel.Text,
+			Press: func(b oled.Button) bool {
+				select {
+				case remote <- b:
+					return true
+				default:
+					return false
+				}
+			},
+		}
+		if err := mir.Listen(*mirror); err != nil {
+			log.Printf("panel mirror unavailable (%v)", err)
+		} else {
+			defer mir.Close()
+			log.Printf("mirroring the panel on %s", *mirror)
+		}
+	}
+
+	run(app, disp, fb, in, remote, *poll)
 }
+
+// panel is the frame the mirror serves. The guard that keeps secrets off it
+// lives in oled.PanelSource, where it is tested.
+var panel = &oled.PanelSource{}
+
+func publish(app *oled.App, fb *oled.Framebuffer) { panel.Publish(app, fb) }
 
 // waitForService polls until the API answers, animating the splash so the
 // screen is visibly alive rather than apparently frozen.
@@ -151,7 +183,7 @@ func waitForService(disp oled.Display, fb *oled.Framebuffer, c oled.Client, limi
 	return false
 }
 
-func run(app *oled.App, disp oled.Display, fb *oled.Framebuffer, in oled.Input, poll time.Duration) {
+func run(app *oled.App, disp oled.Display, fb *oled.Framebuffer, in oled.Input, remote <-chan oled.Button, poll time.Duration) {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 
@@ -164,6 +196,7 @@ func run(app *oled.App, disp oled.Display, fb *oled.Framebuffer, in oled.Input, 
 
 	app.Render(fb)
 	_ = disp.Show(fb)
+	publish(app, fb)
 
 	for {
 		select {
@@ -180,11 +213,24 @@ func run(app *oled.App, disp oled.Display, fb *oled.Framebuffer, in oled.Input, 
 			}
 			app.Render(fb)
 			_ = disp.Show(fb)
+			publish(app, fb)
+		case b := <-remote:
+			// A press from the web console. Identical to a press on the
+			// board from here down, so there is no second code path that
+			// only remote control exercises.
+			app.Handle(b)
+			if app.Quitting() {
+				return
+			}
+			app.Render(fb)
+			_ = disp.Show(fb)
+			publish(app, fb)
 		case <-tick.C:
 			app.Refresh()
 		case <-paint.C:
 			app.Render(fb)
 			_ = disp.Show(fb)
+			publish(app, fb)
 		}
 	}
 }

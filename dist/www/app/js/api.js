@@ -165,6 +165,40 @@ const Api = (() => {
     return (await res.json()).methods || [];
   }
 
+  /* --- the OLED panel, mirrored ----------------------------------------- */
+
+  /* The panel is fetched, not pointed at with <img src>.
+   *
+   * Auth here is a bearer token in a header, and a browser does not attach
+   * headers to an <img>. Putting the token in the query string instead would
+   * put it in access logs and browser history, which is the same reason the
+   * event stream is not an EventSource. So: fetch with the header, hand the
+   * view a Blob, and let it make an object URL.
+   *
+   * 409 is not an error. It is the device declining to mirror the screen
+   * that shows your first-boot passwords, and the view says so. */
+  async function panelImage() {
+    const res = await fetch('/api/v1/panel.png', { headers: authHeaders(), cache: 'no-store' });
+    if (!res.ok) throw new ApiError(res.status, await readError(res), 'panel.png');
+    return res.blob();
+  }
+
+  async function panelText() {
+    const res = await fetch('/api/v1/panel.txt', { headers: authHeaders(), cache: 'no-store' });
+    if (!res.ok) throw new ApiError(res.status, await readError(res), 'panel.txt');
+    return res.text();
+  }
+
+  async function panelPress(button) {
+    const res = await fetch('/api/v1/panel/press', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify({ button }),
+    });
+    if (!res.ok) throw new ApiError(res.status, await readError(res), 'panel/press');
+    return res.json();
+  }
+
   /* --- event stream ----------------------------------------------------- */
 
   /* Opens the SSE stream and calls onEvent for each event. Reconnects with
@@ -277,6 +311,7 @@ const Api = (() => {
     ApiError,
     login, logout, whoami, changePassword, listSessions, revokeSession,
     rpc, methods, streamEvents,
+    panelImage, panelText, panelPress,
     hasToken, setToken, currentUser,
   };
 })();

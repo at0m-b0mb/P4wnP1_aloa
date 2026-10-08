@@ -1233,6 +1233,145 @@ Views.loadouts = async function () {
 
 /* --- Journal: live events ---------------------------------------------- */
 
+/* The OLED panel, mirrored.
+ *
+ * The device has a screen and eight buttons on it. This is that screen, and
+ * those buttons, from wherever you are.
+ *
+ * Three things worth knowing about how it is built:
+ *
+ *   - the image is fetched with the bearer token and shown from an object
+ *     URL, because a browser will not put an Authorization header on an
+ *     <img src>. Every frame revokes the previous URL; without that, a view
+ *     left open for an hour leaks seven thousand blobs.
+ *   - it polls at 2fps, not 30. Encoding one frame costs the Pi Zero W about
+ *     10ms, so this is roughly 2% of its single core WHILE YOU WATCH and
+ *     nothing at all when you are not. That is also why the image comes over
+ *     at 128x64 and is magnified here rather than on the device: a 4x image
+ *     measured 59ms a frame on the same board.
+ *   - a press goes to the same handler as a press on the board. There is no
+ *     second input path that only remote control exercises.
+ */
+Views.panel = async function () {
+  const main = clear($('#view'));
+  main.append(pageHead('Panel',
+    'The screen on the device, mirrored, and its eight controls. ' +
+    'A press here is the same press as a press on the board.'));
+
+  const img = h('img#panel-img.panel-img', {
+    alt: 'The device OLED screen', width: 128, height: 64,
+  });
+  const pill = h('span#panel-pill.pill', { role: 'status', 'aria-live': 'polite' },
+    h('span.dot.dot-idle'), 'connecting');
+  const note = h('p#panel-note.field-hint', { style: 'margin-top:10px' }, '');
+  const text = h('pre#panel-text.panel-text', {
+    'aria-label': 'The panel contents as text',
+  }, '');
+
+  const key = (label, button, cls, title) => h('button.btn.panel-key' + (cls || ''), {
+    type: 'button', title: title || label, 'data-button': button,
+    onclick: () => press(button),
+  }, label);
+
+  main.append(h('div.grid.two',
+    h('div.card',
+      h('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px' },
+        h('h2.card-title', { style: 'margin:0' }, 'Screen'), pill),
+      h('div.panel-bezel', img),
+      note),
+    h('div.card',
+      h('h2.card-title', 'Controls'),
+      h('div.panel-pad',
+        h('div'), key('\u25B2', 'up', '', 'Up'), h('div'),
+        key('\u25C0', 'left', '', 'Left - back'),
+        key('\u25CF', 'press', '', 'Press - confirm'),
+        key('\u25B6', 'right', '', 'Right - enter'),
+        h('div'), key('\u25BC', 'down', '', 'Down'), h('div')),
+      h('div.panel-keys',
+        key('KEY1', 'key1', '.btn-quiet', 'The action named on the bottom line'),
+        key('KEY2', 'key2', '.btn-quiet', 'Refresh'),
+        key('KEY3', 'key3', '.btn-quiet', 'Back to the root menu')),
+      h('p.field-hint', { style: 'margin-top:14px' },
+        'Arrow keys, Enter and 1/2/3 work too while this view is open.'),
+      h('h2.card-title', { style: 'margin-top:22px' }, 'As text'),
+      text)));
+
+  let lastURL = null;
+  let stopped = false;
+
+  function status(kind, label) {
+    const el = $('#panel-pill');
+    if (!el) return;
+    clear(el);
+    el.append(h('span.dot.dot-' + kind), label);
+  }
+
+  async function press(button) {
+    try {
+      await Api.panelPress(button);
+      await refresh();
+    } catch (e) {
+      toast(e.message || 'the press was not accepted', 'bad');
+    }
+  }
+
+  async function refresh() {
+    if (stopped) return;
+    try {
+      const blob = await Api.panelImage();
+      const url = URL.createObjectURL(blob);
+      const el = $('#panel-img');
+      if (el) el.src = url;
+      /* Revoke AFTER swapping, never before: revoking a URL the <img> is
+         still showing blanks the picture on some browsers. */
+      if (lastURL) URL.revokeObjectURL(lastURL);
+      lastURL = url;
+      status('ok', 'live');
+      const n = $('#panel-note'); if (n) n.textContent = '';
+      const t = $('#panel-text');
+      if (t) t.textContent = await Api.panelText().catch(() => '');
+    } catch (e) {
+      const n = $('#panel-note');
+      if (e && e.status === 409) {
+        status('idle', 'not mirrored');
+        if (n) n.textContent = 'The device is showing its first-boot credentials. '
+          + 'That screen is deliberately never mirrored: it exists so the password '
+          + 'reaches whoever is standing over the device, and then stops existing.';
+      } else if (e && e.status === 503) {
+        status('bad', 'no panel');
+        if (n) n.textContent = 'No OLED daemon is running. A plain image has no panel, '
+          + 'and a board with no HAT fitted does not start one.';
+      } else {
+        status('bad', 'error');
+        if (n) n.textContent = (e && e.message) || 'the panel could not be read';
+      }
+    }
+  }
+
+  const KEYMAP = {
+    ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    Enter: 'press', ' ': 'press', 1: 'key1', 2: 'key2', 3: 'key3',
+  };
+  function onKey(ev) {
+    if (ev.target && /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
+    const b = KEYMAP[ev.key];
+    if (!b) return;
+    ev.preventDefault();
+    press(b);
+  }
+  document.addEventListener('keydown', onKey);
+
+  const timer = setInterval(refresh, 500);
+  onViewTeardown(() => {
+    stopped = true;
+    clearInterval(timer);
+    document.removeEventListener('keydown', onKey);
+    if (lastURL) URL.revokeObjectURL(lastURL);
+  });
+
+  await refresh();
+};
+
 Views.journal = function () {
   const main = clear($('#view'));
   main.append(pageHead('Journal',
@@ -1395,6 +1534,7 @@ const NAV = [
   ['keystrokes', 'Keystrokes'],
   ['reflexes', 'Reflexes'],
   ['loadouts', 'Loadouts'],
+  ['panel', 'Panel'],
   ['journal', 'Journal'],
 ];
 

@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package pgpio
@@ -26,9 +27,9 @@ type P4wnp1PinIO struct {
 	piPin gpio.PinIO
 
 	/*
-	edgeDetectLoopContext *context.Context //nil if no internal edge detect loop is running
-	edgeDetectLoopCancel context.CancelFunc //nil if no internal edge detect loop is running
-	edgeDetectionMutex    *sync.Mutex
+		edgeDetectLoopContext *context.Context //nil if no internal edge detect loop is running
+		edgeDetectLoopCancel context.CancelFunc //nil if no internal edge detect loop is running
+		edgeDetectionMutex    *sync.Mutex
 	*/
 
 	edge                 gpio.Edge
@@ -203,9 +204,9 @@ func (p *P4wnp1PinIO) ExtWaitForEdge(ctx context.Context, debounceDuration time.
 }
 
 /*
-func (p P4wnp1PinIO) String() string {
-	return p.piPin.String()
-}
+	func (p P4wnp1PinIO) String() string {
+		return p.piPin.String()
+	}
 */
 func (p P4wnp1PinIO) Halt() error {
 	return p.piPin.Halt()

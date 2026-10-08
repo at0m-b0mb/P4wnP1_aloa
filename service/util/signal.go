@@ -1,16 +1,16 @@
 package util
 
 import (
+	"errors"
 	"sync"
 	"time"
-	"errors"
 )
 
 type Signal struct {
 	isSet     bool
 	autoReset bool
 	*sync.Mutex
-	chNotSet  chan interface{} // channel is open, when signal isn't set
+	chNotSet chan interface{} // channel is open, when signal isn't set
 }
 
 func NewSignal(isSet, autoReset bool) (s *Signal) {

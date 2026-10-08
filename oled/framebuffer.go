@@ -33,6 +33,17 @@ func NewFramebuffer() *Framebuffer { return &Framebuffer{} }
 // Bytes exposes the raw pages for a driver to push to the panel.
 func (f *Framebuffer) Bytes() []byte { return f.buf[:] }
 
+// Load replaces the contents from a stored copy. Returns false if the length
+// is wrong rather than panicking: the caller is usually holding bytes that
+// came from somewhere else.
+func (f *Framebuffer) Load(b []byte) bool {
+	if len(b) != len(f.buf) {
+		return false
+	}
+	copy(f.buf[:], b)
+	return true
+}
+
 // Page returns the Width bytes of one 8-pixel-tall page.
 func (f *Framebuffer) Page(p int) []byte {
 	if p < 0 || p >= Pages {

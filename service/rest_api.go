@@ -152,6 +152,10 @@ func NewAPIHandler(srv *server, authMgr *auth.Manager) (http.Handler, error) {
 	mux.HandleFunc("/rpc", a.handleMethodList)
 	mux.HandleFunc("/rpc/", a.handleRPC)
 	mux.HandleFunc("/events", a.handleEvents)
+	// The OLED panel, mirrored. Same auth and same origin guard as the RPCs.
+	mux.HandleFunc("/panel.png", a.handlePanelImage)
+	mux.HandleFunc("/panel.txt", a.handlePanelText)
+	mux.HandleFunc("/panel/press", a.handlePanelPress)
 	return http.StripPrefix(strings.TrimSuffix(APIPrefix, "/"), mux), nil
 }
 

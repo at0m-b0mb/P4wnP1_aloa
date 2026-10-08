@@ -169,6 +169,16 @@ func NewFirstRunView(c *FirstRunCreds) *FirstRunView { return &FirstRunView{c: c
 
 func (v *FirstRunView) Title() string { return "First boot" }
 
+// Secret keeps this screen off the remote mirror.
+//
+// The entire point of showing a password on the panel is that it reaches
+// whoever is STANDING OVER THE DEVICE and then stops existing. Streaming it
+// to a browser hands it to anyone holding a console session and quietly
+// undoes that. Once erased there is nothing left to withhold, so the screen
+// mirrors again -- which also means a remote operator can see that the erase
+// happened.
+func (v *FirstRunView) Secret() bool { return !v.done }
+
 func (v *FirstRunView) Hint() string {
 	if v.done {
 		return "left to finish"
