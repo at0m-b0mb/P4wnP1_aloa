@@ -27,6 +27,11 @@ type FakeClient struct {
 	Calls              []string
 	LED                int
 	Rebooted, ShutDown bool
+
+	// FinishJobsImmediately makes StartHIDScript return an id that is
+	// already finished, so a screen test does not have to drive the poll.
+	FinishJobsImmediately bool
+	nextJobID             int
 }
 
 // NewFakeClient returns a device with plausible contents.
@@ -120,17 +125,43 @@ func (f *FakeClient) DeleteStored(k Kind, name string) error {
 	return nil
 }
 
-func (f *FakeClient) RunHIDScript(name string, background bool) (string, error) {
-	f.note("RunHID(%s,bg=%v)", name, background)
+// StartHIDScript begins a job and returns at once, like the real one.
+//
+// FinishJobsImmediately makes a started job complete before the next poll,
+// which is what most screen tests want. Leave it false to watch the
+// "running" state.
+func (f *FakeClient) StartHIDScript(name string) (int, error) {
+	f.note("StartHID(%s)", name)
 	if err := f.fail("RunHID"); err != nil {
+		return 0, err
+	}
+	f.nextJobID++
+	id := f.nextJobID
+	if !f.FinishJobsImmediately {
+		f.Jobs = append(f.Jobs, Job{ID: id, Name: name})
+	}
+	return id, nil
+}
+
+func (f *FakeClient) JobRunning(id int) (bool, error) {
+	f.note("JobRunning(%d)", id)
+	if err := f.fail("RunningJobs"); err != nil {
+		return false, err
+	}
+	for _, j := range f.Jobs {
+		if j.ID == id {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (f *FakeClient) CollectResult(id int) (string, error) {
+	f.note("CollectResult(%d)", id)
+	if err := f.fail("CollectResult"); err != nil {
 		return "", err
 	}
-	if background {
-		id := len(f.Jobs) + 1
-		f.Jobs = append(f.Jobs, Job{ID: id, Name: name})
-		return fmt.Sprintf("started job %d", id), nil
-	}
-	return "typed " + name + " into the host, 142 keystrokes, no errors", nil
+	return "typed into the host, 142 keystrokes, no errors", nil
 }
 
 func (f *FakeClient) RunningJobs() ([]Job, error) {

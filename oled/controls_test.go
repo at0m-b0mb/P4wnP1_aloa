@@ -184,3 +184,68 @@ func TestButtonTestIsHonestWithoutPinAccess(t *testing.T) {
 		t.Errorf("an unknown pin is shown as released:\n%s", s)
 	}
 }
+
+// Running a payload must never hold a request open on it.
+//
+// The service treats a cancelled request as job.Cancel() and interrupts the
+// Otto VM, so a client-side HTTP deadline does not time out the reply -- it
+// aborts the payload, part-way through typing into someone's machine. The
+// panel had a six second timeout and asked for an unbounded run, which meant
+// every foreground payload longer than six seconds was killed mid-keystroke
+// and the panel reported "service unreachable", blaming the network for its
+// own deadline. Four of the seven payloads this device ships are while(true)
+// loops, so for those a foreground run could never once have succeeded.
+func TestRunningAPayloadNeverWaitsOnIt(t *testing.T) {
+	c := NewFakeClient()
+	app := NewApp(c, NewRoot())
+	for _, b := range path(toPayloads, []Button{BtnEnter, BtnRight, BtnConfirm}) {
+		app.Handle(b)
+	}
+
+	v, ok := app.Top().(*RunningView)
+	if !ok {
+		t.Fatalf("after starting a payload the top screen is %T, want the watcher", app.Top())
+	}
+	if c.Called("RunHID(") && !c.Called("StartHID(") {
+		t.Error("the panel used a call that waits on the job")
+	}
+	if !c.Called("StartHID(") {
+		t.Fatalf("no payload was started: %v", c.Calls)
+	}
+	// While it is running, the result must NOT be asked for: fetching it
+	// waits on the job, which is the same hazard by another name.
+	if c.Called("CollectResult(") {
+		t.Errorf("the result was collected while the job was still running: %v", c.Calls)
+	}
+
+	s := renderText(app)
+	for _, want := range []string{"Running", "running", "KEY1 stop it"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the watcher does not show %q:\n%s", want, s)
+		}
+	}
+
+	// Now let the job finish. The watcher polls, sees it gone, and only
+	// then collects.
+	c.Jobs = nil
+	v.Refresh(app)
+	if !c.Called("CollectResult(") {
+		t.Errorf("the result was never collected once the job finished: %v", c.Calls)
+	}
+	s = renderText(app)
+	if !strings.Contains(s, "finished") {
+		t.Errorf("the watcher does not report the job finished:\n%s", s)
+	}
+
+	// And KEY1 must stop a running payload -- the one control you urgently
+	// want when a script is mid-type into someone else's machine.
+	c2 := NewFakeClient()
+	app2 := NewApp(c2, NewRoot())
+	for _, b := range path(toPayloads, []Button{BtnEnter, BtnRight, BtnConfirm}) {
+		app2.Handle(b)
+	}
+	app2.Handle(BtnAction)
+	if !c2.Called("CancelAllJobs") {
+		t.Errorf("KEY1 did not stop the running payload: %v", c2.Calls)
+	}
+}

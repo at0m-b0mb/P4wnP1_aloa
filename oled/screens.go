@@ -441,17 +441,126 @@ func (p *PayloadList) run(app *App, name string, background bool) {
 		detail = "Starts it and returns here. Watch it under Jobs."
 	}
 	app.Push(NewConfirm(what, "Run "+Truncate(name, 14)+"?", detail, func(a *App) {
-		out, err := a.Client.RunHIDScript(name, background)
+		// Start, never wait. Waiting on a running payload over HTTP is what
+		// used to abort it: the service treats a cancelled request as
+		// job.Cancel() and interrupts the script mid-keystroke.
+		id, err := a.Client.StartHIDScript(name)
 		if err != nil {
 			a.Push(NewTextView("Failed", err.Error()))
 			return
 		}
 		if background {
-			a.Toast("%s", Truncate(out, Cols-1))
+			a.Toast("started job %d", id)
 			return
 		}
-		a.Push(NewTextView("Result", out))
+		a.Push(NewRunningView(name, id))
 	}))
+}
+
+// --- watching a payload run --------------------------------------------------
+
+// RunningView follows one job to completion without ever holding a request
+// open on it.
+//
+// It polls the list of running ids -- which returns immediately -- and only
+// asks for the result once the job is gone from that list, at which point
+// fetching it cannot wait and so cannot cancel anything.
+type RunningView struct {
+	name   string
+	id     int
+	done   bool
+	result string
+	err    string
+	ticks  int
+}
+
+func NewRunningView(name string, id int) *RunningView {
+	return &RunningView{name: name, id: id}
+}
+
+func (v *RunningView) Title() string { return "Running" }
+
+func (v *RunningView) Hint() string {
+	if v.done {
+		return "left to go back"
+	}
+	return "KEY1 stop it"
+}
+
+func (v *RunningView) Refresh(app *App) {
+	if v.done {
+		return
+	}
+	v.ticks++
+	running, err := app.Client.JobRunning(v.id)
+	if err != nil {
+		v.err = err.Error()
+		return
+	}
+	v.err = ""
+	if running {
+		return
+	}
+	v.done = true
+	out, err := app.Client.CollectResult(v.id)
+	if err != nil {
+		v.result = "finished; result unavailable"
+		return
+	}
+	v.result = out
+}
+
+func (v *RunningView) Render(fb *Framebuffer, _ *App) {
+	y := bodyPxTop
+	line := func(s string) {
+		if y+GlyphH <= hintRow*LineH-2 {
+			fb.Text(0, y, Truncate(s, Cols))
+			y += LineH
+		}
+	}
+	line(Truncate(v.name, Cols))
+	line("")
+	if v.err != "" {
+		for _, l := range wrap(v.err, Cols) {
+			line(l)
+		}
+		return
+	}
+	if !v.done {
+		// A spinner, because a payload that types slowly looks identical to
+		// one that has hung, and the panel is the only thing you can see.
+		spin := []string{"|", "/", "-", "\\"}[v.ticks%4]
+		line(fmt.Sprintf("job %d running %s", v.id, spin))
+		line("")
+		line("Typing into the host.")
+		return
+	}
+	line(fmt.Sprintf("job %d finished", v.id))
+	line("")
+	for _, l := range wrap(v.result, Cols) {
+		line(l)
+	}
+}
+
+func (v *RunningView) Handle(b Button, app *App) Action {
+	switch b {
+	case BtnBack, BtnConfirm:
+		return ActPop
+	case BtnHome:
+		return ActHome
+	case BtnAction:
+		if v.done {
+			app.Toast("already finished")
+			return ActNone
+		}
+		if err := app.Client.CancelAllJobs(); err != nil {
+			app.Toast("%s", Truncate(err.Error(), Cols-1))
+			return ActNone
+		}
+		app.Toast("stopped")
+		v.Refresh(app)
+	}
+	return ActNone
 }
 
 func (p *PayloadList) Handle(b Button, app *App) Action {

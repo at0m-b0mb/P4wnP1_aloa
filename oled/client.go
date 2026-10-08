@@ -3,8 +3,10 @@ package oled
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -27,8 +29,26 @@ type Client interface {
 	// DeleteStored removes one.
 	DeleteStored(kind Kind, name string) error
 
-	// RunHIDScript types a stored payload into the attached host.
-	RunHIDScript(name string, background bool) (string, error)
+	// StartHIDScript begins typing a stored payload into the attached host
+	// and returns the job id. It does NOT wait.
+	//
+	// There is no "run it and block until it finishes" method, deliberately.
+	// HIDRunScript and HIDGetScriptJobResult both WAIT on the job and both
+	// take the request context, and the service turns a cancelled request
+	// into job.Cancel() -- which interrupts the Otto VM mid-script. So a
+	// client-side HTTP deadline does not time out the REPLY, it aborts the
+	// PAYLOAD. This panel had a 6-second HTTP timeout and asked for an
+	// unbounded run: every foreground payload longer than six seconds was
+	// killed part-way through typing into the target, and the panel blamed
+	// the network for its own deadline.
+	StartHIDScript(name string) (int, error)
+	// JobRunning reports whether a job is still going. Cheap and immediate:
+	// it lists ids, it does not wait on anything.
+	JobRunning(id int) (bool, error)
+	// CollectResult fetches a FINISHED job's result. Only safe once
+	// JobRunning says false -- on a live job it would wait, and waiting is
+	// what kills payloads.
+	CollectResult(id int) (string, error)
 	RunningJobs() ([]Job, error)
 	// DescribeJob labels one running job. Separate from RunningJobs because
 	// it costs an extra call per job and the dashboard only wants the count.
@@ -176,6 +196,13 @@ func (c *APIClient) call(method string, in interface{}, out interface{}) error {
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
+		// A deadline and a dead socket need different fixes, and collapsing
+		// both into "service unreachable" sent me looking at the network for
+		// a timeout this client owned.
+		var nerr net.Error
+		if errors.As(err, &nerr) && nerr.Timeout() {
+			return fmt.Errorf("timed out after %s", c.HTTP.Timeout)
+		}
 		return fmt.Errorf("service unreachable")
 	}
 	defer resp.Body.Close()
@@ -309,32 +336,48 @@ func hidScriptPath(name string) (string, error) {
 	return HIDScriptDir + "/" + name, nil
 }
 
-func (c *APIClient) RunHIDScript(name string, background bool) (string, error) {
+func (c *APIClient) StartHIDScript(name string) (int, error) {
 	path, err := hidScriptPath(name)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
-	req := map[string]interface{}{
+	var job struct {
+		Id int `json:"id"`
+	}
+	// HIDRunScriptJob returns as soon as the job is started, so the six
+	// second transport deadline covers only the start, never the script.
+	err = c.call("HIDRunScriptJob", map[string]interface{}{
 		"scriptPath":     path,
 		"timeoutSeconds": 0,
+	}, &job)
+	if err != nil {
+		return 0, err
 	}
-	if background {
-		var job struct {
-			Id int `json:"id"`
-		}
-		if err := c.call("HIDRunScriptJob", req, &job); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("started job %d", job.Id), nil
+	return job.Id, nil
+}
+
+func (c *APIClient) JobRunning(id int) (bool, error) {
+	jobs, err := c.RunningJobs()
+	if err != nil {
+		return false, err
 	}
+	for _, j := range jobs {
+		if j.ID == id {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (c *APIClient) CollectResult(id int) (string, error) {
 	var res struct {
 		ResultJson string `json:"resultJson"`
 	}
-	if err := c.call("HIDRunScript", req, &res); err != nil {
+	if err := c.call("HIDGetScriptJobResult", map[string]int{"id": id}, &res); err != nil {
 		return "", err
 	}
-	if res.ResultJson == "" {
-		return "done", nil
+	if res.ResultJson == "" || res.ResultJson == "null" {
+		return "finished", nil
 	}
 	return res.ResultJson, nil
 }

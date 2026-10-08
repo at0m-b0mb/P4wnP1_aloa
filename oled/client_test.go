@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/mame82/P4wnP1_aloa/common"
 )
@@ -244,12 +245,19 @@ func TestClientSendsTheRightRequestShapes(t *testing.T) {
 	}
 
 	rec.reply["HIDRunScriptJob"] = `{"id":7}`
-	out, err := c.RunHIDScript("x.js", true)
+	id, err := c.StartHIDScript("x.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "7") {
-		t.Errorf("background run reported %q, want the job id", out)
+	if id != 7 {
+		t.Errorf("StartHIDScript returned job %d, want 7", id)
+	}
+	// Starting a payload must use the RPC that RETURNS, never the one that
+	// waits. HIDRunScript and HIDGetScriptJobResult both block on the job
+	// and both take the request context, so a client timeout on either one
+	// cancels the running script.
+	if rec.called("HIDRunScript") {
+		t.Error("the panel called HIDRunScript, which waits on the job and can abort it")
 	}
 	// ABSOLUTE, under the HIDScripts directory.
 	//
@@ -265,8 +273,8 @@ func TestClientSendsTheRightRequestShapes(t *testing.T) {
 	// Only a bare name is a payload name. Anything with a separator in it --
 	// including an absolute path -- never reaches the wire.
 	for _, bad := range []string{"../../etc/shadow", "sub/x.js", "/tmp/x.js", "..", ""} {
-		if _, err := c.RunHIDScript(bad, false); err == nil {
-			t.Errorf("RunHIDScript(%q) was accepted", bad)
+		if _, err := c.StartHIDScript(bad); err == nil {
+			t.Errorf("StartHIDScript(%q) was accepted", bad)
 		}
 	}
 }
@@ -446,4 +454,34 @@ func TestBothClientsSatisfyTheInterface(t *testing.T) {
 	// the UI gains a need, both have to answer it.
 	var _ Client = NewFakeClient()
 	var _ Client = NewAPIClient("http://x", "/dev/null")
+}
+
+// A deadline and a dead socket are different faults and need different
+// fixes. This client reported both as "service unreachable", which sent me
+// looking at the network for a timeout the client itself owned.
+func TestTimeoutIsNotReportedAsUnreachable(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer slow.Close()
+
+	dir := t.TempDir()
+	tok := filepath.Join(dir, "tok")
+	if err := os.WriteFile(tok, []byte("sometoken"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c := NewAPIClient(slow.URL, tok)
+	c.HTTP.Timeout = 50 * time.Millisecond
+
+	_, err := c.List(KindHIDScript)
+	if err == nil {
+		t.Fatal("a call that outran its deadline returned no error")
+	}
+	if strings.Contains(err.Error(), "unreachable") {
+		t.Errorf("a timeout was reported as %q -- it blames the network for our own deadline", err)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("a timeout was reported as %q, want it to say so", err)
+	}
 }
