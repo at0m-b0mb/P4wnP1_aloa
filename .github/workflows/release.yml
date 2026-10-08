@@ -174,7 +174,12 @@ jobs:
             echo "artifact rather than of its filename."
             echo
             echo '```'
-            cd dist-images && cat ./*.sha256
+            # A SUBSHELL. Without the parentheses this cd leaks out of the
+            # { } group -- a group is not a subshell -- and the `cat NOTES.md`
+            # after it looks inside dist-images and fails. The notes were
+            # written correctly; only reading them back blew up, which failed
+            # the job after all four images had already uploaded.
+            ( cd dist-images && cat ./*.sha256 )
             echo '```'
             echo
             echo "Built by GitHub Actions from \`${GITHUB_SHA}\`. Every image was mounted"
