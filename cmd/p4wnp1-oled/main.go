@@ -38,6 +38,7 @@ func main() {
 		waitSvc  = flag.Duration("wait-service", 90*time.Second, "how long to wait for the service at startup")
 		brand    = flag.String("brand", "", "operator name on the boot splash (default: read "+oled.BrandFile+")")
 		tagline  = flag.String("tagline", "", "second line under the operator name")
+		firstRun = flag.String("firstrun-creds", oled.FirstRunFile, "first-boot credentials handoff")
 	)
 	flag.Parse()
 
@@ -111,6 +112,14 @@ func main() {
 
 	app := oled.NewApp(client, oled.NewRoot())
 	app.Refresh()
+
+	// First boot leaves the generated credentials here for the panel to show
+	// once. Pushed before the menu because this is the only time they can be
+	// read, and a screen the operator has to go looking for is a screen they
+	// will find after they have already rebooted.
+	if c := oled.LoadFirstRunCreds(*firstRun); c != nil {
+		app.Push(oled.NewFirstRunView(c))
+	}
 
 	in, err := openInput(*headless)
 	if err != nil {

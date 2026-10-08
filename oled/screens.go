@@ -605,6 +605,16 @@ func NewSystemMenu() *Menu {
 				})
 		}},
 		{"Buttons test", func(*App) View { return NewButtonTest() }},
+		{"First-boot creds", func(a *App) View {
+			// Re-read rather than caching: once erased there is nothing to
+			// show, and a menu entry that opens a screen full of a secret
+			// that no longer exists would be a lie about what is on disk.
+			if c := LoadFirstRunCreds(FirstRunFile); c != nil {
+				return NewFirstRunView(c)
+			}
+			a.Toast("nothing pending")
+			return nil
+		}},
 		{"About", func(*App) View {
 			return NewTextView("About", "P4wnP1 A.L.O.A. on-device console. "+
 				"Up/down move, right or press enters, left goes back. "+

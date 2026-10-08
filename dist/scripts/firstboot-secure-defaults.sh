@@ -399,6 +399,45 @@ ${SSH_FPS}
 EOF
 chmod 0600 "${CREDS_FILE}"
 
+# --- hand the credentials to the panel, if this device has one --------------
+#
+# A board with an OLED HAT can do what a headless one cannot: tell you the
+# secret itself. The panel shows these once, you confirm you have written them
+# down, and then it erases every copy -- this handoff, the file on the FAT
+# boot partition, and ${CREDS_FILE}.
+#
+# That is a real improvement on the status quo, which is a plaintext password
+# sitting on a FAT partition for the life of the device, readable by anyone
+# who ever holds the card. It is not magic: it narrows the window from
+# "forever, to anyone with the card" to "once, to whoever is standing over the
+# device at first boot". And an erase on an SD card is not a guarantee --
+# wear levelling can leave the old contents in blocks the filesystem can no
+# longer reach. The panel says so rather than claiming the data is gone.
+#
+# Written only when the panel binary is actually installed. On a plain image
+# there is no screen to read it from, so an extra copy of the credentials
+# would be pure exposure for no benefit.
+if [ -x /usr/local/bin/p4wnp1-oled ]; then
+    PANEL_HANDOFF="${FLAG_DIR}/firstboot-creds"
+    umask 077
+    {
+        echo "# read once by the OLED panel, then erased. 0600, root."
+        echo "web_user=${ADMIN_USER}"
+        echo "web_pass=${NEW_ADMIN_PW}"
+        if [ -n "${OPERATOR_PW_SET}" ]; then
+            echo "ssh_user=${OPERATOR_USER}"
+            echo "ssh_pass=${OPERATOR_PW_SET}"
+        fi
+        # Every copy the panel should destroy on acknowledgement. It erases
+        # exactly this list and nothing it worked out for itself.
+        [ -f "${BOOT_DIR}/p4wnp1-credentials.txt" ] &&
+            echo "erase=${BOOT_DIR}/p4wnp1-credentials.txt"
+        echo "erase=${CREDS_FILE}"
+    } > "${PANEL_HANDOFF}"
+    chmod 0600 "${PANEL_HANDOFF}"
+    log "left the first-boot credentials for the panel at ${PANEL_HANDOFF}"
+fi
+
 # Also log a short summary to journal so an operator who SSHs in immediately
 # sees something useful. The full creds file stays on disk (mode 0600).
 log "first-boot security setup complete; see ${CREDS_FILE} for new credentials"

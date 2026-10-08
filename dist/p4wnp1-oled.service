@@ -21,6 +21,12 @@ SuccessExitStatus=0
 NoNewPrivileges=yes
 ProtectHome=yes
 PrivateTmp=yes
+# ...with one exception. ProtectHome hides /root, and /root is where first
+# boot writes INITIAL_CREDENTIALS.txt. The panel shows those credentials once
+# and then erases every copy, so it has to be able to reach that one. Bound
+# back explicitly rather than by dropping ProtectHome, which would also
+# re-expose /home.
+BindPaths=/root
 
 [Install]
 WantedBy=multi-user.target
