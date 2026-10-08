@@ -321,7 +321,57 @@ directly, not one you expose.
 
 Being specific about this matters more than the feature list.
 
-**No physical Raspberry Pi was used at any point.**
+**Tested on hardware: a Raspberry Pi Zero W with a Waveshare 1.3inch OLED HAT.**
+Everything below that says "verified" without qualification was verified in a container; the
+section immediately after this one says exactly what a real board was shown to do, and what it
+was not.
+
+### What a real board was shown to do
+
+A Pi Zero W, flashed from the published `-oled-armhf` image and plugged into a laptop by USB.
+`tools/hardware-check.sh` talks to it over the USB ethernet link and reports **28 of 28**:
+
+```
+the link        ping; the device's own DHCP server handed this laptop 172.16.0.2
+the console     served on :8000
+access control  GetDeployedGadgetSetting, HIDRunScript, Reboot and DBBackup all 401 without a
+                token; a junk bearer 401; a cross-origin login 403; a rebound Host header 403;
+                a wrong password costs 3-4 seconds, every time, however you ask
+the API         gadget composed CDC_ECM + RNDIS + HID_KEYBOARD + HID_MOUSE
+                wlan0 172.24.0.1, bteth 172.26.0.1, usbeth 172.16.0.1
+                radio AP_UP on channel 6 -- the access point is on air
+                seven stored payloads listed; HIDGetRunningScriptJobs returns `ids`
+the engine      a HIDScript written to /tmp, run, and its result read back
+on the device   P4wnP1, ssh and p4wnp1-oled all active
+                /run/p4wnp1/local.token is 600 root
+                the AP PSK appears nowhere in the journal
+                GPIO 5,6,13,16,19,20,21 all `ip -- | hi` -- the HAT's eight controls are
+                inputs sitting idle, and nothing else on the board is holding them
+```
+
+The OLED console was driven by hand on the panel: the splash, the menu tree, joystick
+navigation, and the payload and radio screens.
+
+Running that check on a real board is also what found the three bugs v0.4.1 fixes, none of
+which any amount of green CI had noticed:
+
+- **every payload failed.** `ListStoredHIDScripts` returns bare names; `HIDRunScript` demands an
+  absolute path and refuses anything else. The panel passed one straight to the other. The unit
+  test asserted the bare name — it pinned what the code did rather than what the service accepts.
+- **the Jobs screen was always empty.** `HIDScriptJobList` is a list of `ids`; the client decoded
+  a shape the service has never sent. Unmarshalling into tags that match nothing is a zero value
+  in Go, not an error, so the screen said "nothing running" while payloads ran.
+- **three keys appeared dead.** They were read, debounced and delivered correctly, then dropped:
+  the menu screens bound neither KEY1 nor KEY2. A control that silently changes nothing is
+  indistinguishable from one that is not wired up.
+
+The checker itself was wrong six times before it was right, and every one of its faults looked
+like a device failure: a login posted as `login` instead of `username`, `RPC_CODE` assigned
+inside a command substitution and lost with the subshell, `\{\}` sent as a request body, the Pi OS
+login banner captured into every value read over ssh, a `stat` without `sudo` on a root-only
+directory — and worst, a GPIO check that could not find its tool, grepped the string `nogpio`,
+and announced that all eight pins were healthy. A green check that verified nothing is the
+reason the other five were worth chasing.
 
 *Verified by automation.* `make smoke` runs the **real service binary against the real data
 tree in a container** and checks 28 things end to end — all passing:
@@ -391,12 +441,18 @@ fallback meant to rescue it was the broken part. The console looked perfect thro
 the console authenticates normally. Nothing in the test suite had ever read the service's own
 log; three checks now do.
 
-*Not verified at all:* that an image boots. That USB gadget mode initialises on real silicon and
-a host enumerates the functions. That keystroke injection types correctly into a real machine.
-That hostapd brings up the access point. That Bluetooth pairs. That the trigger engine fires on
-real events. That any of this survives having the cable pulled out mid-write.
+*Still not verified, on hardware or anywhere:* that keystroke injection types correctly into a
+real host — the hardware check deliberately runs a script that presses **no keys**, because a
+health check that types into whatever window you have focused is not a health check. That
+Bluetooth pairs. That mass storage or the serial function work. That the trigger engine fires on
+real events. That any of it survives the cable being pulled mid-write.
 
-If you are evaluating this for real work, **boot it on a Pi first and check those yourself.**
+Also not yet on hardware: the v0.4.1 changes themselves. The board above was running v0.4.0 when
+it was tested, so the three fixes and the first-boot credentials screen are verified by their
+tests and by reading the framebuffer back, not yet by a flashed card.
+
+If you are evaluating this for real work, **boot it on a Pi and check those yourself** —
+`tools/hardware-check.sh` does the other twenty-eight for you.
 [KNOWN_ISSUES.md](KNOWN_ISSUES.md) tracks what is fixed and what is still open, including the
 cold-boot panic that made every freshly flashed device dead on arrival until this release.
 

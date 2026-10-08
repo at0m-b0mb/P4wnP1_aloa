@@ -350,22 +350,44 @@ sudo cat /root/INITIAL_CREDENTIALS.txt   <span class="c"># console password + Wi
           <li>The console driven in a real browser against the real service</li>
           <li>41 OLED tests: SH1106 addressing, debounce timing, 20,000 random button presses</li>
           <li>Every image mounted and inspected before it is published</li>
+          <li>Every field both clients send or read checked against the <code>.proto</code></li>
         </ul>
       </div>
       <div class="card">
-        <h3>Not verified at all</h3>
+        <h3>Checked on real hardware</h3>
         <p>
-          <strong>No physical Raspberry Pi has been used, and no OLED HAT has been connected.</strong>
+          A <strong>Raspberry Pi Zero W with a Waveshare 1.3inch OLED HAT</strong>, flashed from
+          the published image and plugged into a laptop.
+          <code>tools/hardware-check.sh</code> reports <strong>28 of 28</strong>.
         </p>
-        <p>
-          That an image boots. That USB gadget mode initialises on real silicon and a host
-          enumerates the functions. That keystroke injection types correctly into a real machine.
-          That hostapd brings up the access point. That a pixel lights.
-        </p>
-        <p>
-          If you are evaluating this for real work, boot it on a Pi and check those yourself.
-        </p>
+        <ul class="checks">
+          <li>It boots, and the panel lights: splash, menu tree, joystick navigation</li>
+          <li>The USB gadget enumerates on the host — CDC ECM, RNDIS, keyboard, mouse</li>
+          <li>The device's own DHCP server hands the laptop an address</li>
+          <li>hostapd brings the access point up: <code>AP_UP</code>, on air, channel 6</li>
+          <li>Every sampled RPC refuses an anonymous caller; cross-origin and a rebound
+              <code>Host</code> both refused; a wrong password costs 3–4&nbsp;seconds every time</li>
+          <li>A HIDScript written, run, and its result read back</li>
+          <li>All eight HAT controls read as idle inputs, and every one registers a press
+              at the pin</li>
+          <li>The AP pre-shared key appears nowhere in the journal</li>
+        </ul>
       </div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <h3>Still not verified</h3>
+      <p>
+        That <strong>keystroke injection types correctly into a real host</strong> — the hardware
+        check deliberately runs a script that presses no keys, because a health check that types
+        into whatever window you have focused is not a health check. That Bluetooth pairs. That
+        mass storage or the serial function work. That the trigger engine fires on real events.
+        That any of it survives the cable being pulled mid-write.
+      </p>
+      <p>
+        If you are evaluating this for real work, boot it on a Pi and check those yourself —
+        the script does the other twenty-eight for you.
+      </p>
     </div>
 
     <p class="lead" style="margin-top:28px">
