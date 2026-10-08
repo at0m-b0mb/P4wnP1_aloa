@@ -144,21 +144,52 @@ someone_can_log_in() {
     return 1
 }
 
+# Leaving the account LOCKED is the honest outcome when the password cannot be
+# delivered. An account whose secret exists only inside the device -- in
+# /root/INITIAL_CREDENTIALS.txt, which you must already be root to read -- is
+# not a way in, it is a deadlock. A locked account is still rescuable: put the
+# card in a reader and let Raspberry Pi Imager write userconf.txt.
+operator_delivery_failed() {
+    log "ERROR: cannot deliver a password for '${OPERATOR_USER}': $1"
+    log "ERROR: leaving the account LOCKED -- a secret nobody holds is worse than none"
+    log "ERROR: to get in, put the card in a reader and use Raspberry Pi Imager's"
+    log "ERROR: 'Set username and password', which writes ${BOOT_DIR}/userconf.txt"
+}
+
 if id -u "$OPERATOR_USER" >/dev/null 2>&1; then
     if someone_can_log_in; then
         log "another account can already log in; leaving '${OPERATOR_USER}' locked"
     elif [ "$(passwd -S "$OPERATOR_USER" 2>/dev/null | awk '{print $2}')" = "P" ]; then
         log "'${OPERATOR_USER}' already has a password; leaving it alone"
     else
-        OPERATOR_PW_SET=$(gen_password 20)
-        echo "${OPERATOR_USER}:${OPERATOR_PW_SET}" | chpasswd
-        log "issued a per-device password for '${OPERATOR_USER}'"
-        if [ -d "$BOOT_DIR" ] && [ -w "$BOOT_DIR" ]; then
-            cat > "${BOOT_DIR}/p4wnp1-credentials.txt" <<CREDS
+        # DELIVER FIRST, THEN SET.
+        #
+        # This used to run chpasswd and then try to write the file, warning if
+        # it could not. That warning described an unrecoverable device: the
+        # account now has a password, the only readable copy was never
+        # written, and the other copy lives in /root/INITIAL_CREDENTIALS.txt,
+        # which you need to be root to read, which needs the password. A
+        # locked account you can still rescue by putting the card back in a
+        # reader. An account with a secret nobody holds, you cannot.
+        #
+        # So the password is generated, written, and READ BACK, and only then
+        # applied. If delivery fails for any reason the account stays locked
+        # and the journal says so in terms that name the remedy.
+        OPERATOR_PW_CAND=$(gen_password 20)
+        OPERATOR_CREDS_FILE="${BOOT_DIR}/p4wnp1-credentials.txt"
+
+        # The write is INSIDE the if-condition on purpose. A command in a
+        # condition is exempt from `set -e`, so a FAT partition that is full
+        # or has been remounted read-only takes the failure branch below
+        # instead of killing first boot outright -- which would also skip the
+        # web admin bootstrap and the SSH host-key regeneration that come
+        # after it, turning one unreadable file into an unusable device.
+        if [ -d "$BOOT_DIR" ] && [ -w "$BOOT_DIR" ] &&
+           cat > "${OPERATOR_CREDS_FILE}" <<CREDS
 P4wnP1 A.L.O.A. -- first-boot credentials for THIS device
 
   ssh ${OPERATOR_USER}@172.16.0.1          (over the USB ethernet link)
-  password: ${OPERATOR_PW_SET}
+  password: ${OPERATOR_PW_CAND}
 
 This password was generated on this device at first boot. It is not shared
 with any other device.
@@ -178,10 +209,25 @@ To avoid this file entirely, set your own account at flash time -- Raspberry Pi
 Imager's "Set username and password" writes /boot/firmware/userconf.txt, and
 first boot then leaves this account locked.
 CREDS
-            log "wrote ${BOOT_DIR}/p4wnp1-credentials.txt -- read it, then delete it"
+        then
+            sync 2>/dev/null || true
+            # Read it back before trusting it. A full or read-only FAT
+            # partition can accept the redirect and keep nothing, and the
+            # only symptom would be an operator who cannot log in.
+            if [ -s "${OPERATOR_CREDS_FILE}" ] &&
+               grep -qF -- "${OPERATOR_PW_CAND}" "${OPERATOR_CREDS_FILE}" 2>/dev/null; then
+                echo "${OPERATOR_USER}:${OPERATOR_PW_CAND}" | chpasswd
+                OPERATOR_PW_SET="${OPERATOR_PW_CAND}"
+                log "issued a per-device password for '${OPERATOR_USER}'"
+                log "wrote ${OPERATOR_CREDS_FILE} -- read it from the card, then delete it"
+            else
+                rm -f "${OPERATOR_CREDS_FILE}" 2>/dev/null || true
+                operator_delivery_failed "the file could not be read back (partition full?)"
+            fi
         else
-            log "WARNING: ${BOOT_DIR} is not writable; the operator password is only in ${CREDS_FILE}"
+            operator_delivery_failed "${BOOT_DIR} is not writable"
         fi
+        unset OPERATOR_PW_CAND
     fi
 fi
 
