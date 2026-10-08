@@ -38,15 +38,40 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Create an empty draft for the builds to upload into
+      - name: Create an EMPTY draft for the builds to upload into
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "${{ inputs.version }}" >/dev/null 2>&1; then
-            echo "release ${{ inputs.version }} already exists; reusing it"
+          set -euo pipefail
+          V="${{ inputs.version }}"
+          if gh release view "$V" >/dev/null 2>&1; then
+            # A PUBLISHED release is never reused. Re-running a build over a
+            # live tag would swap the artifacts under everyone who already
+            # has the link.
+            if [ "$(gh release view "$V" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "::error::$V is already published; pick a new version" >&2
+              exit 1
+            fi
+            # Strip every asset off the reused draft.
+            #
+            # A cancelled or failed earlier run leaves behind whatever it had
+            # already uploaded, under exactly the names this run will use. It
+            # happened: a run cancelled at 21:07 had three of four images on
+            # the draft, built from code three fixes out of date, sitting
+            # there looking complete and correct. Nothing in the filename
+            # says which build produced it, and the completeness check later
+            # in this workflow counts them as present -- so a partial rebuild
+            # could publish a mixed set and call it verified.
+            echo "reusing draft $V; removing stale assets first"
+            gh release view "$V" --json assets --jq '.assets[].name' \
+              | while read -r a; do
+                  [ -n "$a" ] || continue
+                  echo "  deleting stale $a"
+                  gh release delete-asset "$V" "$a" --yes
+                done
           else
-            gh release create "${{ inputs.version }}" \
-              --title "${{ inputs.version }}" --notes "Build in progress..." --draft
+            gh release create "$V" \
+              --title "$V" --notes "Build in progress..." --draft
           fi
 
   build:
@@ -182,7 +207,9 @@ jobs:
             ( cd dist-images && cat ./*.sha256 )
             echo '```'
             echo
-            echo "Built by GitHub Actions from \`${GITHUB_SHA}\`. Every image was mounted"
+            echo "Built by GitHub Actions from \`${GITHUB_SHA}\` in run"
+            echo "[\`${GITHUB_RUN_ID}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
+            echo "Every image was mounted"
             echo "and inspected by image/lib/verify.sh before it was uploaded."
             echo
             echo "**Before you flash**, set a username and password in Raspberry Pi Imager:"
