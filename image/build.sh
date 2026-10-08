@@ -215,7 +215,28 @@ for ARCH in $ARCHES; do
     if [ "$COMPRESS" = "1" ]; then
         c "[$ARCH/$VARIANT] Compressing"
         rm -f "$OUT_IMG.xz"
-        xz -T0 -6 "$OUT_IMG" || die "xz failed"
+        # Compress to STDOUT rather than letting xz replace the file in place.
+        #
+        # In place, xz copies the source file's ownership onto the output, and
+        # the image was written by a privileged container running as root. On
+        # a machine where this script runs as an unprivileged user -- a GitHub
+        # runner, for one -- that copy fails with "Cannot set the file group:
+        # Operation not permitted" and xz treats it as fatal. Every image had
+        # built and passed verification; only the last step died, which is a
+        # miserable way to lose an hour of CI.
+        #
+        # Writing through a redirect means the output is created by this shell,
+        # owned by whoever is running it, and xz never touches ownership at all.
+        if ! xz -T0 -6 -c "$OUT_IMG" > "$OUT_IMG.xz"; then
+            rm -f "$OUT_IMG.xz"
+            die "xz failed"
+        fi
+        # The uncompressed image belongs to root for the same reason, so this
+        # can fail too -- and under `set -e` that would kill the build one
+        # line after the compression it was meant to finish. The leftover is
+        # harmless: on CI the runner is discarded, and locally it is a
+        # gitignored scratch file.
+        rm -f "$OUT_IMG" || info "could not remove $OUT_IMG (owned by root); harmless"
         OUT_FINAL="$OUT_IMG.xz"
     else
         OUT_FINAL="$OUT_IMG"
