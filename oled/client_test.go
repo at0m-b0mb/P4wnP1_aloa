@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/mame82/P4wnP1_aloa/common"
 )
 
 // The client names 20-odd RPCs as strings. A typo in one of them cannot fail
@@ -118,6 +120,20 @@ func (r *recorder) called(name string) bool {
 		}
 	}
 	return false
+}
+
+// count reports how many times an RPC was called. "Was it called" cannot
+// catch a call that fires once per item where it should fire once.
+func (r *recorder) count(name string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, c := range r.calls {
+		if c == name {
+			n++
+		}
+	}
+	return n
 }
 
 func (r *recorder) body(name string) string {
@@ -235,8 +251,34 @@ func TestClientSendsTheRightRequestShapes(t *testing.T) {
 	if !strings.Contains(out, "7") {
 		t.Errorf("background run reported %q, want the job id", out)
 	}
-	if got := rec.body("HIDRunScriptJob"); !strings.Contains(got, `"scriptPath":"x.js"`) {
-		t.Errorf("HIDRunScriptJob body = %s, want scriptPath", got)
+	// ABSOLUTE, under the HIDScripts directory.
+	//
+	// This assertion used to read `"scriptPath":"x.js"` -- it tested that the
+	// client sent the name it had been given, which it faithfully did, and
+	// which the service rejects out of hand with "path must be absolute".
+	// The test encoded the bug, so it passed on every machine until a payload
+	// was run on a real device and the OLED printed the refusal.
+	if got := rec.body("HIDRunScriptJob"); !strings.Contains(got, `"scriptPath":"`+HIDScriptDir+`/x.js"`) {
+		t.Errorf("HIDRunScriptJob body = %s, want an absolute path under %s", got, HIDScriptDir)
+	}
+
+	// Only a bare name is a payload name. Anything with a separator in it --
+	// including an absolute path -- never reaches the wire.
+	for _, bad := range []string{"../../etc/shadow", "sub/x.js", "/tmp/x.js", "..", ""} {
+		if _, err := c.RunHIDScript(bad, false); err == nil {
+			t.Errorf("RunHIDScript(%q) was accepted", bad)
+		}
+	}
+}
+
+// The run RPC checks the path it is given against common.PATH_HID_SCRIPTS. If
+// that constant ever moves, this client would go on building paths to the old
+// place and every payload would fail with a refusal that names a directory
+// nobody changed.
+func TestHIDScriptDirMatchesService(t *testing.T) {
+	if HIDScriptDir != common.PATH_HID_SCRIPTS {
+		t.Fatalf("oled builds payload paths under %s, the service allows %s",
+			HIDScriptDir, common.PATH_HID_SCRIPTS)
 	}
 }
 
@@ -273,7 +315,12 @@ func TestClientParsesStatus(t *testing.T) {
 	rec.reply["GetWiFiState"] = `{"mode":"AP","ssid":"P4wnP1"}`
 	rec.reply["GetDeployedTriggerActionSet"] =
 		`{"TriggerActions":[{"isActive":true},{"isActive":false}]}`
-	rec.reply["HIDGetRunningScriptJobs"] = `{"jobs":[{"id":3,"scriptPath":"a.js"}]}`
+	// The shape the SERVICE sends: HIDScriptJobList is a bare list of ids.
+	// This stub used to say {"jobs":[{"id":3,"scriptPath":"a.js"}]}, which no
+	// version of the service has ever produced -- the test and the client
+	// agreed with each other and both disagreed with the device, so the Jobs
+	// screen was empty on hardware while the suite was green.
+	rec.reply["HIDGetRunningScriptJobs"] = `{"ids":[3,4]}`
 
 	st, err := c.Status()
 	if err != nil {
@@ -291,8 +338,13 @@ func TestClientParsesStatus(t *testing.T) {
 	if st.Reflexes != 2 || st.ReflexesArmed != 1 {
 		t.Errorf("reflexes = %d/%d, want 1/2", st.ReflexesArmed, st.Reflexes)
 	}
-	if st.RunningJobs != 1 {
-		t.Errorf("jobs = %d, want 1", st.RunningJobs)
+	if st.RunningJobs != 2 {
+		t.Errorf("jobs = %d, want 2", st.RunningJobs)
+	}
+	// Counting jobs must not cost a call per job: the dashboard polls this
+	// every five seconds on a single-core board.
+	if n := rec.count("HIDGetRunningJobState"); n != 0 {
+		t.Errorf("the status poll described %d jobs; it only needs the count", n)
 	}
 }
 

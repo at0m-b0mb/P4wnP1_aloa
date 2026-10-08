@@ -52,7 +52,7 @@ jobs:
       - name: Console views render
         run: ./tools/check-render.sh
 
-      - name: Console RPC payloads match the proto
+      - name: RPC payloads match the proto (console and OLED client)
         run: python3 tools/check-rpc-shapes.py
 
       - name: Palette meets WCAG AA

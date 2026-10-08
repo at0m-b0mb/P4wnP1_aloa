@@ -142,6 +142,198 @@ def check_response_reads(messages):
     return problems
 
 
+
+# ---------------------------------------------------------------------------
+# The OLED client speaks the same JSON API from Go, with the same hazard.
+#
+# DiscardUnknown drops a misspelled request field in silence, and a response
+# struct whose json tag does not exist just stays at its zero value. The OLED
+# client was never checked here, and it shipped with the bug this whole file
+# was written to catch -- a different shape of it: HIDRunScript was handed a
+# bare payload name where the service demands an absolute path, so every
+# payload run from the panel failed with "path must be absolute". A field-name
+# checker could not have caught that one, but it can catch its siblings, and
+# the client has twenty more call sites that nothing was reading.
+# ---------------------------------------------------------------------------
+
+GO_CLIENT = ROOT / "oled/client.go"
+
+
+def _balanced(src, i, open_ch, close_ch):
+    """Index just past the group starting at src[i] == open_ch."""
+    depth = 0
+    while i < len(src):
+        c = src[i]
+        if c == '"':                       # skip string literals
+            i += 1
+            while i < len(src) and src[i] != '"':
+                i += 2 if src[i] == "\\" else 1
+        elif c == '`':
+            i = src.index('`', i + 1)
+        elif c == open_ch:
+            depth += 1
+        elif c == close_ch:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return len(src)
+
+
+def _split_args(s):
+    """Split a call's argument list on top-level commas."""
+    args, depth, cur, i = [], 0, "", 0
+    while i < len(s):
+        c = s[i]
+        if c == '"':
+            j = i + 1
+            while j < len(s) and s[j] != '"':
+                j += 2 if s[j] == "\\" else 1
+            cur += s[i:j + 1]
+            i = j + 1
+            continue
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        if c == "," and depth == 0:
+            args.append(cur.strip())
+            cur = ""
+        else:
+            cur += c
+        i += 1
+    if cur.strip():
+        args.append(cur.strip())
+    return args
+
+
+def _map_keys(expr):
+    """Top-level string keys of a Go map literal, or None if not a literal."""
+    m = re.match(r"map\[string\][\w.\[\]{}]*\{", expr)
+    if not m:
+        return None
+    body = expr[m.end():expr.rindex("}")]
+    keys, depth, i = [], 0, 0
+    while i < len(body):
+        c = body[i]
+        if c == '"':
+            j = i + 1
+            while j < len(body) and body[j] != '"':
+                j += 2 if body[j] == "\\" else 1
+            if depth == 0 and re.match(r"\s*:", body[j + 1:]):
+                keys.append(body[i + 1:j])
+            i = j + 1
+            continue
+        if c in "{[(":
+            depth += 1
+        elif c in "}])":
+            depth -= 1
+        i += 1
+    return keys
+
+
+def _struct_tags(body):
+    """Top-level json tags of a Go struct literal body.
+
+    Returns [(tag, nested_body_or_None)]. A nested anonymous struct is
+    returned with its own body so the caller can recurse into the message
+    that field's proto type names -- the first version of this scanned line
+    by line and reported the INNER tags as if they were top level, which made
+    three correctly-written response structs look broken and would have hidden
+    a genuinely wrong nested tag behind the noise.
+    """
+    out, i, n = [], 0, len(body)
+    while i < n:
+        if body[i] in " \t\n":
+            i += 1
+            continue
+        # Consume one field declaration, which ends at a newline unless it
+        # opens an anonymous struct.
+        j, nested, after = i, None, i
+        while j < n and body[j] != "\n":
+            if body[j] == "{":
+                k = _balanced(body, j, "{", "}")
+                nested = body[j + 1:k - 1]
+                j = k
+                # The field's OWN tag follows the closing brace. Searching the
+                # whole declaration found the first tag INSIDE the nested
+                # struct instead, so every nested field reported against the
+                # outer message and the outer field was never checked at all.
+                after = k
+                continue
+            if body[j] == "`":
+                j = body.index("`", j + 1) + 1
+                continue
+            j += 1
+        decl = body[i:j]
+        m = re.search(r'`json:"([^",]+)', body[after:j])
+        if m:
+            out.append((m.group(1), nested))
+        i = j + 1
+    return out
+
+
+def _check_tags(tags, msg, messages, where, problems):
+    fields = messages.get(msg)
+    if fields is None:
+        return
+    for tag, nested in tags:
+        if tag not in fields:
+            problems.append(
+                f"{where}: reads '{tag}' off {msg}, which has no such field.\n"
+                f"        {msg} fields: {', '.join(sorted(fields)) or '(none)'}")
+            continue
+        if nested:
+            _check_tags(_struct_tags(nested), fields[tag], messages, where, problems)
+
+
+def check_go_client(messages, rpcs):
+    problems, checked = [], 0
+    src = GO_CLIENT.read_text()
+    # Function bodies, so a response variable is resolved in its own scope.
+    funcs = [(m.start(), m.end()) for m in re.finditer(r"\nfunc ", src)]
+    bounds = [(a, funcs[i + 1][0] if i + 1 < len(funcs) else len(src))
+              for i, (a, _) in enumerate(funcs)]
+
+    for a, b in bounds:
+        body = src[a:b]
+        for m in re.finditer(r"c\.call\(", body):
+            end = _balanced(body, m.end() - 1, "(", ")")
+            args = _split_args(body[m.end():end - 1])
+            if not args or not args[0].startswith('"'):
+                continue
+            method = args[0].strip('"')
+            if method not in rpcs:
+                problems.append(f"client.go: c.call({method!r}) -- no such RPC in grpc.proto")
+                continue
+            req_msg, resp_msg = rpcs[method]
+            checked += 1
+
+            # Request: literal map keys only.
+            if len(args) > 1:
+                keys = _map_keys(args[1])
+                if keys is not None:
+                    fields = messages.get(req_msg, {})
+                    for k in keys:
+                        if k not in fields:
+                            problems.append(
+                                f"client.go: {method} sends '{k}' but {req_msg} has no such field.\n"
+                                f"        {req_msg} fields: {', '.join(sorted(fields)) or '(none)'}")
+
+            # Response: the struct the reply is decoded into.
+            if len(args) > 2 and args[2].startswith("&"):
+                var = args[2][1:].strip()
+                d = re.search(r"var\s+" + re.escape(var) + r"\s+struct\s*\{", body)
+                if d:
+                    j = _balanced(body, d.end() - 1, "{", "}")
+                    _check_tags(_struct_tags(body[d.end():j - 1]), resp_msg,
+                                messages, f"client.go: {method}", problems)
+                elif var == "out" and "stringArray" in body:
+                    _check_tags([("msgArray", None)], resp_msg, messages,
+                                f"client.go: {method}", problems)
+    return problems, checked
+
+
 def main():
     messages, rpcs = parse_proto()
     print(f"proto: {len(messages)} messages, {len(rpcs)} rpcs")
@@ -166,16 +358,19 @@ def main():
                     f"{fname}: {method} sends '{k}' but {req} has no such field.\n"
                     f"        {req} fields: {near}")
 
-    resp_problems = check_response_reads(messages)
-    problems.extend(resp_problems)
-    print(f"checked {checked} call sites with literal payloads, "
+    problems.extend(check_response_reads(messages))
+
+    go_problems, go_checked = check_go_client(messages, rpcs)
+    problems.extend(go_problems)
+    print(f"checked {checked} console call sites with literal payloads, "
+          f"{go_checked} OLED client call sites, "
           f"plus the keys the console reads off GadgetSettings")
     if problems:
         print(f"\nFAIL -- {len(problems)} problem(s):")
         for p in problems:
             print("  - " + p)
         return 1
-    print("PASS -- every field the console sends exists in its request message")
+    print("PASS -- every field the console and the OLED client send or read exists")
     return 0
 
 

@@ -30,6 +30,9 @@ type Client interface {
 	// RunHIDScript types a stored payload into the attached host.
 	RunHIDScript(name string, background bool) (string, error)
 	RunningJobs() ([]Job, error)
+	// DescribeJob labels one running job. Separate from RunningJobs because
+	// it costs an extra call per job and the dashboard only wants the count.
+	DescribeJob(id int) string
 	CancelAllJobs() error
 
 	// USB composition.
@@ -271,9 +274,48 @@ func (c *APIClient) StartupTemplate() (string, error) {
 	return out.Msg, nil
 }
 
+// HIDScriptDir is where the service keeps stored payloads.
+//
+// It has to be spelled out here because the two RPCs disagree about what a
+// payload is called: ListStoredHIDScripts returns BARE NAMES ("hidtest1.js"),
+// and HIDRunScript takes an ABSOLUTE PATH, which it then checks is inside this
+// directory or /tmp. Feeding the name straight back from one to the other --
+// which is what this client did -- is rejected on the device with
+//
+//	HIDScript path rejected: path must be absolute
+//
+// and that is exactly what the OLED showed the first time a payload was run on
+// real hardware. Nothing off-device catches it: the fake client never saw a
+// path, so every test passed.
+//
+// Kept in step with common.PATH_HID_SCRIPTS by TestHIDScriptDirMatchesService.
+const HIDScriptDir = "/usr/local/P4wnP1/HIDScripts"
+
+// hidScriptPath turns a stored payload name into the absolute path the service
+// demands.
+//
+// Only a bare name is accepted. This screen runs what ListStoredHIDScripts
+// reported and nothing else, so a separator in the name means the list is not
+// what we think it is; refusing is both the narrower contract and a better
+// thing to read on a 21-column screen than a path-traversal message from the
+// far side of the API.
+func hidScriptPath(name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("no payload selected")
+	}
+	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+		return "", fmt.Errorf("bad payload name")
+	}
+	return HIDScriptDir + "/" + name, nil
+}
+
 func (c *APIClient) RunHIDScript(name string, background bool) (string, error) {
+	path, err := hidScriptPath(name)
+	if err != nil {
+		return "", err
+	}
 	req := map[string]interface{}{
-		"scriptPath":     name,
+		"scriptPath":     path,
 		"timeoutSeconds": 0,
 	}
 	if background {
@@ -297,21 +339,66 @@ func (c *APIClient) RunHIDScript(name string, background bool) (string, error) {
 	return res.ResultJson, nil
 }
 
+// RunningJobs lists the HIDScript jobs the service has running.
+//
+// The reply is HIDScriptJobList, which is a bare list of IDS -- nothing else.
+// This client decoded it as {"jobs":[{"id","scriptPath"}]}, a shape the
+// service has never sent, so the list came back empty every single time:
+// the Jobs screen always said "nothing running" and the dashboard always said
+// "Jobs 0 running", while payloads were in fact running. Unmarshalling into a
+// struct whose tags match nothing is not an error in Go, it is a zero value,
+// so nothing anywhere reported a problem.
+//
+// One call. The dashboard polls this every five seconds and only wants the
+// count, so it must stay cheap -- names are fetched separately by the screen
+// that displays them.
 func (c *APIClient) RunningJobs() ([]Job, error) {
 	var out struct {
-		Jobs []struct {
-			Id         int    `json:"id"`
-			ScriptPath string `json:"scriptPath"`
-		} `json:"jobs"`
+		Ids []int `json:"ids"`
 	}
 	if err := c.call("HIDGetRunningScriptJobs", nil, &out); err != nil {
 		return nil, err
 	}
-	jobs := make([]Job, 0, len(out.Jobs))
-	for _, j := range out.Jobs {
-		jobs = append(jobs, Job{ID: j.Id, Name: j.ScriptPath})
+	jobs := make([]Job, 0, len(out.Ids))
+	for _, id := range out.Ids {
+		jobs = append(jobs, Job{ID: id})
 	}
 	return jobs, nil
+}
+
+// DescribeJob returns a short label for one running job.
+//
+// There is no RPC that reports what a job was started FROM: HIDScriptJobList
+// carries ids and HIDRunningJobStateResult carries the script's source text,
+// not its path. So the label is the first meaningful line of the source, which
+// for every payload in this tree is its header comment. Costs one call, which
+// is why only the Jobs screen asks and only for the rows it can show.
+func (c *APIClient) DescribeJob(id int) string {
+	var st struct {
+		Source string `json:"source"`
+	}
+	if err := c.call("HIDGetRunningJobState", map[string]int{"id": id}, &st); err != nil {
+		return ""
+	}
+	return firstMeaningfulLine(st.Source)
+}
+
+// firstMeaningfulLine picks the first line of a script worth showing, with its
+// comment marker stripped.
+func firstMeaningfulLine(src string) string {
+	for _, raw := range strings.Split(src, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		line = strings.TrimLeft(line, "/*# \t")
+		line = strings.TrimRight(line, "*/ \t")
+		if line == "" {
+			continue
+		}
+		return Truncate(line, 16)
+	}
+	return ""
 }
 
 func (c *APIClient) CancelAllJobs() error {

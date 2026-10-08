@@ -13,23 +13,6 @@ import (
 	"periph.io/x/periph/host"
 )
 
-// GPIO pin names for the Waveshare 1.3inch OLED HAT, from its wiki. All eight
-// controls are active-low with the internal pull-up engaged.
-//
-// These are BCM numbers, which is what periph's names use. They are a
-// variable rather than a constant block so an operator with a differently
-// wired panel can override them in the daemon's config without a rebuild.
-var DefaultPins = map[Button]string{
-	BtnUp:    "GPIO6",
-	BtnDown:  "GPIO19",
-	BtnLeft:  "GPIO5",
-	BtnRight: "GPIO26",
-	BtnPress: "GPIO13",
-	BtnKey1:  "GPIO21",
-	BtnKey2:  "GPIO20",
-	BtnKey3:  "GPIO16",
-}
-
 // GPIOInput polls the joystick and keys.
 //
 // Polling at 50Hz rather than using edge interrupts, deliberately. periph's
@@ -108,4 +91,21 @@ func (g *GPIOInput) Events() <-chan Button { return g.ch }
 func (g *GPIOInput) Close() error {
 	g.once.Do(func() { close(g.stop) })
 	return nil
+}
+
+// Levels reads every control right now, bypassing the debouncer.
+func (g *GPIOInput) Levels() map[Button]bool {
+	out := make(map[Button]bool, len(g.pins))
+	for btn, pin := range g.pins {
+		out[btn] = pin.Read() == gpio.Low // active low
+	}
+	return out
+}
+
+// PinName reports which GPIO this control is wired to.
+func (g *GPIOInput) PinName(b Button) string {
+	if p, ok := g.pins[b]; ok {
+		return p.Name()
+	}
+	return "-"
 }

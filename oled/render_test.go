@@ -121,15 +121,36 @@ func path(parts ...[]Button) []Button {
 	return out
 }
 
-// Root menu order, named so a reordering of the menu breaks these by name
-// rather than by silently walking somewhere else.
+// rowOf returns how many down-presses reach the named row of a menu, read
+// from the menu itself.
+//
+// These paths used to be literal row numbers with a comment claiming that
+// reordering a menu would break them by name. It would not, and it did not:
+// adding "Buttons test" to System moved Reboot from row 4 to row 5, and the
+// row-4 path walked onto "LED: off" instead. One test reported "reboot did
+// NOT happen after confirming", which was true and useless. The dangerous
+// case is the other one -- a shift that lands on Shut down and passes, while
+// the test still says it is checking Reboot.
+func rowOf(m *Menu, label string) int {
+	for i, it := range m.items {
+		if it.Label == label {
+			return i
+		}
+	}
+	panic("no menu row labelled " + label)
+}
+
 var (
-	toStatus   = path(down(0), []Button{BtnEnter})
-	toLoadouts = path(down(1), []Button{BtnEnter})
-	toCable    = path(down(2), []Button{BtnEnter})
-	toPayloads = path(down(3), []Button{BtnEnter})
-	toJobs     = path(down(7), []Button{BtnEnter})
-	toSystem   = path(down(8), []Button{BtnEnter})
+	toStatus   = path(down(rowOf(NewRoot(), "Status")), []Button{BtnEnter})
+	toLoadouts = path(down(rowOf(NewRoot(), "Loadouts")), []Button{BtnEnter})
+	toCable    = path(down(rowOf(NewRoot(), "Cable (USB)")), []Button{BtnEnter})
+	toPayloads = path(down(rowOf(NewRoot(), "Payloads")), []Button{BtnEnter})
+	toJobs     = path(down(rowOf(NewRoot(), "Jobs")), []Button{BtnEnter})
+	toSystem   = path(down(rowOf(NewRoot(), "System")), []Button{BtnEnter})
+
+	sysReboot   = down(rowOf(NewSystemMenu(), "Reboot"))
+	sysShutdown = down(rowOf(NewSystemMenu(), "Shut down"))
+	sysButtons  = down(rowOf(NewSystemMenu(), "Buttons test"))
 )
 
 // Each walk starts from a FRESH app and spells out the whole path from the
@@ -164,8 +185,10 @@ func script() []walk {
 			want: []string{"Jobs", "win_recon.js", "stop all"}},
 		{label: "13-system", keys: toSystem,
 			want: []string{"System", "Backups", "LED", "Reboot", "Shut down"}},
-		{label: "14-reboot-confirm", keys: path(toSystem, down(4), []Button{BtnEnter}),
+		{label: "14-reboot-confirm", keys: path(toSystem, sysReboot, []Button{BtnEnter}),
 			want: []string{"Reboot", "Yes", "No"}},
+		{label: "15-buttons-test", keys: path(toSystem, sysButtons, []Button{BtnEnter}),
+			want: []string{"Buttons", "Up", "KEY1", "KEY2", "KEY3", "left exits"}},
 	}
 }
 

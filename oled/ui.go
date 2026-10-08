@@ -49,9 +49,22 @@ type App struct {
 	Client Client
 	stack  []View
 
+	// Input is the source the presses arrived from, kept only so the button
+	// test screen can read the pins directly. Nil elsewhere.
+	Input Input
+
 	toast     string
 	toastTill time.Time
 	nowFn     func() time.Time
+
+	// changes counts anything the operator can SEE: a toast, a push, a pop, a
+	// jump home. Handle uses it to tell "the screen dealt with that press"
+	// from "nothing happened at all", which is the difference between a key
+	// that is unbound and a key that is not wired up.
+	changes int
+
+	// seen counts debounced presses per control, for the button test.
+	seen map[Button]int
 
 	// Quit is closed when the user asks to exit (simulator only; on the
 	// device the daemon runs until stopped).
@@ -81,6 +94,7 @@ func (a *App) Top() View {
 
 func (a *App) Push(v View) {
 	a.stack = append(a.stack, v)
+	a.changes++
 	if r, ok := v.(Refresher); ok {
 		r.Refresh(a)
 	}
@@ -89,12 +103,14 @@ func (a *App) Push(v View) {
 func (a *App) Pop() {
 	if len(a.stack) > 1 {
 		a.stack = a.stack[:len(a.stack)-1]
+		a.changes++
 	}
 }
 
 func (a *App) Home() {
 	if len(a.stack) > 1 {
 		a.stack = a.stack[:1]
+		a.changes++
 	}
 }
 
@@ -106,6 +122,7 @@ func (a *App) Quitting() bool { return a.quit }
 func (a *App) Toast(format string, args ...interface{}) {
 	a.toast = fmt.Sprintf(format, args...)
 	a.toastTill = a.now().Add(3 * time.Second)
+	a.changes++
 }
 
 func (a *App) activeToast() string {
@@ -115,13 +132,30 @@ func (a *App) activeToast() string {
 	return ""
 }
 
-// Handle routes a press. Back and home are handled centrally so no screen can
-// forget to implement them and strand the operator.
+// Handle routes a press.
+//
+// The screen gets first refusal. If it does nothing the operator can see, the
+// three keys fall back to their documented meanings here, so that KEY1, KEY2
+// and KEY3 always answer on every screen in the tree.
+//
+// That fallback is not a nicety. The first hardware report on this board was
+// "the joystick is working but I think the keys doesn't work" -- made from the
+// Radio menu, which is a plain Menu, and Menu bound neither KEY1 (nothing to
+// act on) nor KEY2 (nothing to refresh). Both keys were read correctly,
+// debounced correctly and delivered correctly, and then dropped on the floor.
+// A control that silently does nothing is indistinguishable from a control
+// that is not connected, so now there is no such control.
 func (a *App) Handle(b Button) {
 	v := a.Top()
 	if v == nil {
 		return
 	}
+	if a.seen == nil {
+		a.seen = map[Button]int{}
+	}
+	a.seen[b]++
+
+	before := a.changes
 	switch v.Handle(b, a) {
 	case ActPop:
 		a.Pop()
@@ -129,8 +163,36 @@ func (a *App) Handle(b Button) {
 		a.Home()
 	case ActQuit:
 		a.quit = true
+		return
+	}
+	if a.changes != before {
+		return // the screen answered for itself
+	}
+
+	switch b {
+	case BtnRefresh:
+		// A no-op on a screen that holds no device data, but the toast is
+		// the point: it proves the key reached the UI.
+		a.Refresh()
+		a.Toast("refreshed")
+	case BtnHome:
+		if a.Depth() > 1 {
+			a.Home()
+			a.Toast("home")
+		} else {
+			// Saying so matters: pressing KEY3 at the root is the single most
+			// likely way to conclude the key is dead, because the correct
+			// behaviour there is to change nothing.
+			a.Toast("already home")
+		}
+	case BtnAction:
+		a.Toast("KEY1: nothing here")
 	}
 }
+
+// Seen reports how many debounced presses of b have reached the UI. Used by
+// the button test to separate a dead pin from an unbound key.
+func (a *App) Seen(b Button) int { return a.seen[b] }
 
 // Refresh re-reads the current screen's data.
 func (a *App) Refresh() {

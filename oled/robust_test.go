@@ -324,9 +324,9 @@ func TestDestructiveActionsNeedConfirmationAndCancelDoesNothing(t *testing.T) {
 		keys []Button
 		did  func(*FakeClient) bool
 	}{
-		{"reboot", path(toSystem, down(4), []Button{BtnEnter}),
+		{"reboot", path(toSystem, sysReboot, []Button{BtnEnter}),
 			func(c *FakeClient) bool { return c.Rebooted }},
-		{"shutdown", path(toSystem, down(5), []Button{BtnEnter}),
+		{"shutdown", path(toSystem, sysShutdown, []Button{BtnEnter}),
 			func(c *FakeClient) bool { return c.ShutDown }},
 		{"deploy", path(toLoadouts, []Button{BtnEnter, BtnEnter}),
 			func(c *FakeClient) bool { return c.Called("Deploy(") }},

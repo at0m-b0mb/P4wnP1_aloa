@@ -117,9 +117,6 @@ func (s *StatusView) Handle(b Button, app *App) Action {
 		if s.cur.first < len(s.lines())-bodyRows {
 			s.cur.first++
 		}
-	case BtnRefresh:
-		s.Refresh(app)
-		app.Toast("refreshed")
 	case BtnBack:
 		return ActPop
 	case BtnHome:
@@ -187,9 +184,6 @@ func (l *StoredList) Handle(b Button, app *App) Action {
 		l.cur.move(-1)
 	case BtnDown:
 		l.cur.move(1)
-	case BtnRefresh:
-		l.Refresh(app)
-		app.Toast("refreshed")
 	case BtnBack:
 		return ActPop
 	case BtnHome:
@@ -229,7 +223,18 @@ func (l *StoredList) actionsFor(name string) View {
 						a.Push(NewTextView("Failed", err.Error()))
 						return
 					}
-					a.Toast("deployed")
+					// Land on Status, not on a toast.
+					//
+					// Deploying the stored WiFi config called "startup" and
+					// being told "deployed" is not an answer to "did the
+					// access point come up?". The first thing the operator
+					// did on hardware was deploy it and then ask what had
+					// happened -- fairly, because the only evidence was a
+					// word that disappeared after three seconds. Status
+					// reads the device back: interfaces, addresses, the
+					// radio's actual mode and SSID.
+					a.Toast("deployed %s", Truncate(name, 10))
+					a.Push(NewStatusView())
 				})
 		}})
 	}
@@ -241,7 +246,13 @@ func (l *StoredList) actionsFor(name string) View {
 						a.Toast("%s", Truncate(err.Error(), Cols-1))
 						return
 					}
-					a.Toast("set for boot")
+					// Say plainly that nothing changes yet, because nothing
+					// visibly does and the natural reading of a success
+					// message is that it already took effect.
+					a.Push(NewTextView("Boot loadout",
+						"Saved. "+name+" will be loaded the next time the "+
+							"device boots. Nothing has changed right now -- "+
+							"use Deploy now to apply it immediately."))
 				})
 		}})
 	}
@@ -351,9 +362,6 @@ func (u *USBView) Handle(b Button, app *App) Action {
 		}
 		u.toggles[u.cur.sel].On = !u.toggles[u.cur.sel].On
 		u.dirty = true
-	case BtnRefresh:
-		u.Refresh(app)
-		app.Toast("reloaded")
 	case BtnAction:
 		if !u.dirty {
 			app.Toast("no changes")
@@ -452,9 +460,6 @@ func (p *PayloadList) Handle(b Button, app *App) Action {
 		p.cur.move(-1)
 	case BtnDown:
 		p.cur.move(1)
-	case BtnRefresh:
-		p.Refresh(app)
-		app.Toast("refreshed")
 	case BtnEnter, BtnConfirm:
 		if len(p.names) > 0 {
 			p.run(app, p.names[p.cur.sel], false)
@@ -498,6 +503,16 @@ func (j *JobsView) Refresh(app *App) {
 	j.err = ""
 	j.jobs = jobs
 	j.cur.setLen(len(jobs))
+
+	// Label only what fits on the panel. Each one is another round trip to
+	// the service, and a Pi Zero W polling eight of them every five seconds
+	// to fill rows nobody can see is a poor trade.
+	for i := range j.jobs {
+		if i >= bodyRows {
+			break
+		}
+		j.jobs[i].Name = app.Client.DescribeJob(j.jobs[i].ID)
+	}
 }
 
 func (j *JobsView) Render(fb *Framebuffer, _ *App) {
@@ -514,6 +529,9 @@ func (j *JobsView) Render(fb *Framebuffer, _ *App) {
 		fb.Text(0, bodyPxTop+LineH, "  nothing running")
 	default:
 		j.cur.drawRows(fb, func(i int) string {
+			if j.jobs[i].Name == "" {
+				return fmt.Sprintf("job %d", j.jobs[i].ID)
+			}
 			return fmt.Sprintf("%d %s", j.jobs[i].ID, j.jobs[i].Name)
 		})
 	}
@@ -525,9 +543,6 @@ func (j *JobsView) Handle(b Button, app *App) Action {
 		j.cur.move(-1)
 	case BtnDown:
 		j.cur.move(1)
-	case BtnRefresh:
-		j.Refresh(app)
-		app.Toast("refreshed")
 	case BtnAction:
 		if len(j.jobs) == 0 {
 			app.Toast("nothing running")
@@ -589,10 +604,17 @@ func NewSystemMenu() *Menu {
 					a.Toast("shutting down")
 				})
 		}},
+		{"Buttons test", func(*App) View { return NewButtonTest() }},
 		{"About", func(*App) View {
 			return NewTextView("About", "P4wnP1 A.L.O.A. on-device console. "+
 				"Up/down move, right or press enters, left goes back. "+
-				"KEY1 is the action named on the bottom line, KEY2 refreshes, KEY3 returns here.")
+				"KEY1 is the action named on the bottom line, KEY2 refreshes, "+
+				"KEY3 returns to the root. Every key always answers: if it has "+
+				"nothing to do on a screen it says so. "+
+				"The HAT uses GPIO 5,6,13,16,19,20,21 for its controls and "+
+				"24,25 for the panel -- a reflex set that drives any of those "+
+				"as an output will fight this screen. "+
+				"Buttons test under System shows the live pin state.")
 		}},
 	})
 	m.hint = "KEY3 home"

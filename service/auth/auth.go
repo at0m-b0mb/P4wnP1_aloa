@@ -61,12 +61,12 @@ const (
 
 // Errors exposed from the package. Callers compare via errors.Is.
 var (
-	ErrUnauthenticated   = errors.New("auth: unauthenticated")
-	ErrInvalidToken      = errors.New("auth: invalid or expired token")
+	ErrUnauthenticated    = errors.New("auth: unauthenticated")
+	ErrInvalidToken       = errors.New("auth: invalid or expired token")
 	ErrInvalidCredentials = errors.New("auth: invalid username or password")
-	ErrUserNotFound      = errors.New("auth: user not found")
-	ErrUserExists        = errors.New("auth: user already exists")
-	ErrWeakPassword      = errors.New("auth: password too weak (need 12+ chars)")
+	ErrUserNotFound       = errors.New("auth: user not found")
+	ErrUserExists         = errors.New("auth: user already exists")
+	ErrWeakPassword       = errors.New("auth: password too weak (need 12+ chars)")
 )
 
 // Session is the in-memory record of a successful login.

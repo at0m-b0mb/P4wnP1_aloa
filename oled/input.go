@@ -195,3 +195,50 @@ func (d *Debouncer) Update(b Button, held bool) bool {
 	}
 	return false
 }
+
+// DefaultPins is the wiring of the Waveshare 1.3inch OLED HAT, from its wiki.
+// All eight controls are active-low with the internal pull-up engaged.
+//
+// BCM numbers, which is what periph's names use. A variable rather than a
+// constant block so an operator with a differently wired panel can override
+// them without a rebuild.
+//
+// It lives in the portable file, not next to the GPIO driver, because it is
+// the BOARD's wiring rather than anything about Linux -- and because the
+// button test and its tests both need to name a pin on a machine that has no
+// GPIO at all. While it was behind the linux build tag, nothing off-device
+// could so much as print it.
+var DefaultPins = map[Button]string{
+	BtnUp:    "GPIO6",
+	BtnDown:  "GPIO19",
+	BtnLeft:  "GPIO5",
+	BtnRight: "GPIO26",
+	BtnPress: "GPIO13",
+	BtnKey1:  "GPIO21",
+	BtnKey2:  "GPIO20",
+	BtnKey3:  "GPIO16",
+}
+
+// AllButtons is every control, in the order the button test lists them:
+// joystick first, then the three keys down the edge.
+var AllButtons = []Button{
+	BtnUp, BtnDown, BtnLeft, BtnRight, BtnPress,
+	BtnKey1, BtnKey2, BtnKey3,
+}
+
+// LevelReader is implemented by an Input that can report the RAW, undebounced
+// state of each control.
+//
+// This exists for one screen: the button test. Everything else in the UI sees
+// debounced presses, which is right -- but it means a report of "the keys
+// don't work" cannot be answered. The pin could be unreadable, the wiring
+// could differ from this board revision, the debouncer could be eating the
+// press, or the key could simply be unbound on that screen. Showing the live
+// pin next to the press count separates all four, on the device, with no
+// console and no login.
+type LevelReader interface {
+	Levels() map[Button]bool
+	// PinName is what the pin is called on the board, so an operator can
+	// check it against the silkscreen rather than against a rebuild.
+	PinName(b Button) string
+}

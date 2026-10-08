@@ -221,6 +221,29 @@ func (f *FakeClient) Shutdown() error {
 	return nil
 }
 
+// CountCalls reports how many recorded calls contain sub. "Did it happen" is
+// not always the question: a refresh that fires twice per press is a bug you
+// can only see by counting.
+func (f *FakeClient) CountCalls(sub string) int {
+	n := 0
+	for _, c := range f.Calls {
+		if strings.Contains(c, sub) {
+			n++
+		}
+	}
+	return n
+}
+
+func (f *FakeClient) DescribeJob(id int) string {
+	f.note("DescribeJob(%d)", id)
+	for _, j := range f.Jobs {
+		if j.ID == id {
+			return j.Name
+		}
+	}
+	return ""
+}
+
 // Called reports whether any recorded call contains sub.
 func (f *FakeClient) Called(sub string) bool {
 	for _, c := range f.Calls {

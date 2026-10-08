@@ -120,6 +120,8 @@ func main() {
 		return
 	}
 	defer in.Close()
+	// The button test screen reads the pins directly; nothing else uses this.
+	app.Input = in
 
 	run(app, disp, fb, in, *poll)
 }
