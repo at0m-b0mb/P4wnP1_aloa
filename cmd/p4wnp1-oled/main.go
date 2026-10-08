@@ -36,6 +36,8 @@ func main() {
 		poll     = flag.Duration("poll", 5*time.Second, "how often to re-read the active screen")
 		headless = flag.Bool("headless", false, "run the UI with no panel (for testing the stack)")
 		waitSvc  = flag.Duration("wait-service", 90*time.Second, "how long to wait for the service at startup")
+		brand    = flag.String("brand", "", "operator name on the boot splash (default: read "+oled.BrandFile+")")
+		tagline  = flag.String("tagline", "", "second line under the operator name")
 	)
 	flag.Parse()
 
@@ -82,8 +84,15 @@ func main() {
 	defer disp.Close()
 	_ = disp.SetContrast(byte(*contrast))
 
+	// The operator's mark, from the flag or from a file so an image can be
+	// branded without a rebuild.
+	brandInfo := oled.Brand{Name: *brand, Tagline: *tagline}
+	if brandInfo.Name == "" {
+		brandInfo = oled.LoadBrand(oled.BrandFile)
+	}
+
 	fb := oled.NewFramebuffer()
-	oled.DrawSplash(fb, oled.VersionLine(version), 0)
+	oled.DrawSplashBranded(fb, oled.VersionLine(version), 0, brandInfo)
 	_ = disp.Show(fb)
 
 	client := oled.NewAPIClient(*baseURL, *token)
@@ -92,7 +101,7 @@ func main() {
 	// first call that fails means "not up yet", not "broken" -- and a splash
 	// that sits there saying nothing while the device boots is the single
 	// most common way a screen gets reported as dead.
-	if !waitForService(disp, fb, client, *waitSvc) {
+	if !waitForService(disp, fb, client, *waitSvc, brandInfo) {
 		oled.DrawFatal(fb, " NO SERVICE ",
 			"The P4wnP1 service did not answer. Check: systemctl status P4wnP1")
 		_ = disp.Show(fb)
@@ -117,14 +126,14 @@ func main() {
 
 // waitForService polls until the API answers, animating the splash so the
 // screen is visibly alive rather than apparently frozen.
-func waitForService(disp oled.Display, fb *oled.Framebuffer, c oled.Client, limit time.Duration) bool {
+func waitForService(disp oled.Display, fb *oled.Framebuffer, c oled.Client, limit time.Duration, b oled.Brand) bool {
 	deadline := time.Now().Add(limit)
 	for i := 0; time.Now().Before(deadline); i++ {
 		if _, err := c.Status(); err == nil {
 			return true
 		}
 		elapsed := limit - time.Until(deadline)
-		oled.DrawSplash(fb, oled.VersionLine(version), float64(elapsed)/float64(limit))
+		oled.DrawSplashBranded(fb, oled.VersionLine(version), float64(elapsed)/float64(limit), b)
 		_ = disp.Show(fb)
 		time.Sleep(time.Second)
 	}

@@ -1,6 +1,10 @@
 package oled
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+	"strings"
+)
 
 // The boot splash.
 //
@@ -15,9 +19,52 @@ import "fmt"
 // face at 2x with the slab underline doing the job the serif would: giving the
 // name weight and a baseline to sit on.
 
+// Brand is the operator's own mark on the boot screen.
+//
+// Configurable rather than compiled in, because a device that gets sold or
+// handed over should carry the name of whoever is standing behind it, and
+// that is not a thing to need a rebuild for. Set it with --brand, or put a
+// line in /etc/p4wnp1/brand.txt and every image built from this tree picks
+// it up.
+//
+// Kept to one short line in the lower band: the wordmark is the identity of
+// the device, and a second mark competing with it at the same weight makes
+// both of them read as clutter on a 128-pixel screen.
+type Brand struct {
+	// Name is the line under the rule, e.g. "at0m-b0mb".
+	Name string
+	// Tagline is an optional second line, smaller in effect because it sits
+	// below the fold of attention rather than in a smaller face -- there is
+	// no smaller face at this size.
+	Tagline string
+}
+
+// BrandFile is where the daemon looks for a brand if none was passed.
+const BrandFile = "/etc/p4wnp1/brand.txt"
+
+// Letterspace puts a thin space between characters, which is what makes a
+// short string read as a mark rather than as a word. Used for the subtitle
+// and for a brand name short enough to carry it.
+func Letterspace(s string) string {
+	r := []rune(s)
+	out := make([]rune, 0, len(r)*2)
+	for i, c := range r {
+		if i > 0 {
+			out = append(out, ' ')
+		}
+		out = append(out, c)
+	}
+	return string(out)
+}
+
 // DrawSplash renders the boot screen. progress is 0..1; pass a negative number
 // to omit the progress rule entirely.
 func DrawSplash(fb *Framebuffer, version string, progress float64) {
+	DrawSplashBranded(fb, version, progress, Brand{})
+}
+
+// DrawSplashBranded is DrawSplash with the operator's mark.
+func DrawSplashBranded(fb *Framebuffer, version string, progress float64, b Brand) {
 	fb.Clear()
 
 	// Wordmark, optically centred: text sits slightly above true centre so the
@@ -38,12 +85,48 @@ func DrawSplash(fb *Framebuffer, version string, progress float64) {
 	// first render of this put the bar at y=50 and the version at y=55, which
 	// left them touching with no air between -- visible immediately once it
 	// was drawn, invisible while it was only arithmetic.
+	// The lower band carries, in order of what the moment needs: the progress
+	// bar while booting, then the operator's mark, then the version. Only one
+	// of them, because stacking two on a 64-pixel panel leaves neither any
+	// air and the result looks like a crash report.
 	switch {
 	case progress >= 0:
 		drawProgress(fb, 20, 50, Width-40, 6, progress)
+	case b.Name != "":
+		drawBrand(fb, b)
 	case version != "":
 		fb.TextCentered(50, Truncate(version, Cols))
 	}
+}
+
+// drawBrand renders the operator's mark under a hairline, so it reads as an
+// attribution rather than as part of the product name.
+func drawBrand(fb *Framebuffer, b Brand) {
+	name := b.Name
+	// Letterspace it only if it still fits afterwards; a name that has to be
+	// truncated to be spaced is worse than one simply set plain.
+	if spaced := Letterspace(name); len([]rune(spaced)) <= Cols {
+		name = spaced
+	}
+
+	// Fixed positions, and NO second rule.
+	//
+	// Two earlier attempts put a hairline above the name. The first computed
+	// it from a moving baseline and drew straight through "A . L . O . A .".
+	// The second cleared the subtitle but sat four pixels under it, so it
+	// read as an underline of the subtitle rather than a separator above the
+	// mark -- and the wordmark already has a slab. A third horizontal line on
+	// a 64-pixel panel is clutter whichever row it lands on, so the space
+	// does the separating instead.
+	//
+	// The subtitle ends at y=41 and the panel at 64: the whole lower band is
+	// 22 pixels, and every row in it is placed explicitly.
+	if b.Tagline == "" {
+		fb.TextCentered(51, Truncate(name, Cols))
+		return
+	}
+	fb.TextCentered(48, Truncate(name, Cols))
+	fb.TextCentered(56, Truncate(b.Tagline, Cols))
 }
 
 // drawProgress is a hairline track with a filled bar. One pixel of padding
@@ -159,4 +242,33 @@ func VersionLine(version string) string {
 		return ""
 	}
 	return fmt.Sprintf("v%s", version)
+}
+
+// LoadBrand reads the operator's mark from a file: the first non-empty,
+// non-comment line is the name, the second is an optional tagline.
+//
+// A file rather than only a flag, so an image can be branded by dropping one
+// line into /etc/p4wnp1/brand.txt -- no rebuild, no editing a unit. A missing
+// file is the normal case and is not an error.
+func LoadBrand(path string) Brand {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return Brand{}
+	}
+	var lines []string
+	for _, l := range strings.Split(string(raw), "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		lines = append(lines, l)
+	}
+	var b Brand
+	if len(lines) > 0 {
+		b.Name = lines[0]
+	}
+	if len(lines) > 1 {
+		b.Tagline = lines[1]
+	}
+	return b
 }
