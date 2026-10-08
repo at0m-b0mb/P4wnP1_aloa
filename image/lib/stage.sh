@@ -150,7 +150,7 @@ install -m 0755 "$REPO/image/lib/customize.sh" "$PAYLOAD/customize.sh"
 # 4. run the in-chroot customisation
 # --------------------------------------------------------------------------
 log "entering chroot to customise ($ARCH)"
-chroot "$MNT" /bin/bash -c "P4_ARCH='$ARCH' P4_OLED='${P4_OLED:-0}' /tmp/p4wnp1-payload/customize.sh" \
+chroot "$MNT" /bin/bash -c "P4_ARCH='$ARCH' P4_OLED='${P4_OLED:-0}' P4_BRAND='${P4_BRAND:-}' P4_BRAND_TAGLINE='${P4_BRAND_TAGLINE:-}' /tmp/p4wnp1-payload/customize.sh" \
     || die "in-chroot customisation failed"
 
 # --------------------------------------------------------------------------

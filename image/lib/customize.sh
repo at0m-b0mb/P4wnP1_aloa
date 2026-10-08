@@ -121,6 +121,21 @@ install -m 0644 "$PAYLOAD/dist/p4wnp1-firstboot.service" /etc/systemd/system/p4w
 # The OLED console, in the oled variant only.
 if [ "${P4_OLED:-0}" = "1" ]; then
     install -m 0644 "$PAYLOAD/dist/p4wnp1-oled.service"  /etc/systemd/system/p4wnp1-oled.service
+
+    # The operator's mark on the boot splash. A file rather than a flag in
+    # the unit, so it can be changed on a running device with one edit and
+    # no rebuild.
+    if [ -n "${P4_BRAND:-}" ]; then
+        mkdir -p /etc/p4wnp1
+        {
+            echo "# The name on the OLED boot splash. First line is the name,"
+            echo "# an optional second line is a tagline. Blank it to show none."
+            printf '%s\n' "$P4_BRAND"
+            [ -n "${P4_BRAND_TAGLINE:-}" ] && printf '%s\n' "$P4_BRAND_TAGLINE"
+        } > /etc/p4wnp1/brand.txt
+        chmod 0644 /etc/p4wnp1/brand.txt
+        log "boot splash branded: $P4_BRAND"
+    fi
 fi
 
 enable_unit() {

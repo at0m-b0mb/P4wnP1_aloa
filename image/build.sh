@@ -39,6 +39,11 @@ WIFI_COUNTRY=US
 # build is verified to contain NO OLED support, so the distinction is a fact
 # about the artifact rather than a line in its description.
 VARIANTS="plain oled"
+# The operator's mark on the boot splash. Written to /etc/p4wnp1/brand.txt in
+# the image, so it can still be changed on a running device by editing one
+# line -- the build-time value is a default, not a weld.
+BRAND="at0m-b0mb"
+BRAND_TAGLINE=""
 BUILDER_TAG=p4wnp1-imgbuilder:1
 
 # These live inside the repo on purpose: the builder container bind-mounts the
@@ -66,6 +71,9 @@ Options:
                       and first boot issues a random per-device password.
   --wifi-country CC   regulatory domain            (default $WIFI_COUNTRY)
   --pios-date DATE    Raspberry Pi OS release      (default $PIOS_DATE)
+  --brand NAME        operator name on the OLED boot splash
+                      (default "$BRAND"; empty for none)
+  --brand-tagline T   optional second line under the name
   --variant V         which images to build: plain, oled, or both
                       (default: both). "oled" adds the OLED console and
                       enables SPI; "plain" contains neither.
@@ -82,10 +90,17 @@ while [ $# -gt 0 ]; do
         --ssh-pass)      SSH_PASS="$2"; shift 2 ;;
         --wifi-country)  WIFI_COUNTRY="$2"; shift 2 ;;
         --pios-date)     PIOS_DATE="$2"; shift 2 ;;
+        --brand)         BRAND="$2"; shift 2 ;;
+        --brand-tagline) BRAND_TAGLINE="$2"; shift 2 ;;
         --variant)
             case "$2" in
                 plain|oled) VARIANTS="$2" ;;
-                both)       VARIANTS="plain oled" ;;
+                both)       VARIANTS="plain oled"
+# The operator's mark on the boot splash. Written to /etc/p4wnp1/brand.txt in
+# the image, so it can still be changed on a running device by editing one
+# line -- the build-time value is a default, not a weld.
+BRAND="at0m-b0mb"
+BRAND_TAGLINE="" ;;
                 *) die "unknown --variant '$2' (want plain, oled or both)" ;;
             esac
             shift 2 ;;
@@ -187,6 +202,8 @@ for ARCH in $ARCHES; do
         -e P4_SSH_PASS="$SSH_PASS" \
         -e P4_WIFI_COUNTRY="$WIFI_COUNTRY" \
         -e P4_OLED="$P4_OLED" \
+        -e P4_BRAND="$BRAND" \
+        -e P4_BRAND_TAGLINE="$BRAND_TAGLINE" \
         "$BUILDER_TAG" /repo/image/lib/stage.sh \
         || die "image build failed for $ARCH/$VARIANT"
 
@@ -209,6 +226,8 @@ for ARCH in $ARCHES; do
         -v "$REPO_ROOT:/repo" \
         -e P4_ARCH="$ARCH" \
         -e P4_OLED="$P4_OLED" \
+        -e P4_BRAND="$BRAND" \
+        -e P4_BRAND_TAGLINE="$BRAND_TAGLINE" \
         "$BUILDER_TAG" /repo/image/lib/verify.sh "/repo/image/out/$(basename "$OUT_IMG")" \
         || die "the built image failed verification; not publishing it"
 

@@ -102,6 +102,9 @@ if [ "${P4_OLED:-0}" = "1" ]; then
     check /usr/local/bin/p4wnp1-oled
     check /etc/systemd/system/p4wnp1-oled.service
     check /etc/systemd/system/multi-user.target.wants/p4wnp1-oled.service
+    if [ -n "${P4_BRAND:-}" ]; then
+        check /etc/p4wnp1/brand.txt
+    fi
     # SPI, without which a correctly wired OLED HAT stays dark. Checked here
     # rather than trusted, because the symptom is a blank panel and the first
     # thing anyone blames is their soldering.
@@ -114,6 +117,7 @@ else
     absent /usr/local/bin/p4wnp1-oled
     absent /etc/systemd/system/p4wnp1-oled.service
     absent /etc/systemd/system/multi-user.target.wants/p4wnp1-oled.service
+    absent /etc/p4wnp1/brand.txt
     if grep -q '^dtparam=spi=on' "$MNT/boot/firmware/config.txt"; then
         printf '\033[1;31m[verify:FAIL]\033[0m the plain variant enables SPI; that belongs to the oled build\n' >&2; fail=1
     else
