@@ -119,6 +119,11 @@ required_files=(
     "${REPO_ROOT}/build/P4wnP1_service"
     "${REPO_ROOT}/build/P4wnP1_cli"
     "${REPO_ROOT}/build/p4wnp1-hashpw"
+    # p4wnp1-oled is NOT required: a board with no OLED HAT is a perfectly
+    # good P4wnP1, and the daemon exits cleanly when it finds no panel. But
+    # it IS installed when present, below -- it was never installed by this
+    # path at all, so a from-source build had no panel however the hardware
+    # was wired.
     "${REPO_ROOT}/dist/P4wnP1.service"
     "${REPO_ROOT}/dist/p4wnp1-firstboot.service"
     "${REPO_ROOT}/dist/scripts/firstboot-secure-defaults.sh"
@@ -132,8 +137,8 @@ if (( ${#missing[@]} > 0 )); then
     echo "error: the following required files are missing:" >&2
     printf '  %s\n' "${missing[@]}" >&2
     echo >&2
-    echo "Run build_support/build.sh on a Linux host to produce the binaries" >&2
-    echo "and webapp.js, then re-run this installer." >&2
+    echo "Run build_support/build.sh to produce the binaries, then re-run" >&2
+    echo "this installer." >&2
     exit 1
 fi
 
@@ -221,9 +226,23 @@ for d in keymaps scripts HIDScripts www db helper ums legacy; do
         cp -R "${REPO_ROOT}/dist/${d}" /usr/local/P4wnP1/
     fi
 done
-install -m 0644 "${REPO_ROOT}/build/webapp.js"     /usr/local/P4wnP1/www/
-[[ -f "${REPO_ROOT}/build/webapp.js.map" ]] && \
-    install -m 0644 "${REPO_ROOT}/build/webapp.js.map" /usr/local/P4wnP1/www/
+# The OLED console, when it was built. Optional by design: the daemon
+# detects a missing panel, says so once and exits 0.
+if [[ -f "${REPO_ROOT}/build/p4wnp1-oled" ]]; then
+    install -m 0755 "${REPO_ROOT}/build/p4wnp1-oled" /usr/local/bin/
+    install -m 0644 "${REPO_ROOT}/dist/p4wnp1-oled.service" /etc/systemd/system/
+fi
+# Enabling it happens with the other units, after daemon-reload -- systemctl
+# will not reliably enable a unit file it has not been told to re-read yet.
+
+# No webapp.js. The console is plain files under dist/www/app/ and was
+# copied wholesale by the loop above.
+#
+# This used to install build/webapp.js unconditionally -- the gopherjs
+# bundle the ORIGINAL client compiled to. That client was replaced, its
+# source no longer builds, and the file has not existed for a long time, so
+# under `set -e` this line failed the installer outright. Anyone following
+# the from-source instructions hit it.
 chmod 0755 /usr/local/P4wnP1/scripts/firstboot-secure-defaults.sh
 chmod 0755 /usr/local/P4wnP1/scripts/p4wnp1-healthcheck.sh 2>/dev/null || true
 
@@ -388,6 +407,10 @@ systemctl enable avahi-daemon.service  2>/dev/null || true
 systemctl enable ssh.service           2>/dev/null || true
 systemctl enable P4wnP1.service
 systemctl enable p4wnp1-firstboot.service
+# Only when the panel binary was actually built and installed above.
+if [[ -f /etc/systemd/system/p4wnp1-oled.service ]]; then
+    systemctl enable p4wnp1-oled.service 2>/dev/null || true
+fi
 
 # ---------------------------------------------------------------------------
 # Done

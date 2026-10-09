@@ -1436,10 +1436,13 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 		// its CSS and JS with relative paths -- served from "/" those would
 		// resolve to /css/... and 404.
 		//
-		// The legacy GopherJS client is still present at /index.html but is
-		// NOT functional: it predates the auth layer and has no code to send a
-		// bearer token, so every RPC it makes returns Unauthenticated. It is
-		// kept only so an existing deployment's bookmarks do not 404.
+		// There is nothing else to serve from the root any more. The legacy
+		// GopherJS client used to sit at /index.html, non-functional -- it
+		// predates the auth layer and never sends a bearer token, so every
+		// RPC it made returned Unauthenticated -- and it dragged 29MB of
+		// CodeMirror, FontAwesome and Vue along with it. All of it is gone,
+		// which is why this redirect is now the only thing standing between
+		// "/" and a 404.
 		if req.URL.Path == "/" {
 			http.Redirect(resp, req, "/app/", http.StatusFound)
 			return

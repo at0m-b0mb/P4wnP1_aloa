@@ -11,11 +11,8 @@ help:
 	@echo "P4wnP1 A.L.O.A. -- Makefile targets"
 	@echo
 	@echo "  make build-armv6   Cross-compile P4wnP1_service + P4wnP1_cli + p4wnp1-hashpw"
-	@echo "                     for Pi Zero W (linux/arm/6) into build/. THIS is what you"
-	@echo "                     want before running install.sh on the Pi."
-	@echo "  make compile       Cross-compile binaries + webapp.js into build/"
-	@echo "                     (legacy; use build_support/build.sh for the GopherJS web app)"
-	@echo "  make dep           Install Go toolchain helpers (gopherjs)"
+	@echo "                     + p4wnp1-oled for Pi Zero W (linux/arm/6) into build/."
+	@echo "                     THIS is what you want before running install.sh on the Pi."
 	@echo "  make build-arm64   Same, for Pi Zero 2 W / 3 / 4 / 5 (linux/arm64)."
 	@echo "  make image         Build flashable .img.xz: both architectures x both"
 	@echo "                     variants (plain and oled). Needs Docker."
@@ -59,6 +56,9 @@ build-cli-armv6:
 build-hashpw-armv6:
 	$(GO_ENV_ARMV6) go build $(GO_BUILD_FLAGS) -o build/p4wnp1-hashpw  ./cmd/p4wnp1-hashpw
 
+build-oled-armv6:
+	$(GO_ENV_ARMV6) go build $(GO_BUILD_FLAGS) -o build/p4wnp1-oled    ./cmd/p4wnp1-oled
+
 # arm64 targets. The service used to be gated to 32-bit ARM by build tags
 # (`+build linux,arm` on service.go and friends); that gate was incidental, not
 # a real dependency, and removing it made Pi Zero 2 W / 3 / 4 / 5 buildable.
@@ -73,7 +73,10 @@ build-cli-arm64:
 build-hashpw-arm64:
 	$(GO_ENV_ARM64) go build $(GO_BUILD_FLAGS) -o build/arm64/p4wnp1-hashpw  ./cmd/p4wnp1-hashpw
 
-build-arm64: build-service-arm64 build-cli-arm64 build-hashpw-arm64
+build-oled-arm64:
+	$(GO_ENV_ARM64) go build $(GO_BUILD_FLAGS) -o build/arm64/p4wnp1-oled    ./cmd/p4wnp1-oled
+
+build-arm64: build-service-arm64 build-cli-arm64 build-hashpw-arm64 build-oled-arm64
 	@echo
 	@echo "Built for Pi Zero 2 W / 3 / 4 / 5 (linux/arm64):"
 	@ls -la build/arm64/
@@ -180,10 +183,10 @@ verify:
 	@echo
 	@echo "All gates passed."
 
-build-armv6: build-service-armv6 build-cli-armv6 build-hashpw-armv6
+build-armv6: build-service-armv6 build-cli-armv6 build-hashpw-armv6 build-oled-armv6
 	@echo
 	@echo "Built for Pi Zero W (linux/arm/6):"
-	@ls -la build/P4wnP1_service build/P4wnP1_cli build/p4wnp1-hashpw
+	@ls -la build/P4wnP1_service build/P4wnP1_cli build/p4wnp1-hashpw build/p4wnp1-oled
 
 # The service package only builds for linux (USB gadget, netlink, HID), so its
 # tests run in a container. jsonbridge and auth are portable and run anywhere.
@@ -246,8 +249,8 @@ dep:
 	# echo "export PATH=\$$PATH:/usr/local/go/bin" >> ~/.profile
 	# sudo bash -c 'echo export PATH=\$$PATH:/usr/local/go/bin >> ~/.profile'
 
-	# install gopherjs
-	go install github.com/gopherjs/gopherjs
+	# No gopherjs. The web client it compiled is gone; the console is plain
+	# JavaScript served as-is from dist/www/app/.
 
 	# we don't need protoc + protoc-grpc-web, because the proto file is shipped pre-compiled
 
@@ -265,10 +268,8 @@ compile:
 	# <--- second compilation, maybe -d flag on go get above is better
 	env GOBIN=$(CURDIR)/build go install ./cmd/... # compile all main packages to the build folder
 
-	# compile the web app
-	# ToDo: (check if dependencies have been fetched by 'go get', even with the build js tags)
-	$(HOME)/go/bin/gopherjs get github.com/mame82/P4wnP1_aloa/web_client/...
-	$(HOME)/go/bin/gopherjs build -m -o build/webapp.js web_client/*.go
+	# No web app build step. There is nothing to compile: the console is
+	# hand-written files under dist/www/app/, copied as-is.
 
 installkali:
 	#apt-get -y install git screen hostapd autossh bluez bluez-tools bridge-utils policykit-1 genisoimage iodine haveged
@@ -299,8 +300,11 @@ installkali:
 	cp -R dist/helper /usr/local/P4wnP1/
 	cp -R dist/ums /usr/local/P4wnP1/
 	cp -R dist/legacy /usr/local/P4wnP1/
-	cp build/webapp.js /usr/local/P4wnP1/www
-	cp build/webapp.js.map /usr/local/P4wnP1/www
+	# dist/www went over wholesale above -- there is no generated bundle to
+	# add to it. This used to 'cp build/webapp.js', which has not existed for
+	# a long time, so make stopped here with exit 1.
+	-cp build/p4wnp1-oled /usr/local/bin/ 2>/dev/null
+	-cp dist/p4wnp1-oled.service /etc/systemd/system/ 2>/dev/null
 	chmod 0755 /usr/local/P4wnP1/scripts/firstboot-secure-defaults.sh
 	-chmod 0755 /usr/local/P4wnP1/scripts/p4wnp1-healthcheck.sh
 
@@ -314,6 +318,7 @@ installkali:
 	systemctl enable avahi-daemon
 	systemctl enable P4wnP1.service
 	systemctl enable p4wnp1-firstboot.service
+	-systemctl enable p4wnp1-oled.service
 
 install:
 	cp build/P4wnP1_service /usr/local/bin/
@@ -329,8 +334,11 @@ install:
 	cp -R dist/www /usr/local/P4wnP1/
 	cp -R dist/db /usr/local/P4wnP1/
 	cp dist/bin/* /usr/local/bin/ 2>/dev/null || true
-	cp build/webapp.js /usr/local/P4wnP1/www
-	cp build/webapp.js.map /usr/local/P4wnP1/www
+	# dist/www went over wholesale above -- there is no generated bundle to
+	# add to it. This used to 'cp build/webapp.js', which has not existed for
+	# a long time, so make stopped here with exit 1.
+	-cp build/p4wnp1-oled /usr/local/bin/ 2>/dev/null
+	-cp dist/p4wnp1-oled.service /etc/systemd/system/ 2>/dev/null
 	chmod 0755 /usr/local/P4wnP1/scripts/firstboot-secure-defaults.sh
 	-chmod 0755 /usr/local/P4wnP1/scripts/p4wnp1-healthcheck.sh
 

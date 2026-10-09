@@ -1,13 +1,13 @@
 # macOS junk
 .DS_Store
 
-# Build artefacts -- service/CLI are committed (for ease of install) but
-# locally-rebuilt binaries shouldn't dirty the tree. Comment these out if
-# you want every rebuild to show up in git status.
+# Build artefacts -- the ARMv6 binaries are committed (so install.sh works on
+# a Pi with no Go toolchain) but locally-rebuilt ones shouldn't dirty the
+# tree. Uncomment these if you want every rebuild to show up in git status.
 # build/P4wnP1_service
 # build/P4wnP1_cli
-# build/webapp.js
-# build/webapp.js.map
+# build/p4wnp1-hashpw
+# build/p4wnp1-oled
 
 # Editor / IDE
 .vscode/
