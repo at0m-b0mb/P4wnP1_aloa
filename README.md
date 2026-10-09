@@ -84,6 +84,50 @@ Earlier images shipped `p4wnp1:p4wnp1`. If you flashed one of those, change that
 forced change at first login did not protect it, because whoever logs in first is the one who
 answers the prompt.
 
+### WPA3 is not possible on a Pi Zero or Zero W
+
+The access point is **WPA2-PSK with CCMP**, and on these boards that is the ceiling. Not a
+decision — a hardware limit, and worth recording so nobody spends an evening rediscovering it.
+
+WPA3-Personal **mandates** Protected Management Frames, and PMF needs the **BIP-CMAC-128**
+cipher. The BCM43430 does not have it:
+
+```
+chip      BCM43430/1, firmware 7.45.98
+ciphers   WEP40 · WEP104 · TKIP · CCMP-128
+BIP:      absent
+SAE / MFP / SAE_OFFLOAD in the driver's capabilities:  none
+```
+
+The software side is ready — the device ships **hostapd 2.10 and wpa_supplicant 2.10, both with
+SAE compiled in**. The radio is the limit. Check any board yourself with:
+
+```bash
+sudo iw phy | sed -n '/Supported Ciphers/,/^\s*[A-Z]/p'
+```
+
+If `BIP-CMAC-128 (00-0f-ac:6)` appears, that board can do WPA3 and this is worth revisiting.
+A Pi 3B+, 4 or 5 (BCM43455/43456) may; a Zero, Zero W or Pi 1 will not.
+
+Adding it later is not free even on hardware that supports it: `WiFiAuthMode` would gain `SAE`,
+and `proto/grpc.pb.go` is APIv1-era generated code. The enum value cannot simply be hand-added,
+because `protojson` resolves enum names from the embedded descriptor rather than the Go maps —
+so it needs a real regeneration, pinned to the old generator to avoid rewriting 6,000 lines in
+APIv2 style and changing the JSON naming both consoles depend on.
+
+**What the AP does offer**, asserted by `TestHostapdConfigOffersNothingWeak` rather than assumed:
+
+| | |
+|---|---|
+| `wpa=2` | WPA2 only; WPA1 is never emitted |
+| `rsn_pairwise=CCMP` | AES only; TKIP is never admitted |
+| `auth_algs=1` | Open System only, on **both** the WPA2 and the open path |
+
+That last one was `auth_algs=3` on an open network until recently, which advertised the WEP-era
+Shared Key handshake. It cannot succeed without a WEP key, and where it does work it leaks
+enough of the challenge/response pair to recover keystream. An open AP has nothing to
+authenticate, so it now says so.
+
 ### Seven USB endpoints, and what they cost
 
 The dwc2 controller on a Pi Zero W has **seven usable USB endpoints**. Every function you

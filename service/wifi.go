@@ -785,7 +785,19 @@ func wifiCreateHostapdConfString(ws *pb.WiFiSettings) (config string, err error)
 		config += fmt.Sprintf("wpa_passphrase=%s\n", ws.Ap_BSS.PSK) //Set PSK
 		config += fmt.Sprintf("rsn_pairwise=CCMP\n")                //Use Use AES, instead of TKIP
 	} else {
-		config += fmt.Sprintf("auth_algs=3\n") //Both, open and shared auth
+		// OPEN SYSTEM ONLY (1), not 3.
+		//
+		// auth_algs=3 advertises Shared Key authentication alongside Open
+		// System. Shared Key is the WEP-era challenge-response handshake:
+		// it is meaningless without WEP configured, it cannot succeed here,
+		// and where it does work it is strictly worse than open -- the
+		// challenge/response pair leaks enough to recover the keystream.
+		//
+		// On an open AP there is nothing to authenticate, so offer the one
+		// mechanism that is honest about that. Nothing on this device ever
+		// sets a WEP key, so the shared-key half was pure advertisement for
+		// a broken scheme.
+		config += fmt.Sprintf("auth_algs=1\n") //Open System only; never Shared Key
 	}
 
 	if ws.HideSsid {

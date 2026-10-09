@@ -193,6 +193,7 @@ footer a{color:var(--muted)}
     <nav>
       <a href="#consoles">Consoles</a>
       <a href="#download">Download</a>
+      <a href="#wifi">WiFi</a>
       <a href="#optin">Defaults</a>
       <a href="#firstboot">First boot</a>
       <a href="#verified">Verified</a>
@@ -330,6 +331,39 @@ sudo cat /root/INITIAL_CREDENTIALS.txt   <span class="c"># console password + Wi
     <p class="lead" style="margin-top:22px">
       Then open <code>http://172.16.0.1:8000</code>.
     </p>
+  </div>
+</section>
+
+<section id="wifi">
+  <div class="wrap">
+    <p class="eyebrow">A hardware limit</p>
+    <h2>WPA3 is not possible on a Pi Zero or Zero W</h2>
+    <p class="lead">
+      The access point is WPA2-PSK with CCMP, and on these boards that is the ceiling. WPA3
+      mandates Protected Management Frames, PMF needs the <code>BIP-CMAC-128</code> cipher, and
+      the BCM43430 does not have it &mdash; its list is WEP40, WEP104, TKIP and CCMP-128, with
+      no SAE or MFP capability advertised by the driver at all.
+    </p>
+    <p class="lead">
+      The software is ready: the device ships hostapd 2.10 and wpa_supplicant 2.10, both with
+      SAE compiled in. The radio is the limit. Check any board with
+      <code>sudo iw phy | sed -n '/Supported Ciphers/,/^\s*[A-Z]/p'</code> &mdash; if
+      <code>BIP-CMAC-128</code> appears, that board can do WPA3.
+    </p>
+    <div class="card">
+      <h3>What the access point does offer</h3>
+      <ul class="checks">
+        <li><code>wpa=2</code> &mdash; WPA2 only; WPA1 is never emitted</li>
+        <li><code>rsn_pairwise=CCMP</code> &mdash; AES only; TKIP is never admitted</li>
+        <li><code>auth_algs=1</code> &mdash; Open System only, on both the WPA2 and the open
+            path. It was <code>auth_algs=3</code> until recently, advertising the WEP-era
+            Shared Key handshake on a network with no WEP key to use it with.</li>
+      </ul>
+      <p class="lead" style="margin-top:16px">
+        All three are asserted by a test, not assumed &mdash; these lines are built by string
+        concatenation, where a one-word change is invisible in review.
+      </p>
+    </div>
   </div>
 </section>
 
