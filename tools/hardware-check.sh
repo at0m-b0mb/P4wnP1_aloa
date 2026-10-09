@@ -160,7 +160,18 @@ SCRIPTS=$(rbody | tr ',' '\n' | sed -n 's/.*"\([a-zA-Z0-9_.-]*\.js\)".*/\1/p' | 
 # HIDGetRunningScriptJobs returns {"ids":[...]} -- decoding it as anything
 # else is what made the Jobs screen permanently empty in v0.4.0.
 rpc HIDGetRunningScriptJobs
-if rbody | grep -q '"ids"'; then ok "running jobs: $(rbody | head -c 60)"
+if rbody | grep -qi 'mouse and keyboard disabled'; then
+    # HID off is the SHIPPED DEFAULT -- a Pi that enumerates as a keyboard the
+    # moment it is plugged in is not a safe default, so the images leave it
+    # off and the operator opts in. This check used to report that as a
+    # FAILURE, so a perfectly healthy device finished "1 failed" and the
+    # operator went looking for a fault that was not there. The two checks
+    # immediately below already skip for exactly this reason; this one
+    # disagreed with them. A gate that fails on the documented default is
+    # worse than no gate: it trains you to ignore the red.
+    skip "HIDGetRunningScriptJobs: HID is disabled (the shipped default)"
+    printf '        enable Keyboard under Cable and deploy to exercise this.\n'
+elif rbody | grep -q '"ids"'; then ok "running jobs: $(rbody | head -c 60)"
 else bad "HIDGetRunningScriptJobs did not return an ids field" "$(rbody | head -c 120)"; fi
 
 # --- the HIDScript pipeline, WITHOUT pressing a key -------------------------

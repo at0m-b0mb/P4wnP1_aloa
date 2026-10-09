@@ -154,10 +154,82 @@ def run_job(b):
     return {"id": JOBS[-1]}
 
 
+# The stored-template library.
+#
+# Until v0.5.0 no client could WRITE one of these, so the mock did not need
+# them and only faked ListStoredMasterTemplate with a hard-coded array. That
+# left the mock unable to exercise "Store as template", "Compose a loadout" or
+# "Inspect" -- the three newest screens, and so the three least covered. A UI
+# harness that cannot reach the newest code is the one place a regression goes
+# unnoticed, so these are real dicts and the handlers below genuinely mutate
+# them: store it, list it, read it back, delete it.
+STORED = {
+    "usb":  {"rndis_hid": {}, "storage_only": {}},
+    "wifi": {"default_ap": {}, "client_home": {}},
+    "bt":   {"nap_default": {}},
+    "net":  {"usbeth_dhcp_server": {}, "wlan0_dhcp_server": {}},
+    "tas":  {"on_boot": {}},
+}
+# MasterTemplate is five names (proto/grpc.proto:144) and nothing else.
+LOADOUTS = {
+    "initial":  {"template_name_usb": "rndis_hid", "template_name_wifi": "default_ap",
+                 "template_names_network": ["usbeth_dhcp_server"]},
+    "hid_only": {"template_name_usb": "rndis_hid"},
+    "rogue_ap": {"template_name_wifi": "default_ap", "template_name_bluetooth": "nap_default",
+                 "template_names_network": ["wlan0_dhcp_server"]},
+    "usb_net":  {"template_name_usb": "storage_only",
+                 "template_names_network": ["usbeth_dhcp_server"]},
+}
+
+# Every MasterTemplate field, always present. The real service sets
+# EmitUnpopulated, so an unset name comes back as "" rather than being
+# omitted -- the Inspect modal reads all five unconditionally, and a mock that
+# omitted them would not prove the modal handles an unset subsystem.
+def _loadout(name):
+    t = LOADOUTS.get(name)
+    if t is None:
+        err("no stored master template with name " + name)
+    return {"template_name_bluetooth": t.get("template_name_bluetooth", ""),
+            "template_name_usb": t.get("template_name_usb", ""),
+            "template_name_wifi": t.get("template_name_wifi", ""),
+            "template_name_trigger_actions": t.get("template_name_trigger_actions", ""),
+            "template_names_network": list(t.get("template_names_network", []))}
+
+
+def _store_loadout(b):
+    # RequestMasterTemplateStorage{TemplateName, template}. Capital T: the
+    # bridge uses the proto field names verbatim, and DiscardUnknown means a
+    # lower-case "templateName" here would be dropped and store a loadout
+    # under the empty name. Refuse it loudly instead of imitating the bug.
+    name = (b or {}).get("TemplateName", "")
+    if not name:
+        err("TemplateName is required (did you send templateName?)")
+    LOADOUTS[name] = dict((b or {}).get("template") or {})
+    return {}
+
+
+def _store_named(kind):
+    def go(b):
+        name = (b or {}).get("msg", "")
+        if not name:
+            err("msg is required")
+        STORED[kind][name] = {}
+        return {}
+    return go
+
+
+def _delete_named(kind):
+    def go(b):
+        name = (b or {}).get("msg", "")
+        STORED[kind].pop(name, None)
+        return {}
+    return go
+
+
 RPC = {
     "GetDeployedGadgetSetting": lambda b: USB,
     "DeployGadgetSetting": lambda b: (USB.update(b or {}), USB)[1],
-    "StoreDeployedUSBSettings": lambda b: {},
+    "StoreDeployedUSBSettings": _store_named("usb"),
     "GetWiFiState": lambda b: {
         "mode": 1, "channel": 6, "ssid": "HackProKP",
         "currentSettings": {"name": "default_ap", "disabled": False, "regulatory": "US",
@@ -194,7 +266,25 @@ RPC = {
     "DeployTriggerActionSetAdd": lambda b: _add_reflex(b),
     "DeployTriggerActionSetRemove": lambda b: _remove_reflex(b),
     "DeployTriggerActionSetUpdate": lambda b: _update_reflex(b),
-    "ListStoredMasterTemplate": lambda b: {"msgArray": ["initial", "hid_only", "rogue_ap", "usb_net"]},
+    "ListStoredMasterTemplate": lambda b: {"msgArray": sorted(LOADOUTS)},
+    "StoreMasterTemplate": _store_loadout,
+    "GetStoredMasterTemplate": lambda b: _loadout((b or {}).get("msg", "")),
+    "DeleteStoredMasterTemplate": lambda b: (LOADOUTS.pop((b or {}).get("msg", ""), None), {})[1],
+
+    # The five lists the loadout editor builds its pickers from.
+    "ListStoredUSBSettings": lambda b: {"msgArray": sorted(STORED["usb"])},
+    "ListStoredWifiSettings": lambda b: {"msgArray": sorted(STORED["wifi"])},
+    "ListStoredBluetoothSettings": lambda b: {"msgArray": sorted(STORED["bt"])},
+    "ListStoredEthernetInterfaceSettings": lambda b: {"msgArray": sorted(STORED["net"])},
+    "ListStoredTriggerActionSets": lambda b: {"msgArray": sorted(STORED["tas"])},
+
+    # "Store as template" on Radio. StringMessage{msg}: the service snapshots
+    # whatever is deployed, so the name is the whole request.
+    "StoreDeployedWifiSettings": _store_named("wifi"),
+    "StoreDeployedBluetoothSettings": _store_named("bt"),
+    "DeleteStoredWifiSettings": _delete_named("wifi"),
+    "DeleteStoredBluetoothSettings": _delete_named("bt"),
+    "DeleteStoredUSBSettings": _delete_named("usb"),
     # StringMessage{msg}. Returning the real field name matters: the console
     # previously SENT `templateName` here, which the bridge discarded, so this
     # silently set the boot default to "". A mock that accepted it would have
@@ -206,6 +296,51 @@ RPC = {
     "Reboot": lambda b: {},
     "Shutdown": lambda b: {},
 }
+
+
+# --- the OLED panel mirror -------------------------------------------------
+#
+# The Panel view polls /api/v1/panel.png twice a second. Without this the
+# mock answered 404 forever, so the ONE screen whose whole job is to show a
+# live image could not be exercised at all -- and neither could the polling
+# behaviour around it, which is where the interesting bug was: the view used
+# to hammer a permanently-failing endpoint at full rate on a device with no
+# panel.
+#
+# A real 128x64 PNG, built with zlib and struct so the mock keeps its "no
+# third-party imports" property (Pillow is not a dependency of this repo).
+PANEL_FRAME = [
+    " P4wnP1 (mock)",
+    "Status",
+    "Loadouts",
+    "Cable (USB)",
+    "Payloads",
+    "Radio (WiFi/BT)",
+    " KEY3 home",
+]
+
+
+def _png(width=128, height=64):
+    import struct, zlib
+    # A recognisable pattern rather than a blank rectangle: a border and some
+    # horizontal bars, so "the image updated" is visible to a human and the
+    # bytes differ from frame to frame.
+    tick = int(time.time() * 2) % height
+    rows = bytearray()
+    for y in range(height):
+        rows.append(0)                                  # filter type 0
+        for x in range(width):
+            edge = x < 2 or x >= width - 2 or y < 2 or y >= height - 2
+            bar = (y == tick) or (y // 8) % 3 == 0 and 10 < x < width - 10
+            v = 255 if (edge or bar) else 0
+            rows += bytes((v, v, v))
+    def chunk(tag, data):
+        c = tag + data
+        return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c) & 0xFFFFFFFF)
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(rows), 6))
+            + chunk(b"IEND", b""))
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -252,6 +387,13 @@ class Handler(SimpleHTTPRequestHandler):
             if b.get("username") == USER and b.get("password") == PASS:
                 return self._json(200, {"token": TOKEN, "expires_at": int(time.time()) + 86400})
             return self._json(401, {"error": "invalid credentials"})
+        if path == "/api/v1/panel/press":
+            if not self._authed():
+                return self._json(401, {"error": "unauthenticated"})
+            btn = (self._body() or {}).get("button", "")
+            if btn not in ("up", "down", "left", "right", "press", "key1", "key2", "key3"):
+                return self._json(400, {"error": "no such button: " + str(btn)})
+            return self._json(200, {"pressed": btn})
         if path == "/api/auth/logout":
             return self._json(204, {})
         if path == "/api/auth/changepw":
@@ -288,6 +430,28 @@ class Handler(SimpleHTTPRequestHandler):
             if not self._authed():
                 return self._json(401, {"error": "unauthenticated"})
             return self._json(200, {"methods": sorted(RPC)})
+        if path == "/api/v1/panel.png":
+            if not self._authed():
+                return self._json(401, {"error": "unauthenticated"})
+            body = _png()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/api/v1/panel.txt":
+            if not self._authed():
+                return self._json(401, {"error": "unauthenticated"})
+            body = ("\n".join(PANEL_FRAME) + "\n").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if path == "/api/v1/events":
             if not self._authed():
                 return self._json(401, {"error": "unauthenticated"})

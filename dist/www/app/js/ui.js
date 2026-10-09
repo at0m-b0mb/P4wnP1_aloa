@@ -101,8 +101,30 @@ const Modal = (() => {
     function close() {
       backdrop.remove();
       document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('hashchange', onNavigate);
       if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
     }
+
+    /* Navigating away dismisses the dialog.
+     *
+     * The router is a hashchange listener that re-renders #view in place
+     * (app.js). The dialog lives in document.body, NOT in #view, so nothing
+     * was tearing it down: press Back with a dialog open and the dialog
+     * stayed on screen, floating over a completely different screen, with
+     * its buttons still live. Reproduced: open "Compose a loadout", press
+     * Back, and you are on Keystrokes with the loadout editor still up and
+     * its "Store loadout" button still working.
+     *
+     * Back is the reflex people use to dismiss a dialog -- on a phone it is
+     * THE dismiss gesture -- so this was the most likely way to meet it.
+     *
+     * onEscape matters as much as the removal: every caller is sitting on
+     * `await promptForm(...)` / `await confirmAction(...)`, and those
+     * promises only settle through an action button or onEscape. Tearing the
+     * dialog out of the DOM without settling would suspend that handler for
+     * the life of the page. Treating it as a cancel is both correct and the
+     * only way the caller is ever released. */
+    function onNavigate() { close(); if (onEscape) onEscape(); }
 
     function focusables() {
       return [...panel.querySelectorAll(
@@ -126,6 +148,7 @@ const Modal = (() => {
       if (e.target === backdrop) { close(); if (onEscape) onEscape(); }
     });
     document.addEventListener('keydown', onKey, true);
+    window.addEventListener('hashchange', onNavigate);
     document.body.append(backdrop);
 
     const target = initialFocus || focusables()[0];

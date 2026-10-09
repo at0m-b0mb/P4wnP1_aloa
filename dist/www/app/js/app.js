@@ -1599,6 +1599,24 @@ Views.panel = async function () {
 
   let lastURL = null;
   let stopped = false;
+  /* How long to wait before the next poll.
+   *
+   * 500ms is right when the panel is live -- it is what makes the mirror
+   * feel like a screen rather than a slideshow. It is the wrong number for a
+   * device that has no panel at all. A plain (non-oled) image never starts
+   * the daemon, so every single poll returns 503, forever, and the console
+   * was asking twice a second for the whole time the tab stayed open. On a
+   * single-core Pi Zero W that is not free, and it buys literally nothing:
+   * the answer cannot change until a daemon starts.
+   *
+   * So: full speed while it works, and back off when it does not. 409 is
+   * deliberately NOT backed off -- that one means "the panel is showing the
+   * first-boot credentials", which is a screen the operator dismisses by
+   * hand at any moment, and the mirror should come back the instant they
+   * do. It is also the cheapest possible answer for the service to give,
+   * since it withholds the frame instead of encoding one. */
+  const FAST = 500, SLOW = 5000;
+  let delay = FAST;
 
   function status(kind, label) {
     const el = $('#panel-pill');
@@ -1628,21 +1646,25 @@ Views.panel = async function () {
       if (lastURL) URL.revokeObjectURL(lastURL);
       lastURL = url;
       status('ok', 'live');
+      delay = FAST;
       const n = $('#panel-note'); if (n) n.textContent = '';
       const t = $('#panel-text');
       if (t) t.textContent = await Api.panelText().catch(() => '');
     } catch (e) {
       const n = $('#panel-note');
       if (e && e.status === 409) {
+        delay = FAST;  // transient by nature: see the note on FAST/SLOW
         status('idle', 'not mirrored');
         if (n) n.textContent = 'The device is showing its first-boot credentials. '
           + 'That screen is deliberately never mirrored: it exists so the password '
           + 'reaches whoever is standing over the device, and then stops existing.';
       } else if (e && e.status === 503) {
+        delay = SLOW;
         status('bad', 'no panel');
         if (n) n.textContent = 'No OLED daemon is running. A plain image has no panel, '
           + 'and a board with no HAT fitted does not start one.';
       } else {
+        delay = SLOW;
         status('bad', 'error');
         if (n) n.textContent = (e && e.message) || 'the panel could not be read';
       }
@@ -1662,15 +1684,22 @@ Views.panel = async function () {
   }
   document.addEventListener('keydown', onKey);
 
-  const timer = setInterval(refresh, 500);
+  /* setTimeout rather than setInterval, because the interval is no longer a
+     constant. setInterval would also queue polls on top of a slow one. */
+  let timer = null;
+  function schedule() {
+    if (stopped) return;
+    timer = setTimeout(async () => { await refresh(); schedule(); }, delay);
+  }
   onViewTeardown(() => {
     stopped = true;
-    clearInterval(timer);
+    if (timer) clearTimeout(timer);
     document.removeEventListener('keydown', onKey);
     if (lastURL) URL.revokeObjectURL(lastURL);
   });
 
   await refresh();
+  schedule();
 };
 
 Views.journal = function () {
