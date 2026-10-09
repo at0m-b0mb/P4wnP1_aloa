@@ -175,6 +175,13 @@ oled-shots:
 
 # The whole suite, in the order that fails cheapest-first.
 verify:
+	# First, and deliberately. It is the cheapest check in the list and it
+	# covers the most serious class of bug this repository has shipped:
+	# three API routes that served the device's screen and accepted button
+	# presses with no authentication at all. It was not in this list when it
+	# was written, which is its own small lesson -- a security gate that is
+	# not in `verify` is a security gate that does not run.
+	./tools/check-api-auth.sh
 	./tools/check-js.sh
 	./tools/check-render.sh
 	./tools/check-shell-quoting.sh

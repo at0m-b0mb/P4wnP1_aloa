@@ -26,45 +26,70 @@
 > **Authorized testing only.** This is a red-team tool. Point it only at systems you own or
 > have written permission to test. See [DISCLAIMER.md](DISCLAIMER.md).
 
-> **Hardware-verification status.** The images below are built from official Raspberry Pi OS
-> releases and automatically verified before publishing — but **they have never been booted on
-> a physical Pi.** Read [What is not verified](#what-is-not-verified) before you rely on this.
+> **Hardware-verification status.** The `oled-armhf` image is **booted and tested on a real
+> Raspberry Pi Zero W** with a Waveshare 1.3inch OLED HAT: USB ethernet, the web console,
+> access control, the HID engine, USB serial and mass storage, and the panel itself, driven
+> both by hand and remotely. The other three images are built from the same source and
+> verified before publishing, but **have not been booted on hardware** — nobody here owns a
+> Pi Zero 2 W. See [What a real board was shown to do](#what-a-real-board-was-shown-to-do).
 
 ---
 
 ## Download
 
-Built from `v0.4.0`, on **Raspberry Pi OS Lite (Debian 13 "trixie"), 2026-09-15**, kernel
-`6.18.50+rpt-rpi`.
+Built from `v0.6.0`, on **Raspberry Pi OS Lite (Debian 13 "trixie"), 2026-09-15**.
 
-> **If you are running v0.3.0 or earlier, replace it.** Every image up to and including
-> v0.3.0 shipped the same SSH password (`p4wnp1:p4wnp1`) with passwordless sudo, so anyone
-> who could reach the device — including the host it was plugged into — could take root on
-> it. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md). v0.3.1 ships no usable account at all.
+> **If you are running v0.5.1 or earlier, replace it.** Those images served
+> `/api/v1/panel.png`, `/panel.txt` and `/panel/press` with **no authentication**, so anyone
+> who could reach the device's web port could read its screen and press its buttons. Fixed in
+> v0.5.2. And if you are on v0.3.0 or earlier, replace it urgently: every image up to and
+> including v0.3.0 shipped the same SSH password (`p4wnp1:p4wnp1`) with passwordless sudo.
+> See [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
 
-| Image | Size | Boards |
-|---|---|---|
-| `P4wnP1-ALOA-v0.4.0-armhf.img.xz` | 656M | Pi Zero, **Pi Zero W**, Pi 1 |
-| `P4wnP1-ALOA-v0.4.0-arm64.img.xz` | 608M | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 |
+Four images. Pick by **board**, then by whether you have the **OLED HAT**.
+
+| Image | Size | Boards | Screen |
+|---|---|---|---|
+| `P4wnP1-ALOA-v0.6.0-armhf.img.xz` | 587M | Pi Zero, **Pi Zero W**, Pi 1 | none |
+| `P4wnP1-ALOA-v0.6.0-oled-armhf.img.xz` | 585M | Pi Zero, **Pi Zero W**, Pi 1 | Waveshare 1.3in HAT |
+| `P4wnP1-ALOA-v0.6.0-arm64.img.xz` | 552M | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 | none |
+| `P4wnP1-ALOA-v0.6.0-oled-arm64.img.xz` | 553M | **Pi Zero 2 W**, Pi 3, Pi 4, Pi 5 | Waveshare 1.3in HAT |
+
+The `oled` images are the plain ones plus a panel daemon. They run perfectly well on a board
+with no HAT fitted — the daemon notices there is no screen, says so once in the journal and
+exits. If you are unsure, take an `oled` image.
 
 ```
-armhf  sha256  b38240a35b56afebccc193cda4859056f43a2982140f72077a84e8ca69875e24
-arm64  sha256  e10f76236d87d53903f736c6336fe370b74110e01b21075405b56a59bae2a355
+armhf       sha256  f39e80bf598e1276a478db1d13f69d80f567d275a68618eb3e7db2fbaf71611d
+oled-armhf  sha256  397ed08cd721aefc69c6729db1ebb3061c7874fe0f683071f1df18b706411338
+arm64       sha256  24fa9226928dec975d7dde45c6c23d95ff24af795e3fdffc11b6a9f8ddd092ad
+oled-arm64  sha256  bdb4084e952baac61339c95de509326308ee76d198e57ac8031d41a18d7c0216
 ```
 
 Verify, flash, and boot with the cable in the **data** port (the inner one on a Zero):
 
 ```bash
-sha256sum -c P4wnP1-ALOA-v0.4.0-armhf.img.xz.sha256
-xz -d P4wnP1-ALOA-v0.4.0-armhf.img.xz
-sudo dd if=P4wnP1-ALOA-v0.4.0-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
+sha256sum -c P4wnP1-ALOA-v0.6.0-oled-armhf.img.xz.sha256
+xz -d P4wnP1-ALOA-v0.6.0-oled-armhf.img.xz
+sudo dd if=P4wnP1-ALOA-v0.6.0-oled-armhf.img of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
-**Before you flash**, set a username and password in Raspberry Pi Imager ("Set username and
-password" under the gear icon). The image ships with **no usable account**, so this is how you
-get in. If you skip it, boot the device once, put the card back in your laptop, and read
-`p4wnp1-credentials.txt` on the boot partition — first boot generates a password for this one
-device and writes it there.
+### Getting the first-boot credentials
+
+The image ships **no shared password**. First boot generates a unique set for that one device:
+an SSH account, a web console login, and a WiFi AP key. There are three ways to read them, and
+you only need one.
+
+**With the OLED HAT —** the panel shows them once, each as a **QR code** with the text beside
+it. Scan, write them down, then press **KEY1** to erase every copy. The WiFi card is a
+*scan-to-join* code: your phone offers "Join Network" rather than making you type the key.
+
+**Without a screen —** boot the device once, put the card back in your laptop, and read
+`p4wnp1-credentials.txt` on the boot partition.
+
+**Or decide them yourself before flashing —** set a username and password in Raspberry Pi
+Imager ("Set username and password" under the gear icon). First boot sees an account already
+exists and leaves it alone.
 
 Then, over the USB ethernet link the device brings up:
 
@@ -254,6 +279,25 @@ The bottom line always says what KEY1 does on that screen. Eight unlabelled cont
 manual within reach is otherwise a thing you have to memorise, and a thing you have to memorise
 is a thing you stop using.
 
+**Which way up.** With a Zero W in a laptop's USB port the board hangs plug-left, keys-right,
+and the panel's own orientation puts every line upside down in that position. The default is
+now the orientation that matches the keys. If your board is mounted the other way round, set
+`P4WNP1_OLED_ROTATE=180` in `/etc/systemd/system/p4wnp1-oled.service` and restart it — no
+reflash. It is done in the display controller, so it costs nothing per frame; the one visible
+consequence is that the console's panel mirror shows the *logical* image, and will look upside
+down relative to the glass.
+
+**First boot shows the credentials as QR codes.** Three cards — SSH, web console, WiFi — each
+with a scannable code and the password printed beside it, because not everyone has a phone in
+hand. The WiFi one is a `WIFI:` join URI, so a phone offers *Join Network* rather than making
+you thumb in a twenty-character key. **KEY1** then erases every copy.
+
+That layout is forced by arithmetic worth knowing if you change the SSID: a code that fits the
+64-pixel panel holds 53 bytes, the `WIFI:` structure and the generated key take 38 of them, and
+so the SSID gets **15 bytes** — and an emoji costs three or four each. Past that the card falls
+back to a code of just the key and says `key only: SSID long`, rather than silently offering
+something that no longer joins anything.
+
 It authenticates with the machine-local credential the service writes to
 `/run/p4wnp1/local.token`, so there is nothing to configure: it is a local script like any
 other, holding an ordinary session that expires and can be revoked. The image enables SPI and
@@ -295,11 +339,12 @@ address, with the attach state driven by real gadget events.
 | View | What it is |
 |---|---|
 | **Overview** | What the device is presenting and doing right now, and a plain-language primer if you are new to it |
-| **Cable** | USB composition and the identity the device claims — vendor, product, serial |
-| **Radio** | WiFi state, the Bluetooth controller, and the interface table |
+| **Cable** | USB composition and the identity the device claims — vendor, product, serial. Shows what each function costs against the seven endpoints the chip has, and stores the result as a template |
+| **Radio** | WiFi state, the Bluetooth controller and its pairing PIN, the interface table, and "store as template" for either radio |
 | **Keystrokes** | HIDScript editor and runner, with the full function reference on the page |
 | **Reflexes** | Build, arm and delete the trigger/action rules the device runs by itself |
-| **Loadouts** | Whole-device configurations, backup, reboot, shutdown |
+| **Loadouts** | Whole-device configurations: compose one from stored templates, inspect what a loadout will apply before deploying it, set the boot default, back up and restore |
+| **Panel** | The OLED screen, mirrored — the live image, and buttons that reach the same handler a physical press does |
 | **Journal** | Everything the device reports, live |
 
 <p align="center">
@@ -315,11 +360,15 @@ runtime VM and appear in no file you can open; and failures are translated into
 what went wrong and what to do about it, with a button to the view that fixes
 it, rather than showing the service's own wording.
 
-**196KB total, no framework and no build step** — 120KB of that is two variable
+**288KB total, no framework and no build step** — 116KB of that is two variable
 webfonts, served from the device because this appliance is routinely operated with no internet
 route at all. The smallest supported target is a Pi Zero W: one 1GHz ARM11 core and 512MB of
-RAM. Light and dark themes, and all 18 text and UI colour pairings are checked against WCAG AA
+RAM. Light and dark themes, and all 21 text and UI colour pairings are checked against WCAG AA
 in both by `make contrast`.
+
+It replaced a 29MB GopherJS client that could not work at all: it predated the authentication
+layer and never sent a bearer token, so every call it made came back Unauthenticated. All of
+it — the bundle, the vendored CodeMirror, FontAwesome, Vue and Vuex — is gone.
 
 ---
 
@@ -374,15 +423,17 @@ make build-arm64     # binaries for Pi Zero 2 W / 3 / 4 / 5
 make image           # flashable .img.xz: both architectures x both variants
 make image-plain     # only the images WITHOUT OLED support
 make image-oled      # only the images WITH the OLED console
-make test            # Go unit tests
+make test            # Go unit tests (portable packages)
+make test-linux      # the service's own tests, in a container
 make verify          # every gate below, in order, cheapest failure first
 make smoke           # run the service in a container, end to end (28 checks)
 make feature-test    # call all 83 RPCs against the real binary (85 checks)
-make access-control  # attack the running service (60 checks, all must FAIL)
+make access-control  # attack the running service (63 checks, all must FAIL)
+make check-api-auth  # every JSON API handler authenticates (12 checks)
 make oled-sim        # drive the OLED interface in a browser, no hardware needed
 make oled-shots      # render every OLED screen to one sheet
 make check-quoting   # values install.sh writes must survive being sourced
-make check-render    # render every console view in jsdom (11 checks)
+make check-render    # render every console view in jsdom (12 checks)
 make check-rpc       # console RPC payloads vs the .proto
 make check-js        # parse the console JavaScript
 make contrast        # WCAG check on the console palette (21 pairings x 2 themes)
