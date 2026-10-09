@@ -26,9 +26,28 @@ const (
 // usual here: this code drives a display I have never had in front of me.
 type Framebuffer struct {
 	buf [Pages * Width]byte
+	// graphic lists rectangles that hold a picture rather than text, so
+	// ReadBack does not try to resolve QR modules into punctuation.
+	graphic [][4]int
 }
 
 func NewFramebuffer() *Framebuffer { return &Framebuffer{} }
+
+// MarkGraphic records a rectangle as a picture rather than text, so the
+// text reader skips it. Cleared by Clear, like the pixels.
+func (f *Framebuffer) MarkGraphic(x, y, w, h int) {
+	f.graphic = append(f.graphic, [4]int{x, y, w, h})
+}
+
+// inGraphic reports whether a 5x7 cell at (x, y) overlaps a marked picture.
+func (f *Framebuffer) inGraphic(x, y int) bool {
+	for _, g := range f.graphic {
+		if x+GlyphW > g[0] && x < g[0]+g[2] && y+GlyphH > g[1] && y < g[1]+g[3] {
+			return true
+		}
+	}
+	return false
+}
 
 // Bytes exposes the raw pages for a driver to push to the panel.
 func (f *Framebuffer) Bytes() []byte { return f.buf[:] }
@@ -53,6 +72,7 @@ func (f *Framebuffer) Page(p int) []byte {
 }
 
 func (f *Framebuffer) Clear() {
+	f.graphic = f.graphic[:0]
 	for i := range f.buf {
 		f.buf[i] = 0
 	}

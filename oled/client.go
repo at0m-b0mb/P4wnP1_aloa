@@ -22,6 +22,20 @@ import (
 type Client interface {
 	Status() (Status, error)
 
+	// LiveSSID returns the SSID the access point is ACTUALLY broadcasting.
+	//
+	// Not the one configured at install time. Those are different values and
+	// the device had been telling operators the wrong one: install.sh writes
+	// its --ssid into /etc/p4wnp1/initial.conf, which the first-boot card
+	// prints, while the AP itself broadcasts whatever is in the shipped
+	// template database. On a stock v0.6.0 the card said "HackProKP" and the
+	// radio was on air as an entirely different name.
+	//
+	// Harmless when it is only printed -- irritating, you scan and find a
+	// network with another name. Not harmless in a QR join code, which would
+	// confidently encode a network that does not exist.
+	LiveSSID() (string, error)
+
 	// List returns the names stored under a kind.
 	List(kind Kind) ([]string, error)
 	// DeployStored applies a stored item by name.
@@ -633,4 +647,15 @@ func (c *APIClient) Status() (Status, error) {
 		return s, fmt.Errorf("service not answering")
 	}
 	return s, nil
+}
+
+// LiveSSID asks the service what the access point is broadcasting right now.
+func (c *APIClient) LiveSSID() (string, error) {
+	var wifi struct {
+		Ssid string `json:"ssid"`
+	}
+	if err := c.call("GetWiFiState", nil, &wifi); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(wifi.Ssid), nil
 }

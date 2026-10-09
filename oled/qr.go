@@ -591,6 +591,10 @@ func (fb *Framebuffer) DrawQR(x, y int, q *QRCode, scale, quiet int) int {
 	}
 	dim := (q.Size + 2*quiet) * scale
 	fb.FillRect(x, y, dim, dim, true) // the paper
+	// Tell the text reader this rectangle is a picture. A QR module is
+	// pixel-identical to inverted punctuation, so without this /panel.txt
+	// grows stray full stops through the middle of the password.
+	fb.MarkGraphic(x, y, dim, dim)
 	ox, oy := x+quiet*scale, y+quiet*scale
 	for my := 0; my < q.Size; my++ {
 		for mx := 0; mx < q.Size; mx++ {

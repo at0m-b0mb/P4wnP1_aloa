@@ -178,9 +178,42 @@ type FirstRunView struct {
 	page int
 	done bool     // the erase has run
 	left []string // what the erase could not remove
+
+	// liveSSID is what the radio is actually broadcasting, read once from
+	// the service; ssidDone records that we asked, so a device with no WiFi
+	// is not re-queried on every redraw.
+	liveSSID string
+	ssidDone bool
 }
 
 func NewFirstRunView(c *FirstRunCreds) *FirstRunView { return &FirstRunView{c: c} }
+
+// resolveSSID asks the service what the AP is actually broadcasting, once.
+//
+// The handoff's wifi_ssid comes from install.sh via /etc/p4wnp1/initial.conf,
+// and that is NOT necessarily what is on air: the AP broadcasts whatever the
+// deployed template says, and on a stock image those differ. Printing the
+// wrong one is irritating. Encoding the wrong one in a join QR produces a
+// code that cannot work and gives no clue why, so the live value wins and the
+// handoff is only a fallback for when the service cannot be reached.
+func (v *FirstRunView) resolveSSID(app *App) {
+	if v.ssidDone || app == nil || app.Client == nil {
+		return
+	}
+	v.ssidDone = true
+	if live, err := app.Client.LiveSSID(); err == nil && live != "" {
+		v.liveSSID = live
+	}
+}
+
+// ssid is the name to put in a join code: live if we have it, otherwise
+// whatever first boot wrote down.
+func (v *FirstRunView) ssid() string {
+	if v.liveSSID != "" {
+		return v.liveSSID
+	}
+	return v.c.WiFiSSID
+}
 
 func (v *FirstRunView) Title() string { return "First boot" }
 
@@ -251,8 +284,8 @@ func (v *FirstRunView) cards() []credCard {
 		// blows past what 31 modules hold. Then the card falls back to the
 		// key alone and SAYS so, because a QR that quietly means something
 		// other than what the operator expects is worse than no QR.
-		if v.c.WiFiSSID != "" {
-			uri := WiFiURI(v.c.WiFiSSID, v.c.WiFiPSK)
+		if ssid := v.ssid(); ssid != "" {
+			uri := WiFiURI(ssid, v.c.WiFiPSK)
 			if _, err := NewQRMax([]byte(uri), qrMaxModules); err == nil {
 				card.qr, card.note = uri, "scan to join"
 			} else {
@@ -264,7 +297,7 @@ func (v *FirstRunView) cards() []credCard {
 	return out
 }
 
-func (v *FirstRunView) Render(fb *Framebuffer, _ *App) {
+func (v *FirstRunView) Render(fb *Framebuffer, app *App) {
 	if v.done {
 		y := bodyPxTop
 		for _, line := range v.doneLines() {
@@ -277,6 +310,7 @@ func (v *FirstRunView) Render(fb *Framebuffer, _ *App) {
 		return
 	}
 
+	v.resolveSSID(app)
 	cards := v.cards()
 	if v.page >= len(cards) {
 		v.page = len(cards) - 1

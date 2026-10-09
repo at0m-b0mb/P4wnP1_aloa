@@ -72,6 +72,22 @@ func cellRune(fb *Framebuffer, x, y int) (rune, bool) {
 		}
 		cell[c], inv[c] = bb, ib
 	}
+	// Skip anything the drawing code marked as a graphic.
+	//
+	// There is NO local way to tell a QR module from inverted punctuation.
+	// A cell showing an inverted '.' is thirty-three lit pixels with two
+	// dark ones in the bottom middle -- and a block of QR "paper" with one
+	// dark module in the same place is the identical cell. I tried
+	// rejecting complement matches on sparse glyphs, and it worked until a
+	// selected job row showed "win_recon.js" on an inverted bar, where the
+	// '.' is real and had to read.
+	//
+	// So the drawing code says which rectangles are pictures, and this skips
+	// them. Explicit beats clever: a QR code is not text and no heuristic
+	// should have to guess that.
+	if fb.inGraphic(x, y) {
+		return 0, false
+	}
 	for i, g := range font5x7 {
 		if g == cell || g == inv {
 			return rune(0x20 + i), true

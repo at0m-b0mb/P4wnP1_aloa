@@ -19,6 +19,7 @@ type FakeClient struct {
 	Jobs    []Job
 	St      Status
 	Startup string
+	SSID    string
 
 	// Fail makes the named RPC-ish operation return an error, so the error
 	// paths get exercised as thoroughly as the happy ones.
@@ -84,6 +85,19 @@ func (f *FakeClient) fail(op string) error {
 		return fmt.Errorf("%s", msg)
 	}
 	return nil
+}
+
+// SSID is what LiveSSID reports. Deliberately different from anything a
+// handoff would carry, so a test that confuses the two fails.
+func (f *FakeClient) LiveSSID() (string, error) {
+	f.note("LiveSSID")
+	if err := f.fail("LiveSSID"); err != nil {
+		return "", err
+	}
+	if f.SSID == "" {
+		return "live-ap", nil
+	}
+	return f.SSID, nil
 }
 
 func (f *FakeClient) Status() (Status, error) {
