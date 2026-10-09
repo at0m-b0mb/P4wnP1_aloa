@@ -12,6 +12,8 @@ package service
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -237,5 +239,53 @@ func TestKnownHostHonoursTheOperatorsOwnName(t *testing.T) {
 	}
 	if knownHost("other.internal") {
 		t.Error("a host NOT in the allowlist was accepted")
+	}
+}
+
+// The console busts its own cache with ?v=N on every asset in
+// app/index.html. That only works if the HTML carrying the version is
+// always refetched. Nothing set a Cache-Control header, so browsers cached
+// index.html off Last-Modified and went on requesting the old ?v= -- which
+// means a device upgrade silently fails to reach anyone who has visited
+// before, and looks like the change simply did not work.
+func TestHTMLIsNotCachedButAssetsMayBe(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "app", "js"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for path, body := range map[string]string{
+		"app/index.html": "<html><script src=\"js/app.js?v=1\"></script></html>",
+		"app/js/app.js":  "// console",
+	} {
+		if err := os.WriteFile(filepath.Join(root, path), []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	raw := http.FileServer(http.Dir(root))
+	// The same wrapper the service installs.
+	srv := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if p == "" || strings.HasSuffix(p, "/") || strings.HasSuffix(p, ".html") {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		}
+		raw.ServeHTTP(w, r)
+	})
+
+	for _, tc := range []struct {
+		path        string
+		wantNoCache bool
+	}{
+		{"/app/index.html", true},
+		{"/app/", true}, // directory index serves the same HTML
+		{"/app/js/app.js?v=1", false},
+	} {
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		got := w.Header().Get("Cache-Control")
+		has := strings.Contains(got, "no-cache")
+		if has != tc.wantNoCache {
+			t.Errorf("%s: Cache-Control %q, wanted no-cache=%v", tc.path, got, tc.wantNoCache)
+		}
 	}
 }

@@ -1389,7 +1389,32 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 	// Origin check at all.
 	guardedAuthHandler := GuardBrowserOrigin(authHTTPHandler)
 
-	fileServer := http.FileServer(http.Dir(absWebRoot))
+	// HTML MUST NOT BE CACHED, and everything else may be.
+	//
+	// The console busts its own cache with ?v=N on every script and
+	// stylesheet in app/index.html. That scheme only works if the HTML
+	// CARRYING the version is always refetched -- and nothing here set a
+	// Cache-Control header, so browsers cached index.html heuristically off
+	// Last-Modified and went on requesting the old ?v= for hours.
+	//
+	// The effect is that a device upgrade does not reach anyone who has
+	// visited before. I hit it myself: deployed a new app.js, bumped the
+	// version, reloaded, and the browser cheerfully fetched ?v=18 from the
+	// page it already had. A console that cannot be updated in the field is
+	// a bad console, and the failure is invisible -- it looks like the
+	// change simply did not work.
+	//
+	// So: no-cache on HTML (revalidate every time, cheap -- it is 4KB on a
+	// link to a device in your hand), and leave the versioned assets alone
+	// so they still cache properly.
+	rawFileServer := http.FileServer(http.Dir(absWebRoot))
+	fileServer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if p == "" || strings.HasSuffix(p, "/") || strings.HasSuffix(p, ".html") {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		}
+		rawFileServer.ServeHTTP(w, r)
+	})
 	http_handler := func(resp http.ResponseWriter, req *http.Request) {
 		if strings.HasPrefix(req.URL.Path, auth.HTTPPrefix) {
 			guardedAuthHandler.ServeHTTP(resp, req)

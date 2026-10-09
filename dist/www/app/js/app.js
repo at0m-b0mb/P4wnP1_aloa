@@ -566,9 +566,13 @@ Views.radio = async function () {
   main.append(pageHead('Radio',
     'The wireless side: the access point this device spawns or the network it joins, and the Bluetooth controller.'));
 
-  const [wifi, bt] = await Promise.all([
+  const [wifi, bt, btAgent] = await Promise.all([
     guard(() => Api.rpc('GetWiFiState'), 'read WiFi state'),
     guard(() => Api.rpc('GetBluetoothControllerInformation'), 'read Bluetooth controller'),
+    /* Not guarded: a device with no Bluetooth answers with an error and
+       that is fine -- the pairing card simply does not appear. guard()
+       would raise a toast about it on every visit to this page. */
+    Api.rpc('GetBluetoothAgentSettings').catch(() => null),
   ]);
   State.wifi = wifi; State.bt = bt;
 
@@ -607,6 +611,63 @@ Views.radio = async function () {
               bt.service_network_server_nap ? 'The device offers network access over Bluetooth PAN.' : null),
             kvRow('PANU', bt.service_network_server_panu ? 'on' : 'off'),
             kvRow('GN', bt.service_network_server_gn ? 'on' : 'off')))));
+  }
+
+  /* THE PAIRING PIN.
+   *
+   * This screen did not exist, and its absence was not merely a missing
+   * feature: /root/INITIAL_CREDENTIALS.txt, written on every device at
+   * first boot, lists the PIN as a shared default and tells the operator
+   *
+   *     Bluetooth PIN:  1337
+   *                     -> web client -> Bluetooth -> Settings -> new PIN
+   *
+   * There was no such screen in any client -- not here, and there is no
+   * cmd_bluetooth.go in the CLI either. The device flagged its own weakest
+   * credential and pointed at a way to fix it that did not exist. A
+   * security instruction aimed at nothing is worse than none, because the
+   * operator believes it has been dealt with.
+   *
+   * BluetoothAgentSettings is one string field, so this is a small screen
+   * for a real hole. */
+  if (btAgent) {
+    let pin = btAgent.pin || '';
+    main.append(h('div.card',
+      h('h2.card-title', 'Bluetooth pairing'),
+      h('p.field-hint', { style: 'margin-bottom:14px' },
+        'The PIN a device must enter to pair with this one. Every image ships the same '
+        + 'default, so until you change it, anyone who knows the project knows your PIN.'),
+      btAgent.pin === '1337'
+        ? h('div.banner.banner-danger', { style: 'margin-bottom:14px' },
+          h('p.banner-title', 'This is the shipped default'),
+          h('p', 'The PIN is still 1337, which is the same on every P4wnP1 built from this '
+               + 'image. Change it, or turn Bluetooth off entirely with '),
+          h('p.mono', 'systemctl disable --now bluetooth'))
+        : null,
+      textField('Pairing PIN', pin, v => { pin = v; }, '4 to 16 digits'),
+      h('div.btn-row', { style: 'margin-top:12px' },
+        h('button.btn.btn-primary', {
+          type: 'button',
+          onclick: async (e) => {
+            const v = String(pin || '').trim();
+            /* Checked here so the message names the rule. The agent takes a
+               string, so a bad value would otherwise be accepted and fail
+               silently at pairing time -- the worst place to find out. */
+            if (!/^[0-9]{4,16}$/.test(v)) {
+              toast('A pairing PIN must be 4 to 16 digits.', 'bad');
+              return;
+            }
+            if (v === '1337') {
+              toast('That is the shipped default. Pick something else.', 'bad');
+              return;
+            }
+            e.target.disabled = true;
+            const res = await guard(() => Api.rpc('DeployBluetoothAgentSettings', { pin: v }),
+              'set the Bluetooth PIN');
+            e.target.disabled = false;
+            if (res) { toast('Bluetooth PIN changed.'); Views.radio(); }
+          },
+        }, 'Change PIN'))));
   }
 
   const eth = await guard(() => Api.rpc('GetAllDeployedEthernetInterfaceSettings'), 'read interfaces');
