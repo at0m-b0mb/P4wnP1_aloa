@@ -329,7 +329,11 @@ was not.
 ### What a real board was shown to do
 
 A Pi Zero W, flashed from the published `-oled-armhf` image and plugged into a laptop by USB.
-`tools/hardware-check.sh` talks to it over the USB ethernet link and reports **28 of 28**:
+`tools/hardware-check.sh` talks to it over the USB ethernet link and reports **28 of 28**. It
+earned that number the hard way: on the run before, it was 27, and the one failure was real --
+the CLI printed the WiFi pre-shared key with `%+v`, `servicestart.sh` calls that CLI, and the
+service captures the script's stdout into the journal. The check greps the journal for the
+*actual secret* rather than for the word "psk", which is why it found it.
 
 ```
 the link        ping; the device's own DHCP server handed this laptop 172.16.0.2
@@ -349,8 +353,17 @@ on the device   P4wnP1, ssh and p4wnp1-oled all active
                 inputs sitting idle, and nothing else on the board is holding them
 ```
 
-The OLED console was driven by hand on the panel: the splash, the menu tree, joystick
-navigation, and the payload and radio screens.
+The OLED console was driven by hand on the panel, and then driven **remotely over HTTP** --
+`GET /api/v1/panel.txt` returns the live screen as text, `panel.png` as a 128x64 image, and
+`POST /api/v1/panel/press` delivers a button to the same handler a physical press reaches. The
+Cable screen was navigated from a laptop, two USB functions ticked, and the change deployed; the
+link re-enumerated and came back with the keyboard present in three seconds.
+
+That last sequence is also the proof of a fix. Until v0.4.2 the Cable screen could not do it:
+`GetDeployedGadgetSetting` reports configfs as it is now, so on a torn-down gadget it returns
+`enabled:false`, and the read-modify-write sent that straight back -- ticking every function and
+deploying built another *disabled* gadget and reported success. The one screen whose job is to
+revive a dead USB link could not, and said nothing about why.
 
 Running that check on a real board is also what found the three bugs v0.4.1 fixes, none of
 which any amount of green CI had noticed:
@@ -441,15 +454,27 @@ fallback meant to rescue it was the broken part. The console looked perfect thro
 the console authenticates normally. Nothing in the test suite had ever read the service's own
 log; three checks now do.
 
-*Still not verified, on hardware or anywhere:* that keystroke injection types correctly into a
-real host — the hardware check deliberately runs a script that presses **no keys**, because a
-health check that types into whatever window you have focused is not a health check. That
-Bluetooth pairs. That mass storage or the serial function work. That the trigger engine fires on
-real events. That any of it survives the cable being pulled mid-write.
+**Keystroke injection is verified.** A payload written to `/tmp`, started as a job and typed
+into a MacBook over the cable:
 
-Also not yet on hardware: the v0.4.1 changes themselves. The board above was running v0.4.0 when
-it was tested, so the three fixes and the first-boot credentials screen are verified by their
-tests and by reading the framebuffer back, not yet by a flashed card.
+```
+HIDScript layout: Setting layout to 'US'
+HIDScript type: Typing 'P4wnP1 HID test ...' on HID keyboard device '/dev/hidg0'
+JOB 2 on VM 0 SUCCEEDED WITH RESULT: null
+```
+
+and the line arrived in the host's editor. The device log proves only that it transmitted; the
+host is the only thing that can prove receipt, and it did.
+
+The payload sent **no Enter and no modifier keys**, deliberately. Had the focus been a terminal
+rather than an editor, the text would have sat there inertly instead of executing. That is the
+difference between a test and an accident, and `tools/hardware-check.sh` keeps the distinction:
+the script it runs by itself presses no keys at all, because a health check that types into
+whatever window you have focused is not a health check.
+
+*Still not verified:* that Bluetooth pairs. That mass storage or the serial function work. That
+the trigger engine fires on real events. That any of it survives the cable being pulled
+mid-write.
 
 If you are evaluating this for real work, **boot it on a Pi and check those yourself** —
 `tools/hardware-check.sh` does the other twenty-eight for you.

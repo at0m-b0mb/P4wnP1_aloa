@@ -370,7 +370,12 @@ sudo cat /root/INITIAL_CREDENTIALS.txt   <span class="c"># console password + Wi
           <li>A HIDScript written, run, and its result read back</li>
           <li>All eight HAT controls read as idle inputs, and every one registers a press
               at the pin</li>
-          <li>The AP pre-shared key appears nowhere in the journal</li>
+          <li>The AP pre-shared key appears nowhere in the journal &mdash; checked by grepping
+              for the <em>actual secret</em>, which is how a real leak was found and fixed</li>
+          <li><strong>Keystroke injection into a real host</strong>: a payload typed into a
+              laptop over the cable, and the line arrived</li>
+          <li>The panel mirrored and driven <strong>over HTTP</strong> &mdash; the Cable screen
+              navigated from a browser, USB functions deployed, the link back in three seconds</li>
         </ul>
       </div>
     </div>
@@ -378,9 +383,7 @@ sudo cat /root/INITIAL_CREDENTIALS.txt   <span class="c"># console password + Wi
     <div class="card" style="margin-top:20px">
       <h3>Still not verified</h3>
       <p>
-        That <strong>keystroke injection types correctly into a real host</strong> — the hardware
-        check deliberately runs a script that presses no keys, because a health check that types
-        into whatever window you have focused is not a health check. That Bluetooth pairs. That
+        That Bluetooth pairs. That
         mass storage or the serial function work. That the trigger engine fires on real events.
         That any of it survives the cable being pulled mid-write.
       </p>
