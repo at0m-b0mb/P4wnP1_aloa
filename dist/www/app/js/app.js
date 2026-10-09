@@ -1766,7 +1766,27 @@ function handleEvent(ev) {
     // The device is telling us a subsystem's settings changed under us --
     // reload the view that shows it rather than displaying stale state.
     const sub = Number(vals[0]);
-    const map = { 0: 'cable', 1: 'radio', 3: 'radio', 5: 'reflexes' };
+    /* Subsystem -> the view that shows it. The numbers are
+       STATE_CHANGE_EVT_TYPE_* in common_web/EventConst.go. Both the "this
+       changed" events and the "the stored list changed" events are mapped,
+       because a loadout, the CLI or the OLED panel can reconfigure the device
+       under a page that is open -- and a console showing an address or a
+       pairing state that stopped being true half a minute ago is worse than
+       one that admits it needs a reload. */
+    const map = {
+      0: 'cable',      // USB
+      1: 'radio',      // WiFi
+      2: 'network',    // NETWORK
+      3: 'bluetooth',  // BLUETOOTH
+      5: 'reflexes',   // TRIGGER_ACTIONS
+      6: 'system',     // LED
+      8: 'cable',      // stored USB settings list
+      9: 'network',    // stored ethernet interface settings list
+      10: 'radio',     // stored WiFi settings list
+      11: 'bluetooth', // stored Bluetooth settings list
+      12: 'reflexes',  // stored trigger action sets list
+      14: 'loadouts',  // stored global settings list
+    };
     if (map[sub]) reloadViewOnStateChange(map[sub]);
   }
 }
@@ -1857,13 +1877,20 @@ function textField(label, value, onInput, placeholder) {
 
 /* ------------------------------------------------------------------ chrome */
 
+/* Grouped by what the operator is doing, not alphabetically: the USB side,
+   then the wireless and network side, then payloads, then configuration, then
+   what the device is telling you. */
 const NAV = [
   ['overview', 'Overview'],
   ['cable', 'Cable'],
+  ['storage', 'Storage'],
   ['radio', 'Radio'],
+  ['bluetooth', 'Bluetooth'],
+  ['network', 'Network'],
   ['keystrokes', 'Keystrokes'],
   ['reflexes', 'Reflexes'],
   ['loadouts', 'Loadouts'],
+  ['system', 'System'],
   ['panel', 'Panel'],
   ['journal', 'Journal'],
 ];
@@ -1879,6 +1906,23 @@ function runViewTeardown() {
   viewCleanups = [];
 }
 
+/* Keep the current page visible in the mobile nav strip.
+   Under 820px the rail becomes one horizontally scrolling row. With twelve
+   entries the later ones start off-screen, so navigating to System or Journal
+   -- by hash, by a link, or by the strip scrolling back on re-render -- left
+   the highlighted item outside the viewport and the operator with no sign of
+   where they were. */
+function revealCurrentNavItem() {
+  const el = document.querySelector('.nav-item[aria-current="page"]');
+  if (!el || !el.scrollIntoView) return;
+  try {
+    el.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  } catch (e) {
+    /* jsdom has no layout and older WebKit takes no options object. Neither
+       is a reason to fail a render. */
+  }
+}
+
 function go(view) {
   if (!Views[view]) view = 'overview';
   runViewTeardown();
@@ -1888,6 +1932,7 @@ function go(view) {
   for (const b of document.querySelectorAll('.nav-item')) {
     b.setAttribute('aria-current', b.dataset.view === view ? 'page' : 'false');
   }
+  revealCurrentNavItem();
   Views[view]();
 }
 

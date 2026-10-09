@@ -97,8 +97,38 @@ function makeDom() {
   window.localStorage.setItem('p4wnp1.user', 'admin');
 
   /* The page's own <script src> tags cannot resolve (no server), so strip them
-     and inject the real file contents in the same order a browser would. */
+     and inject the real file contents in the same order a browser would.
+     The ORDER AND THE LIST both come from index.html rather than from a
+     literal here: the two used to be maintained separately, so a new console
+     file added to the page but not to this array would render in the browser
+     and never be rendered by this gate -- which is exactly the file most
+     likely to be broken, being the newest. */
+  const scriptSrcs = [...window.document.querySelectorAll('script[src]')]
+    .map(t => t.getAttribute('src').split('?')[0]);
   for (const tag of [...window.document.querySelectorAll('script[src]')]) tag.remove();
+  /* EVERY console script must be on the page.
+     A count threshold does not work here, and the first version of this guard
+     proved it: it required at least 3 tags, index.html had exactly 3, and
+     four new view files sat in the directory unreferenced -- so the gate was
+     green while rendering none of them. The invariant is not "enough tags",
+     it is "nothing in js/ is missing from the page". A file present on disk
+     and absent from index.html is dead in the browser AND invisible here,
+     which is the worst of both. */
+  const onDisk = fs.readdirSync(path.join(APP, 'js')).filter(f => f.endsWith('.js')).sort();
+  const loaded = scriptSrcs.map(sfile => sfile.replace(/^js\//, '')).sort();
+  const missing = onDisk.filter(f => !loaded.includes(f));
+  if (missing.length) {
+    console.log('  \x1b[1;31mFAIL\x1b[0m  these console scripts exist but index.html ' +
+      'never loads them, so they are dead in the browser and unrendered here:\n        ' +
+      missing.join(', '));
+    process.exit(1);
+  }
+  const ghosts = loaded.filter(f => !onDisk.includes(f));
+  if (ghosts.length) {
+    console.log('  \x1b[1;31mFAIL\x1b[0m  index.html loads scripts that do not exist: ' +
+      ghosts.join(', '));
+    process.exit(1);
+  }
 
   /* Capture anything a script throws while executing. jsdom reports these on
      the virtual console rather than rethrowing, so without this a file that
@@ -108,7 +138,7 @@ function makeDom() {
   window.addEventListener('error', e => scriptErrors.push(e.error || e.message));
   dom.virtualConsole.on('jsdomError', e => scriptErrors.push(e));
 
-  for (const f of ['js/ui.js', 'js/api.js', 'js/app.js']) {
+  for (const f of scriptSrcs) {
     const el = window.document.createElement('script');
     el.textContent = fs.readFileSync(path.join(APP, f), 'utf8');
     window.document.head.appendChild(el);

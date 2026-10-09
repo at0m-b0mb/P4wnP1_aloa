@@ -307,8 +307,20 @@ table.data td.mono { font-family: var(--font-mono); }
   .nav {
     flex-direction: row; padding: 0 var(--s4);
     overflow-x: auto; overflow-y: hidden;
-    scrollbar-width: none;            /* the row is short; a bar would crowd it */
+    scrollbar-width: none;            /* a bar would crowd a one-line strip */
     -webkit-overflow-scrolling: touch;
+    /* THE ROW IS NO LONGER SHORT. It was eight items when the scrollbar was
+       hidden; it is twelve now, and on a phone four of them sit off the right
+       edge with nothing to say they exist -- a hidden scrollbar on a strip
+       that visibly ends at the viewport reads as "that is all there is".
+       Fading the last few millimetres is the smallest honest signal: content
+       continuing under a fade is legible as continuing, and it costs no
+       layout and no script. The fade only applies while the row actually
+       overflows, because mask-image follows the padding box either way and a
+       short row simply has nothing under the fade. */
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+    scroll-padding-inline: var(--s4);
   }
   .nav::-webkit-scrollbar { display: none; }
   .nav-item { white-space: nowrap; flex: none; }
