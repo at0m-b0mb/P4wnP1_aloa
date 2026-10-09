@@ -44,6 +44,10 @@ type FirstRunCreds struct {
 	SSHPass string
 	WebUser string
 	WebPass string
+	// WiFiPSK is the access point's per-device key. No SSID: the device
+	// broadcasts that, so it is discoverable by scanning and is not a
+	// secret -- and it is often emoji, which this font cannot draw.
+	WiFiPSK string
 	// Erase lists every file holding a copy, including this one. The panel
 	// shreds exactly this list and nothing it inferred for itself.
 	Erase []string
@@ -78,6 +82,8 @@ func LoadFirstRunCreds(path string) *FirstRunCreds {
 			c.WebUser = v
 		case "web_pass":
 			c.WebPass = v
+		case "wifi_psk":
+			c.WiFiPSK = v
 		case "erase":
 			if v != "" {
 				c.Erase = append(c.Erase, v)
@@ -87,7 +93,7 @@ func LoadFirstRunCreds(path string) *FirstRunCreds {
 	if sc.Err() != nil {
 		return nil
 	}
-	if c.SSHPass == "" && c.WebPass == "" {
+	if c.SSHPass == "" && c.WebPass == "" && c.WiFiPSK == "" {
 		// Nothing worth showing. A key-only device reaches this.
 		return nil
 	}
@@ -206,6 +212,14 @@ func (v *FirstRunView) cards() []credCard {
 			head: "Web  :8000",
 			user: "user " + v.c.WebUser,
 			pass: v.c.WebPass,
+		})
+	}
+	if v.c.WiFiPSK != "" {
+		out = append(out, credCard{
+			head: "WiFi access point",
+			user: "key:",
+			pass: v.c.WiFiPSK,
+			note: "SSID is broadcast; scan for it.",
 		})
 	}
 	return out

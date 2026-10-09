@@ -190,3 +190,76 @@ func TestFirstRunIsHonestAfterErasing(t *testing.T) {
 		t.Errorf("the screen claims a clean erase on flash storage:\n%s", s)
 	}
 }
+
+// The panel must show every credential the erase destroys.
+//
+// KEY1 shreds /root/INITIAL_CREDENTIALS.txt, and the per-device WiFi access
+// point key lives in there. Before this, the handoff carried only the web
+// and SSH passwords -- so an operator who followed the instruction on the
+// screen destroyed a key they had never been shown, and could not get back.
+// Shown-set must equal erased-set.
+func TestEveryCredentialTheEraseDestroysIsShownFirst(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "INITIAL_CREDENTIALS.txt")
+	if err := os.WriteFile(root, []byte("admin pw and the wifi psk live here"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	p := writeHandoff(t, dir, "web_user=admin\nweb_pass=WEBPASSWORD1234\n"+
+		"wifi_psk=WIFIKEY123456789abc\nerase="+root+"\n")
+
+	c := LoadFirstRunCreds(p)
+	if c == nil {
+		t.Fatal("handoff did not load")
+	}
+	if c.WiFiPSK != "WIFIKEY123456789abc" {
+		t.Fatalf("the AP key did not load: %q", c.WiFiPSK)
+	}
+
+	app := NewApp(NewFakeClient(), NewRoot())
+	app.Push(NewFirstRunView(c))
+	seen := map[string]bool{}
+	for i := 0; i < 6; i++ {
+		s := renderText(app)
+		for _, want := range []string{"WEBPASSWORD1234", "WIFIKEY123456789abc", "WiFi"} {
+			if strings.Contains(s, want) {
+				seen[want] = true
+			}
+		}
+		app.Handle(BtnDown)
+	}
+	for _, want := range []string{"WEBPASSWORD1234", "WIFIKEY123456789abc", "WiFi"} {
+		if !seen[want] {
+			t.Errorf("paging through the cards never showed %q -- yet KEY1 erases it", want)
+		}
+	}
+}
+
+// A device reachable only by key, with no WiFi configured, still has a web
+// password to hand over -- and one with ONLY a WiFi key must still show it.
+func TestHandoffLoadsWithAnySingleCredential(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"web only", "web_user=admin\nweb_pass=ONLYWEB123456\n", "ONLYWEB123456"},
+		{"wifi only", "wifi_psk=ONLYWIFI1234567\n", "ONLYWIFI1234567"},
+		{"ssh only", "ssh_user=p4wnp1\nssh_pass=ONLYSSH12345678\n", "ONLYSSH12345678"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := writeHandoff(t, t.TempDir(), tc.body)
+			c := LoadFirstRunCreds(p)
+			if c == nil {
+				t.Fatalf("a handoff carrying %s did not load", tc.name)
+			}
+			app := NewApp(NewFakeClient(), NewRoot())
+			app.Push(NewFirstRunView(c))
+			found := false
+			for i := 0; i < 5 && !found; i++ {
+				if strings.Contains(renderText(app), tc.want) {
+					found = true
+				}
+				app.Handle(BtnDown)
+			}
+			if !found {
+				t.Errorf("never showed %q", tc.want)
+			}
+		})
+	}
+}

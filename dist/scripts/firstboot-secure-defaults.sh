@@ -548,6 +548,20 @@ if [ -x /usr/local/bin/p4wnp1-oled ]; then
         echo "# read once by the OLED panel, then erased. 0600, root."
         echo "web_user=${ADMIN_USER}"
         echo "web_pass=${NEW_ADMIN_PW}"
+        # The WiFi access point key.
+        #
+        # Without this the panel erased more than it displayed: KEY1 shreds
+        # ${CREDS_FILE}, and the per-device AP key lives in there. An
+        # operator who followed the instructions on screen destroyed a
+        # credential they had never been shown.
+        #
+        # The SSID is NOT sent. It is not a secret -- the device broadcasts
+        # it, so anyone can read it by scanning -- and it is frequently
+        # emoji, which a 5x7 font renders as a row of question marks. The
+        # key is the part that has to reach a human.
+        if [ -r /etc/p4wnp1/generated-ap.psk ]; then
+            echo "wifi_psk=$(cat /etc/p4wnp1/generated-ap.psk)"
+        fi
         if [ -n "${OPERATOR_PW_SET}" ]; then
             echo "ssh_user=${OPERATOR_USER}"
             echo "ssh_pass=${OPERATOR_PW_SET}"
