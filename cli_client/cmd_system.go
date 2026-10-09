@@ -6,9 +6,6 @@ import (
 	"os"
 )
 
-
-
-
 func init() {
 	cmdSystem := &cobra.Command{
 		Use:   "system",
@@ -27,7 +24,6 @@ func init() {
 			}
 			fmt.Println(" success")
 		},
-
 	}
 
 	cmdSystemShutdown := &cobra.Command{
@@ -42,9 +38,7 @@ func init() {
 			}
 			fmt.Println(" success")
 		},
-
 	}
-
 
 	rootCmd.AddCommand(cmdSystem)
 	cmdSystem.AddCommand(cmdSystemReboot, cmdSystemShutdown)

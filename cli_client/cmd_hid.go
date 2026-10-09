@@ -1,19 +1,19 @@
 package cli_client
 
 import (
-	"context"
-	"github.com/mame82/P4wnP1_aloa/common"
-	"github.com/spf13/cobra"
-	"fmt"
-	"path/filepath"
-	"strings"
-	"io"
 	"bufio"
-	"os"
+	"context"
 	"errors"
-	"log"
-	"strconv"
+	"fmt"
+	"github.com/mame82/P4wnP1_aloa/common"
 	pb "github.com/mame82/P4wnP1_aloa/proto"
+	"github.com/spf13/cobra"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 var (
@@ -30,21 +30,21 @@ var hidCmd = &cobra.Command{
 var hidRunCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run a HID Script",
-	Long:"Run script provided from standard input, commandline parameter or by path to script file on P4wnP1",
-	Run: cobraHidRun,
+	Long:  "Run script provided from standard input, commandline parameter or by path to script file on P4wnP1",
+	Run:   cobraHidRun,
 }
 
 var hidJobCmd = &cobra.Command{
 	Use:   "job",
 	Short: "Run a HID Script as background job",
-	Long:"Run a background script provided from standard input, commandline parameter or by path to script file on P4wnP1",
-	Run: cobraHidJob,
+	Long:  "Run a background script provided from standard input, commandline parameter or by path to script file on P4wnP1",
+	Run:   cobraHidJob,
 }
 
 var hidJobCancelCmd = &cobra.Command{
 	Use:   "cancel",
 	Short: "Cancel background job given by its ID",
-	Run: cobraHidJobCancel,
+	Run:   cobraHidJobCancel,
 }
 
 // Decision on how to run scripts (terms "local"/"remote" from perspective of gRPC server):
@@ -92,18 +92,16 @@ var hidJobCancelCmd = &cobra.Command{
 //
 // The logic above applies to both, running scripts synchronous with `run` or asynchronous with `job`
 
-
 func parseHIDRunScriptCmd(cmd *cobra.Command, args []string) (serverScriptPath string, err error) {
 	/*
-	readFromStdin := false
-	localFile := false //if true readFilePath refers to a file on the host of the rpcClient, else to a file on the rpcServer
-	readFilePath := ""
-	scriptContent :=""
+		readFromStdin := false
+		localFile := false //if true readFilePath refers to a file on the host of the rpcClient, else to a file on the rpcServer
+		readFilePath := ""
+		scriptContent :=""
 	*/
 
 	var srcReader io.Reader
 	transferNeeded := false
-
 
 	cFlagSet := cmd.Flags().ShorthandLookup("c").Changed
 	rFlagSet := cmd.Flags().ShorthandLookup("n").Changed
@@ -119,9 +117,11 @@ func parseHIDRunScriptCmd(cmd *cobra.Command, args []string) (serverScriptPath s
 			// we assume the arg is a filePath
 			if strings.ToLower(StrRemoteHost) != "localhost" {
 				// file not hosted on RPC server, needs to be transferred
-				transferNeeded=true
-				f,err := os.OpenFile(args[0], os.O_RDONLY, os.ModePerm)
-				if err != nil { return "",err }
+				transferNeeded = true
+				f, err := os.OpenFile(args[0], os.O_RDONLY, os.ModePerm)
+				if err != nil {
+					return "", err
+				}
 				defer f.Close()
 				srcReader = bufio.NewReader(f)
 			} else {
@@ -139,36 +139,36 @@ func parseHIDRunScriptCmd(cmd *cobra.Command, args []string) (serverScriptPath s
 		transferNeeded = true
 		srcReader = strings.NewReader(tmpHidCommands)
 	case cFlagSet && rFlagSet:
-		return "",errors.New("Couldn't use '-c' and '-r' at the same time")
+		return "", errors.New("Couldn't use '-c' and '-r' at the same time")
 	default:
-		return "",errors.New("Invalid flag/parameter combination")
+		return "", errors.New("Invalid flag/parameter combination")
 	}
 
 	/*
-	if readFromStdin {
-		buf := make([]byte,1024)
-		reader := bufio.NewReader(os.Stdin)
-		for {
-			n,rErr := reader.Read(buf)
-			if rErr != nil {
-				if rErr == io.EOF { break } else { return rErr }
+		if readFromStdin {
+			buf := make([]byte,1024)
+			reader := bufio.NewReader(os.Stdin)
+			for {
+				n,rErr := reader.Read(buf)
+				if rErr != nil {
+					if rErr == io.EOF { break } else { return rErr }
+				}
+				chunk := buf[:n]
+				scriptContent += string(chunk)
+				fmt.Printf("Read %d bytes: %+q\n", n, string(chunk))
 			}
-			chunk := buf[:n]
-			scriptContent += string(chunk)
-			fmt.Printf("Read %d bytes: %+q\n", n, string(chunk))
 		}
-	}
 
 
-	fmt.Printf("readFromStdIn: %v path: %v content: %v\n", readFromStdin, readFilePath, scriptContent)
+		fmt.Printf("readFromStdIn: %v path: %v content: %v\n", readFromStdin, readFilePath, scriptContent)
 	*/
 
 	if transferNeeded {
 		// create random remote file
 
-		serverScriptPath, err = ClientCreateTempFile(StrRemoteHost,StrRemotePort,"","HIDscript")
+		serverScriptPath, err = ClientCreateTempFile(StrRemoteHost, StrRemotePort, "", "HIDscript")
 		if err != nil {
-			return "",err
+			return "", err
 		} else {
 			fmt.Printf("TempFile created: %s\n", serverScriptPath)
 		}
@@ -177,51 +177,63 @@ func parseHIDRunScriptCmd(cmd *cobra.Command, args []string) (serverScriptPath s
 
 		//transfer from reader to remote file
 		err = ClientUploadFile(StrRemoteHost, StrRemotePort, srcReader, pb.AccessibleFolder_TMP, filename, true)
-		if err != nil { return "",errors.New(fmt.Sprintf("Error transfering HIDScript content to P4wnP1 Server: %v", err))}
+		if err != nil {
+			return "", errors.New(fmt.Sprintf("Error transfering HIDScript content to P4wnP1 Server: %v", err))
+		}
 	}
 
 	return
 }
 
 func cobraHidRun(cmd *cobra.Command, args []string) {
-	serverScriptFilePath, err := parseHIDRunScriptCmd(cmd,args)
-	if err != nil { log.Fatal(err)}
+	serverScriptFilePath, err := parseHIDRunScriptCmd(cmd, args)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	ctx,cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	res,err := ClientHIDRunScript(StrRemoteHost, StrRemotePort, ctx, serverScriptFilePath, tmpHidTimeout)
-	if err != nil { log.Fatal(err) }
+	res, err := ClientHIDRunScript(StrRemoteHost, StrRemotePort, ctx, serverScriptFilePath, tmpHidTimeout)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	fmt.Printf("Result:\n%s\n", res.ResultJson)
 	return
 }
 
-
 func cobraHidJob(cmd *cobra.Command, args []string) {
-	serverScriptFilePath, err := parseHIDRunScriptCmd(cmd,args)
-	if err != nil { log.Fatal(err)}
+	serverScriptFilePath, err := parseHIDRunScriptCmd(cmd, args)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-
-	job,err := ClientHIDRunScriptJob(StrRemoteHost, StrRemotePort, serverScriptFilePath, tmpHidTimeout)
-	if err != nil { log.Fatal(err) }
+	job, err := ClientHIDRunScriptJob(StrRemoteHost, StrRemotePort, serverScriptFilePath, tmpHidTimeout)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	fmt.Printf("Job ID: %d\n", job.Id)
 	return
 }
 
 func cobraHidJobCancel(cmd *cobra.Command, args []string) {
-	if len(args) < 1 { log.Fatal("Job ID to cancel has to be given as argument\n")}
-	jobID,err := strconv.ParseUint(args[0], 10, 32)
-	if err != nil { log.Fatalf("Error parsing job ID '%s' ton integer\n", args[0])}
+	if len(args) < 1 {
+		log.Fatal("Job ID to cancel has to be given as argument\n")
+	}
+	jobID, err := strconv.ParseUint(args[0], 10, 32)
+	if err != nil {
+		log.Fatalf("Error parsing job ID '%s' ton integer\n", args[0])
+	}
 
 	err = ClientHIDCancelScriptJob(StrRemoteHost, StrRemotePort, uint32(jobID))
-	if err != nil { log.Fatal(err) }
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	return
 }
-
-
 
 func init() {
 	rootCmd.AddCommand(hidCmd)
@@ -229,11 +241,11 @@ func init() {
 	hidCmd.AddCommand(hidJobCmd)
 	hidJobCmd.AddCommand(hidJobCancelCmd)
 
-	hidRunCmd.Flags().StringVarP(&tmpHidCommands, "commands","c", "", "HIDScript commands to run, given as string")
-	hidRunCmd.Flags().StringVarP(&tmpRunStored, "name","n", "", "Run a stored HIDScript")
-	hidRunCmd.Flags().Uint32VarP(&tmpHidTimeout, "timeout","t", 0, "Interrupt HIDScript after this timeout (seconds)")
+	hidRunCmd.Flags().StringVarP(&tmpHidCommands, "commands", "c", "", "HIDScript commands to run, given as string")
+	hidRunCmd.Flags().StringVarP(&tmpRunStored, "name", "n", "", "Run a stored HIDScript")
+	hidRunCmd.Flags().Uint32VarP(&tmpHidTimeout, "timeout", "t", 0, "Interrupt HIDScript after this timeout (seconds)")
 
-	hidJobCmd.Flags().StringVarP(&tmpHidCommands, "commands","c", "", "HIDScript commands to run, given as string")
-	hidJobCmd.Flags().StringVarP(&tmpRunStored, "name","n", "", "Run a stored HIDScript")
-	hidJobCmd.Flags().Uint32VarP(&tmpHidTimeout, "timeout","t", 0, "Interrupt HIDScript after this timeout (seconds)")
+	hidJobCmd.Flags().StringVarP(&tmpHidCommands, "commands", "c", "", "HIDScript commands to run, given as string")
+	hidJobCmd.Flags().StringVarP(&tmpRunStored, "name", "n", "", "Run a stored HIDScript")
+	hidJobCmd.Flags().Uint32VarP(&tmpHidTimeout, "timeout", "t", 0, "Interrupt HIDScript after this timeout (seconds)")
 }

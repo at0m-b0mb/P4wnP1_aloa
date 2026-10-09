@@ -4,8 +4,8 @@ import (
 	"github.com/spf13/cobra"
 	"os"
 
-	pb "github.com/mame82/P4wnP1_aloa/proto"
 	"fmt"
+	pb "github.com/mame82/P4wnP1_aloa/proto"
 	"log"
 )
 
@@ -36,9 +36,8 @@ var ledCmd = &cobra.Command{
 	},
 }
 
-
 func init() {
 	rootCmd.AddCommand(ledCmd)
 
-	ledCmd.Flags().Uint32VarP(&blink_count,"blink", "b", 0,"Set blink count (0: Off, 1..254: blink n times, >254: On)")
+	ledCmd.Flags().Uint32VarP(&blink_count, "blink", "b", 0, "Set blink count (0: Off, 1..254: blink n times, >254: On)")
 }

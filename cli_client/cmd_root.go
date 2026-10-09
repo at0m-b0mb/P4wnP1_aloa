@@ -48,8 +48,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&StrRemotePort, "port", "50051", "The port on which the P4wnP1 RPC server is listening")
 
 	/*
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+		// Cobra also supports local flags, which will only run
+		// when this action is called directly.
+		rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 	*/
 }

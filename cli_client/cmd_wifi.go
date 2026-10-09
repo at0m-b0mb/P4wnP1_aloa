@@ -1,16 +1,16 @@
 package cli_client
 
 import (
-	"github.com/spf13/cobra"
-	pb "github.com/mame82/P4wnP1_aloa/proto"
+	"errors"
 	"fmt"
+	pb "github.com/mame82/P4wnP1_aloa/proto"
+	"github.com/spf13/cobra"
 	"google.golang.org/grpc/status"
 	"os"
-	"errors"
 	"strings"
 )
 
-//Empty settings used to store cobra flags
+// Empty settings used to store cobra flags
 var (
 	tmpWifiStrReg        string = ""
 	tmpWifiStrChannel    uint8  = 0
@@ -66,6 +66,55 @@ func cobraWifiGet(cmd *cobra.Command, args []string) {
 	return
 }
 
+// Printing WiFi settings and state WITHOUT the pre-shared key.
+//
+// These four call sites used fmt.Printf("%+v") on a WiFiSettings and a
+// WiFiState. Both carry ap_BSS.PSK and client_BSS.PSK, so every one of them
+// printed the access point's pre-shared key to stdout.
+//
+// That is not only an interactive concern. servicestart.sh -- the fallback
+// the service runs on every boot whose startup template fails -- calls
+// `P4wnP1_cli wifi set ap ... -k ...`, and the service captures that script's
+// stdout into the journal. So the PSK landed in journalctl on a real device,
+// found by tools/hardware-check.sh grepping the journal for the actual
+// secret rather than for the word "psk".
+//
+// The service was fixed for exactly this once before, in
+// describeWifiSettings. The CLI was never done. Same bug, same %+v, four
+// more places.
+func describePSK(psk string) string {
+	if psk == "" {
+		return "(none)"
+	}
+	return fmt.Sprintf("(set, %d chars)", len(psk))
+}
+
+func describeWifiSettings(w *pb.WiFiSettings) string {
+	if w == nil {
+		return "(none)"
+	}
+	out := fmt.Sprintf("name:%q mode:%v reg:%q channel:%d disabled:%v",
+		w.Name, w.WorkingMode, w.Regulatory, w.Channel, w.Disabled)
+	if w.Ap_BSS != nil {
+		out += fmt.Sprintf(" ap{ssid:%q psk:%s}", w.Ap_BSS.SSID, describePSK(w.Ap_BSS.PSK))
+	}
+	for i, c := range w.Client_BSSList {
+		if c == nil {
+			continue
+		}
+		out += fmt.Sprintf(" client%d{ssid:%q psk:%s}", i, c.SSID, describePSK(c.PSK))
+	}
+	return out
+}
+
+func describeWifiState(st *pb.WiFiState) string {
+	if st == nil {
+		return "(none)"
+	}
+	return fmt.Sprintf("mode:%v channel:%d ssid:%q settings:{%s}",
+		st.Mode, st.Channel, st.Ssid, describeWifiSettings(st.CurrentSettings))
+}
+
 func cobraWifiSetAP(cmd *cobra.Command, args []string) {
 	settings, err := createWifiAPSettings(tmpWifiStrChannel, tmpWifiStrReg, tmpWifiSSID, tmpWifiPSK, tmpWifiHideSSID, tmpWifiDisableNexmon, tmpWifiDisabled)
 	if err != nil {
@@ -75,14 +124,14 @@ func cobraWifiSetAP(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	fmt.Printf("Deploying WiFi inteface settings:\n\t%v\n", settings)
+	fmt.Printf("Deploying WiFi interface settings:\n\t%s\n", describeWifiSettings(settings))
 
 	state, err := ClientDeployWifiSettings(StrRemoteHost, StrRemotePort, settings)
 	if err != nil {
 		fmt.Println(status.Convert(err).Message())
 		os.Exit(-1) //exit with error
 	} else {
-		fmt.Printf("%+v\n", state)
+		fmt.Printf("%s\n", describeWifiState(state))
 	}
 	return
 }
@@ -97,14 +146,14 @@ func cobraWifiSetSta(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	fmt.Printf("Deploying WiFi inteface settings:\n\t%v\n", settings)
+	fmt.Printf("Deploying WiFi interface settings:\n\t%s\n", describeWifiSettings(settings))
 
-	state,err := ClientDeployWifiSettings(StrRemoteHost, StrRemotePort, settings)
+	state, err := ClientDeployWifiSettings(StrRemoteHost, StrRemotePort, settings)
 	if err != nil {
 		fmt.Println(status.Convert(err).Message())
 		os.Exit(-1) //exit with error
 	} else {
-		fmt.Printf("%+v\n", state)
+		fmt.Printf("%s\n", describeWifiState(state))
 	}
 	return
 }
@@ -175,9 +224,9 @@ func createWifiStaSettings(reg string, strSSID string, strPSK string, nonexmon b
 				PSK:  strPSK,
 			},
 		},
-		Nexmon: !nonexmon,
-		Ap_BSS: &pb.WiFiBSSCfg{}, //not needed
-		Name: "default",
+		Nexmon:   !nonexmon,
+		Ap_BSS:   &pb.WiFiBSSCfg{}, //not needed
+		Name:     "default",
 		HideSsid: false,
 	}
 

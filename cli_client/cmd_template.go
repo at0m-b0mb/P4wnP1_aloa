@@ -8,26 +8,23 @@ import (
 	"os"
 )
 
-
-
 const (
-	templateFlagNameBluetooth = "bluetooth"
-	templateFlagNameNetwork = "network"
+	templateFlagNameBluetooth      = "bluetooth"
+	templateFlagNameNetwork        = "network"
 	templateFlagNameTriggerActions = "trigger-actions"
-	templateFlagNameWifi = "wifi"
-	templateFlagNameUsb = "usb"
-	templateFlagNameFullSettings = "full"
+	templateFlagNameWifi           = "wifi"
+	templateFlagNameUsb            = "usb"
+	templateFlagNameFullSettings   = "full"
 )
+
 var templateFlagNames = map[string]bool{
-	templateFlagNameBluetooth: true,
-	templateFlagNameNetwork: true,
+	templateFlagNameBluetooth:      true,
+	templateFlagNameNetwork:        true,
 	templateFlagNameTriggerActions: true,
-	templateFlagNameWifi: true,
-	templateFlagNameUsb: true,
-	templateFlagNameFullSettings: true,
+	templateFlagNameWifi:           true,
+	templateFlagNameUsb:            true,
+	templateFlagNameFullSettings:   true,
 }
-
-
 
 var (
 	// deploy
@@ -37,7 +34,7 @@ var (
 	tmpTemplateTypeUsb            = ""
 	tmpTemplateTypeBluetooth      = ""
 	tmpTemplateTypeTriggerActions = ""
-//	tmpTemplateName               = ""
+	//	tmpTemplateName               = ""
 	//list
 	tmpTemplateTypeFullSettingsToggle   = false
 	tmpTemplateTypeNetworkToggle        = false
@@ -45,26 +42,24 @@ var (
 	tmpTemplateTypeUsbToggle            = false
 	tmpTemplateTypeBluetoothToggle      = false
 	tmpTemplateTypeTriggerActionsToggle = false
-
 )
-
 
 func listTemplateType(ttype pb.ActionDeploySettingsTemplate_TemplateType) (err error) {
 	fmt.Println("Templates of type", ttype, ":")
 	fmt.Println("------------------------------------")
-	list,err := ClientListTemplateType(TIMEOUT_MEDIUM, StrRemoteHost, StrRemotePort, ttype)
+	list, err := ClientListTemplateType(TIMEOUT_MEDIUM, StrRemoteHost, StrRemotePort, ttype)
 	if err != nil {
 		fmt.Println("Error retrieving templates: ", err.Error())
 		return err
 	}
-	for _,s := range list {
+	for _, s := range list {
 		fmt.Println(s)
 	}
 	fmt.Println()
 	return nil
 }
 
-func deployTemplateType(ttype pb.ActionDeploySettingsTemplate_TemplateType, name string) (err error){
+func deployTemplateType(ttype pb.ActionDeploySettingsTemplate_TemplateType, name string) (err error) {
 	fmt.Print("Deploying template of type ", ttype, ", name '", name, "': ...")
 	err = ClientDeployTemplateType(TIMEOUT_MEDIUM, StrRemoteHost, StrRemotePort, ttype, name)
 	if err != nil {
@@ -79,7 +74,7 @@ func deployTemplateType(ttype pb.ActionDeploySettingsTemplate_TemplateType, name
 func parseFlagsDeploy(cmd *cobra.Command) (res map[pb.ActionDeploySettingsTemplate_TemplateType]string) {
 	res = make(map[pb.ActionDeploySettingsTemplate_TemplateType]string)
 	cmd.Flags().Visit(func(flag *pflag.Flag) {
-		if _,exists := templateFlagNames[flag.Name]; exists {
+		if _, exists := templateFlagNames[flag.Name]; exists {
 			switch flag.Name {
 			case templateFlagNameBluetooth:
 				res[pb.ActionDeploySettingsTemplate_BLUETOOTH] = flag.Value.String()
@@ -103,7 +98,7 @@ func parseFlagsDeploy(cmd *cobra.Command) (res map[pb.ActionDeploySettingsTempla
 
 func parseFlagsList(cmd *cobra.Command) (res []pb.ActionDeploySettingsTemplate_TemplateType) {
 	cmd.Flags().Visit(func(flag *pflag.Flag) {
-		if _,exists := templateFlagNames[flag.Name]; exists {
+		if _, exists := templateFlagNames[flag.Name]; exists {
 			switch flag.Name {
 			case templateFlagNameBluetooth:
 				res = append(res, pb.ActionDeploySettingsTemplate_BLUETOOTH)
@@ -129,7 +124,7 @@ func parseFlagsList(cmd *cobra.Command) (res []pb.ActionDeploySettingsTemplate_T
 			pb.ActionDeploySettingsTemplate_WIFI,
 			pb.ActionDeploySettingsTemplate_TRIGGER_ACTIONS,
 			pb.ActionDeploySettingsTemplate_NETWORK,
-			)
+		)
 	}
 
 	//fmt.Printf("%+v\n", res)
@@ -147,14 +142,13 @@ func init() {
 		Short: "Deploy given gadget settings",
 		Run: func(cmd *cobra.Command, args []string) {
 			deployList := parseFlagsDeploy(cmd)
-			for ttype,name := range deployList {
-				err := deployTemplateType(ttype,name)
+			for ttype, name := range deployList {
+				err := deployTemplateType(ttype, name)
 				if err != nil {
 					os.Exit(-1)
 				}
 			}
 		},
-
 	}
 
 	cmdTemplateList := &cobra.Command{
@@ -163,7 +157,7 @@ func init() {
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
 			showList := parseFlagsList(cmd)
-			for _,ttype := range showList {
+			for _, ttype := range showList {
 				err := listTemplateType(ttype)
 				if err != nil {
 					os.Exit(-1)
@@ -173,23 +167,21 @@ func init() {
 		},
 	}
 
-
-
 	rootCmd.AddCommand(cmdTemplate)
 	cmdTemplate.AddCommand(cmdTemplateDeploy, cmdTemplateList)
 
-	cmdTemplateList.Flags().BoolVarP(&tmpTemplateTypeBluetoothToggle, templateFlagNameBluetooth, "b", false,"List existing bluetooth settings templates")
-	cmdTemplateList.Flags().BoolVarP(&tmpTemplateTypeNetworkToggle, templateFlagNameNetwork, "n", false,"List existing network settings templates")
-	cmdTemplateList.Flags().BoolVarP(&tmpTemplateTypeTriggerActionsToggle, templateFlagNameTriggerActions, "t", false,"List existing trigger action templates")
-	cmdTemplateList.Flags().BoolVarP(&tmpTemplateTypeWifiToggle, templateFlagNameWifi, "w", false,"List existing WiFi settings templates")
-	cmdTemplateList.Flags().BoolVarP(&tmpTemplateTypeUsbToggle, templateFlagNameUsb, "u", false,"List existing USB settings templates")
-	cmdTemplateList.Flags().BoolVarP(&tmpTemplateTypeFullSettingsToggle, templateFlagNameFullSettings, "f", false,"List existing full settings templates")
+	cmdTemplateList.Flags().BoolVarP(&tmpTemplateTypeBluetoothToggle, templateFlagNameBluetooth, "b", false, "List existing bluetooth settings templates")
+	cmdTemplateList.Flags().BoolVarP(&tmpTemplateTypeNetworkToggle, templateFlagNameNetwork, "n", false, "List existing network settings templates")
+	cmdTemplateList.Flags().BoolVarP(&tmpTemplateTypeTriggerActionsToggle, templateFlagNameTriggerActions, "t", false, "List existing trigger action templates")
+	cmdTemplateList.Flags().BoolVarP(&tmpTemplateTypeWifiToggle, templateFlagNameWifi, "w", false, "List existing WiFi settings templates")
+	cmdTemplateList.Flags().BoolVarP(&tmpTemplateTypeUsbToggle, templateFlagNameUsb, "u", false, "List existing USB settings templates")
+	cmdTemplateList.Flags().BoolVarP(&tmpTemplateTypeFullSettingsToggle, templateFlagNameFullSettings, "f", false, "List existing full settings templates")
 
-	cmdTemplateDeploy.Flags().StringVarP(&tmpTemplateTypeBluetooth, templateFlagNameBluetooth, "b", "","Deploy Bluetooth template")
-	cmdTemplateDeploy.Flags().StringVarP(&tmpTemplateTypeNetwork, templateFlagNameNetwork, "n", "","Deploy network settings template")
-	cmdTemplateDeploy.Flags().StringVarP(&tmpTemplateTypeTriggerActions, templateFlagNameTriggerActions, "t", "","Deploy trigger action template")
-	cmdTemplateDeploy.Flags().StringVarP(&tmpTemplateTypeWifi, templateFlagNameWifi, "w", "","Deploy WiFi settings templates")
-	cmdTemplateDeploy.Flags().StringVarP(&tmpTemplateTypeUsb, templateFlagNameUsb, "u", "","Deploy USB settings template")
-	cmdTemplateDeploy.Flags().StringVarP(&tmpTemplateTypeFullSettings, templateFlagNameFullSettings, "f", "","Deploy full settings template")
+	cmdTemplateDeploy.Flags().StringVarP(&tmpTemplateTypeBluetooth, templateFlagNameBluetooth, "b", "", "Deploy Bluetooth template")
+	cmdTemplateDeploy.Flags().StringVarP(&tmpTemplateTypeNetwork, templateFlagNameNetwork, "n", "", "Deploy network settings template")
+	cmdTemplateDeploy.Flags().StringVarP(&tmpTemplateTypeTriggerActions, templateFlagNameTriggerActions, "t", "", "Deploy trigger action template")
+	cmdTemplateDeploy.Flags().StringVarP(&tmpTemplateTypeWifi, templateFlagNameWifi, "w", "", "Deploy WiFi settings templates")
+	cmdTemplateDeploy.Flags().StringVarP(&tmpTemplateTypeUsb, templateFlagNameUsb, "u", "", "Deploy USB settings template")
+	cmdTemplateDeploy.Flags().StringVarP(&tmpTemplateTypeFullSettings, templateFlagNameFullSettings, "f", "", "Deploy full settings template")
 
 }

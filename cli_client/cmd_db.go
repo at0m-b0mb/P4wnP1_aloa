@@ -7,13 +7,10 @@ import (
 	"os"
 )
 
-
-
 var (
 	// deploy
 	tmpDBBackupName = ""
 )
-
 
 func init() {
 	cmdDB := &cobra.Command{
@@ -38,7 +35,6 @@ func init() {
 			}
 			fmt.Println(" success")
 		},
-
 	}
 
 	cmdDBRestore := &cobra.Command{
@@ -58,7 +54,6 @@ func init() {
 			}
 			fmt.Println(" success")
 		},
-
 	}
 
 	cmdDBList := &cobra.Command{
@@ -66,7 +61,7 @@ func init() {
 		Short: "List backups",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			list,err := ClientDBList(TIMEOUT_LONG, StrRemoteHost, StrRemotePort)
+			list, err := ClientDBList(TIMEOUT_LONG, StrRemoteHost, StrRemotePort)
 			if err != nil {
 				fmt.Println(err.Error())
 				os.Exit(-1)
@@ -86,13 +81,11 @@ func init() {
 		},
 	}
 
-
-
 	rootCmd.AddCommand(cmdDB)
 	cmdDB.AddCommand(cmdDBBackup, cmdDBList, cmdDBRestore)
 
-	cmdDBBackup.Flags().StringVarP(&tmpDBBackupName, "name", "n", "","Name of backup")
-	cmdDBRestore.Flags().StringVarP(&tmpDBBackupName, "name", "n", "","Name of backup")
+	cmdDBBackup.Flags().StringVarP(&tmpDBBackupName, "name", "n", "", "Name of backup")
+	cmdDBRestore.Flags().StringVarP(&tmpDBBackupName, "name", "n", "", "Name of backup")
 
 	cmdDBList.Flags().BoolVar(&BoolJson, "json", false, "Output results as JSON if applicable")
 

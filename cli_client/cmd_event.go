@@ -13,7 +13,9 @@ var evtCmd = &cobra.Command{
 	Short: "Receive P4wnP1 service events",
 	Run: func(cmd *cobra.Command, args []string) {
 		err := receiveEvent(tmpEventID)
-		if err != nil { log.Fatal(err)}
+		if err != nil {
+			log.Fatal(err)
+		}
 	},
 }
 
@@ -21,9 +23,7 @@ func receiveEvent(eType int64) (err error) {
 	return ClientRegisterEvent(StrRemoteHost, StrRemotePort, eType)
 }
 
-
-
 func init() {
 	rootCmd.AddCommand(evtCmd)
-	evtCmd.Flags().Int64VarP(&tmpEventID,"event-id", "i", 0,"Listen to events of given ID (0 = Any)")
+	evtCmd.Flags().Int64VarP(&tmpEventID, "event-id", "i", 0, "Listen to events of given ID (0 = Any)")
 }

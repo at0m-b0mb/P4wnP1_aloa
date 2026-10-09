@@ -7,21 +7,19 @@ import (
 	"os"
 )
 
-
-
 const (
-	templateFlagTriggerGroupName = "group-name"
+	templateFlagTriggerGroupName  = "group-name"
 	templateFlagTriggerGroupValue = "group-value"
 )
 
 var (
 	// deploy
-	tmpTriggerGroupName   = ""
+	tmpTriggerGroupName  = ""
 	tmpTriggerGroupValue = int32(0)
 )
 
 func TriggerCheckFlags(cmd *cobra.Command) {
-	valDefined,nameDefined := false,false
+	valDefined, nameDefined := false, false
 	cmd.Flags().Visit(func(flag *pflag.Flag) {
 		if flag.Name == templateFlagTriggerGroupName {
 			nameDefined = true
@@ -58,14 +56,13 @@ func init() {
 		Run: func(cmd *cobra.Command, args []string) {
 			TriggerCheckFlags(cmd)
 			fmt.Printf("Sending value %d to group '%s'...", tmpTriggerGroupValue, tmpTriggerGroupName)
-			err := ClientTriggerGroupSend(StrRemoteHost,StrRemotePort,tmpTriggerGroupName,tmpTriggerGroupValue)
+			err := ClientTriggerGroupSend(StrRemoteHost, StrRemotePort, tmpTriggerGroupName, tmpTriggerGroupValue)
 			if err != nil {
 				fmt.Println("error: ", err)
 				os.Exit(-1)
 			}
 			fmt.Println("success")
 		},
-
 	}
 
 	cmdTriggerWait := &cobra.Command{
@@ -75,7 +72,7 @@ func init() {
 		Run: func(cmd *cobra.Command, args []string) {
 			TriggerCheckFlags(cmd)
 			fmt.Printf("Waiting for value %d on group '%s'...", tmpTriggerGroupValue, tmpTriggerGroupName)
-			err := ClientTriggerGroupWait(StrRemoteHost,StrRemotePort,tmpTriggerGroupName,tmpTriggerGroupValue)
+			err := ClientTriggerGroupWait(StrRemoteHost, StrRemotePort, tmpTriggerGroupName, tmpTriggerGroupValue)
 			if err != nil {
 				fmt.Println("error: ", err)
 				os.Exit(-1)
@@ -84,14 +81,12 @@ func init() {
 		},
 	}
 
-
-
 	rootCmd.AddCommand(cmdTrigger)
 	cmdTrigger.AddCommand(cmdTriggerSend, cmdTriggerWait)
 
-	cmdTriggerSend.Flags().StringVarP(&tmpTriggerGroupName, templateFlagTriggerGroupName, "n", "","Name of the group to send to")
-	cmdTriggerSend.Flags().Int32VarP(&tmpTriggerGroupValue, templateFlagTriggerGroupValue, "v", 0,"The value to send")
+	cmdTriggerSend.Flags().StringVarP(&tmpTriggerGroupName, templateFlagTriggerGroupName, "n", "", "Name of the group to send to")
+	cmdTriggerSend.Flags().Int32VarP(&tmpTriggerGroupValue, templateFlagTriggerGroupValue, "v", 0, "The value to send")
 
-	cmdTriggerWait.Flags().StringVarP(&tmpTriggerGroupName, templateFlagTriggerGroupName, "n", "","Name of the group to listen")
-	cmdTriggerWait.Flags().Int32VarP(&tmpTriggerGroupValue, templateFlagTriggerGroupValue, "v", 0,"The value to wait for")
+	cmdTriggerWait.Flags().StringVarP(&tmpTriggerGroupName, templateFlagTriggerGroupName, "n", "", "Name of the group to listen")
+	cmdTriggerWait.Flags().Int32VarP(&tmpTriggerGroupValue, templateFlagTriggerGroupValue, "v", 0, "The value to wait for")
 }
