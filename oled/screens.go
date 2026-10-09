@@ -334,10 +334,16 @@ func NewUSBView() *USBView { return &USBView{} }
 func (u *USBView) Title() string { return "Cable" }
 
 func (u *USBView) Hint() string {
-	if u.dirty {
-		return "KEY1 deploy changes"
+	used := EndpointsUsed(u.toggles)
+	if used > EndpointMax {
+		// The budget beats everything else on this line: a selection that
+		// cannot deploy is the only thing worth saying.
+		return fmt.Sprintf("OVER %d/%d endpoints", used, EndpointMax)
 	}
-	return "press toggles"
+	if u.dirty {
+		return fmt.Sprintf("KEY1 deploy  %d/%d ep", used, EndpointMax)
+	}
+	return fmt.Sprintf("press toggles %d/%d", used, EndpointMax)
 }
 
 func (u *USBView) Refresh(app *App) {
@@ -397,6 +403,12 @@ func (u *USBView) Handle(b Button, app *App) Action {
 		}
 		u.toggles[u.cur.sel].On = !u.toggles[u.cur.sel].On
 		u.dirty = true
+		// Say it at the moment of the tick, not at the deploy. The hint line
+		// carries the running total, but a toast is what you actually notice
+		// when the box you just ticked is the one that broke the budget.
+		if used := EndpointsUsed(u.toggles); used > EndpointMax {
+			app.Toast("over budget: %d of %d", used, EndpointMax)
+		}
 	case BtnRefresh:
 		// Reached only when there is something to lose: Refresh is a no-op
 		// while dirty, so without this the central handler would say
@@ -406,6 +418,17 @@ func (u *USBView) Handle(b Button, app *App) Action {
 			return ActNone
 		}
 	case BtnAction:
+		if used := EndpointsUsed(u.toggles); used > EndpointMax {
+			// Refuse HERE, naming what to turn off. The service refuses too
+			// and reverts cleanly, but it can only report a number -- and a
+			// number is not an instruction.
+			app.Push(NewTextView("Too many",
+				fmt.Sprintf("This needs %d USB endpoints and the board has %d. ", used, EndpointMax)+
+					"Turn something off first. "+
+					"Network and storage cost 2 each; keyboard, mouse and raw HID cost 1. "+
+					"To add mass storage or serial, drop RNDIS net or CDC ECM net."))
+			return ActNone
+		}
 		if !u.dirty {
 			app.Toast("no changes")
 			return ActNone

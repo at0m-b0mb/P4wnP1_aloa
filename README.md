@@ -84,6 +84,41 @@ Earlier images shipped `p4wnp1:p4wnp1`. If you flashed one of those, change that
 forced change at first login did not protect it, because whoever logs in first is the one who
 answers the prompt.
 
+### Seven USB endpoints, and what they cost
+
+The dwc2 controller on a Pi Zero W has **seven usable USB endpoints**. Every function you
+compose spends some, and you cannot overdraw:
+
+| function | endpoints |
+|---|---|
+| Keyboard, Mouse, Raw HID | 1 each |
+| RNDIS, CDC ECM, Serial, Storage | 2 each |
+
+So the common composition — both network functions plus keyboard and mouse — is **6 of 7**.
+There is room for Raw HID, and not for Storage or Serial. To add either, turn off RNDIS or
+CDC ECM first.
+
+The service has always refused an over-budget composition and reverted cleanly, which is
+correct. What it could only say was the number:
+
+```
+Gadget Settings consume 8 out of 7 available USB Endpoints
+```
+
+— true, arriving only *after* you had ticked the boxes and confirmed a disconnect warning, and
+silent on which thing to turn off. Both consoles now count the same budget and say so first:
+
+* the **OLED** Cable screen carries `6/7` on its hint line, toasts `over budget: 8 of 7` the
+  moment a tick breaks it, and refuses KEY1 with the remedy;
+* the **web console** refuses before the disconnect warning, because letting someone confirm
+  "this console WILL disconnect" for a composition that cannot deploy is a cruel way to find
+  out.
+
+That makes three copies of the number seven — the service, the panel and the console — which is
+exactly the arrangement that silently stops agreeing. `tools/check-rpc-shapes.py` compares all
+three on every CI run, ceiling and per-function costs, and each direction of drift is
+negative-tested.
+
 ### The cable presents no keyboard until you ask it to
 
 A freshly flashed device composes **ethernet only** — RNDIS and CDC ECM, so you can reach it —

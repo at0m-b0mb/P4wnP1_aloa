@@ -237,6 +237,29 @@ const USB_FUNCTIONS = [
     what: 'The device appears as a USB stick or a CD-ROM, backed by an image file you choose.' },
 ];
 
+/* THE USB ENDPOINT BUDGET.
+ *
+ * The dwc2 controller on a Pi Zero W has seven usable endpoints and each
+ * function costs some. Compose more than seven and the service refuses --
+ * correctly -- with "Gadget Settings consume 8 out of 7 available USB
+ * Endpoints", which is true, arrives only after you have ticked the boxes
+ * and confirmed a disconnect warning, and does not say what to turn off.
+ *
+ * Reported from hardware by an operator trying to add Storage to a device
+ * that already had both network functions and a keyboard.
+ *
+ * Mirrored from service/SubSysUSB.go; kept in step by the endpoint-budget
+ * check in tools/check-rpc-shapes.py. */
+const USB_ENDPOINT_MAX = 7;
+const USB_ENDPOINT_COST = {
+  use_HID_KEYBOARD: 1, use_HID_MOUSE: 1, use_HID_RAW: 1,
+  use_RNDIS: 2, use_CDC_ECM: 2, use_SERIAL: 2, use_UMS: 2,
+};
+function endpointsUsed(settings) {
+  return USB_FUNCTIONS.reduce(
+    (n, f) => n + (settings && settings[f.key] ? (USB_ENDPOINT_COST[f.key] || 0) : 0), 0);
+}
+
 function renderCable() {
   const s = State.usb;
   const strip = h('div.cable-strip');
@@ -485,6 +508,21 @@ Views.cable = async function () {
              functions. If the console is reached over USB ethernet -- the
              normal case -- this request is what kills the connection it
              arrived on. Say so before doing it. */
+          /* Refuse here, before the disconnect warning. Letting someone
+             confirm "this console WILL disconnect" for a composition that
+             cannot deploy is a cruel way to find out. */
+          const used = endpointsUsed(draft);
+          if (used > USB_ENDPOINT_MAX) {
+            await showDetail({
+              title: 'Too many USB functions',
+              body: 'This composition needs ' + used + ' USB endpoints and the board has '
+                  + USB_ENDPOINT_MAX + '.\n\n'
+                  + 'Network and storage functions cost 2 endpoints each; keyboard, mouse and '
+                  + 'raw HID cost 1.\n\n'
+                  + 'To add Storage or Serial, turn off RNDIS or CDC ECM first.',
+            });
+            return;
+          }
           const overUsb = /^172\.16\.0\./.test(location.hostname);
           const yes = await confirmAction({
             title: 'Re-compose the USB gadget?',

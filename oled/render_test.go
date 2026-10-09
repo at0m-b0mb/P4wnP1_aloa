@@ -106,8 +106,10 @@ func script() []walk {
 			want: []string{"Deploy", "No", "Yes", "re-enumerate"}},
 		{label: "07-cable", keys: toCable,
 			want: []string{"Cable", "Keyboard", "RNDIS", "[x]", "[ ]"}},
+		// The hint now carries the endpoint budget too, because a composition
+		// that cannot deploy is worth knowing about before you confirm it.
 		{label: "08-cable-dirty", keys: path(toCable, []Button{BtnDown, BtnConfirm}),
-			want: []string{"deploy changes"}},
+			want: []string{"KEY1 deploy", "/7"}},
 		{label: "09-payloads", keys: toPayloads,
 			want: []string{"Payloads", "hello.js", "run in bg"}},
 		{label: "10-payload-confirm", keys: path(toPayloads, []Button{BtnEnter}),

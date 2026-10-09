@@ -141,6 +141,49 @@ type Toggle struct {
 	On    bool
 }
 
+// THE ENDPOINT BUDGET.
+//
+// The dwc2 controller on a Pi Zero W has seven usable USB endpoints, and
+// each function costs some. Compose more than seven and the deploy is
+// refused -- correctly -- with
+//
+//	Gadget Settings consume 8 out of 7 available USB Endpoints
+//
+// which is true, and arrives only AFTER you have ticked the boxes and
+// confirmed. An operator hits it by selecting mass storage on a device that
+// already has both network functions and a keyboard, is told a number, and
+// is not told which thing to turn off.
+//
+// So the panel counts too, and says so before the deploy rather than after.
+// Mirrored from service/SubSysUSB.go; kept in step by the endpoint-budget
+// check in tools/check-rpc-shapes.py, because two copies of a number that
+// must agree is exactly the arrangement that silently stops agreeing.
+const EndpointMax = 7
+
+var endpointCost = map[string]int{
+	"use_HID_KEYBOARD": 1,
+	"use_HID_MOUSE":    1,
+	"use_HID_RAW":      1,
+	"use_RNDIS":        2,
+	"use_CDC_ECM":      2,
+	"use_SERIAL":       2,
+	"use_UMS":          2,
+}
+
+// EndpointsUsed totals the budget for a set of toggles.
+func EndpointsUsed(toggles []Toggle) int {
+	n := 0
+	for _, t := range toggles {
+		if t.On {
+			n += endpointCost[t.Key]
+		}
+	}
+	return n
+}
+
+// EndpointCostOf reports what one function costs, 0 if it is not counted.
+func EndpointCostOf(key string) int { return endpointCost[key] }
+
 // usbToggles is the subset of the USB composition worth exposing on a 21-column
 // screen, in the order an operator thinks about them.
 var usbToggles = []struct{ Key, Label string }{

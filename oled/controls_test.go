@@ -514,3 +514,97 @@ func TestHomeStillSpeaksAtATidyRoot(t *testing.T) {
 		t.Errorf("KEY3 with the cursor moved said nothing:\n%s", s)
 	}
 }
+
+// The board has seven USB endpoints. A composition that needs more is
+// refused by the service -- correctly -- with
+//
+//	Gadget Settings consume 8 out of 7 available USB Endpoints
+//
+// which is true, arrives only after you have ticked and confirmed, and does
+// not say what to turn off. Reported from hardware by an operator trying to
+// add mass storage to a device that already had both network functions and
+// a keyboard.
+func TestCableCountsEndpointsBeforeDeploying(t *testing.T) {
+	c := NewFakeClient()
+	c.Toggles = []Toggle{
+		{Key: "use_HID_KEYBOARD", Label: "Keyboard", On: true},
+		{Key: "use_HID_MOUSE", Label: "Mouse", On: true},
+		{Key: "use_RNDIS", Label: "RNDIS net", On: true},
+		{Key: "use_CDC_ECM", Label: "CDC ECM net", On: true},
+		{Key: "use_UMS", Label: "Mass storage", On: false},
+	}
+	// 1+1+2+2 = 6 of 7, which is the real composition this was found on.
+	if got := EndpointsUsed(c.Toggles); got != 6 {
+		t.Fatalf("setup: the fixture uses %d endpoints, expected 6", got)
+	}
+
+	app := NewApp(c, NewRoot())
+	for _, b := range toCable {
+		app.Handle(b)
+	}
+	v := app.Top().(*USBView)
+	if s := renderText(app); !strings.Contains(s, "6/7") {
+		t.Errorf("the screen does not show the budget:\n%s", s)
+	}
+
+	// Tick mass storage: 6 + 2 = 8, over the ceiling.
+	v.cur.sel = 4
+	app.Handle(BtnConfirm)
+	if got := EndpointsUsed(v.toggles); got != 8 {
+		t.Fatalf("ticking mass storage gave %d endpoints, expected 8", got)
+	}
+	s := renderText(app)
+	if !strings.Contains(s, "over budget") && !strings.Contains(s, "OVER") {
+		t.Errorf("ticking past the ceiling said nothing:\n%s", s)
+	}
+
+	// Deploying must refuse HERE, and name the remedy.
+	app.Handle(BtnAction)
+	s = renderText(app)
+	for _, want := range []string{"Too many", "8", "7"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the refusal does not mention %q:\n%s", want, s)
+		}
+	}
+	if c.Called("SetUSB(") {
+		t.Errorf("an over-budget composition was sent to the device: %v", c.Calls)
+	}
+
+	// Drop a 2-cost network function and it becomes deployable again.
+	app.Handle(BtnBack)
+	v.cur.sel = 2 // RNDIS
+	app.Handle(BtnConfirm)
+	if got := EndpointsUsed(v.toggles); got != 6 {
+		t.Fatalf("after dropping RNDIS the total is %d, expected 6", got)
+	}
+	app.Handle(BtnAction)
+	app.Handle(BtnRight)
+	app.Handle(BtnConfirm)
+	if !c.Called("SetUSB(") {
+		t.Errorf("a composition within budget was not deployed: %v", c.Calls)
+	}
+}
+
+// The ceiling and the per-function costs must match the service exactly.
+// Pinned here as well as by tools/check-rpc-shapes.py, so a Go-only change
+// fails without needing the python gate to run.
+func TestEndpointCostsAreTheOnesTheServiceCharges(t *testing.T) {
+	want := map[string]int{
+		"use_HID_KEYBOARD": 1, "use_HID_MOUSE": 1, "use_HID_RAW": 1,
+		"use_RNDIS": 2, "use_CDC_ECM": 2, "use_SERIAL": 2, "use_UMS": 2,
+	}
+	if EndpointMax != 7 {
+		t.Errorf("EndpointMax is %d; the dwc2 controller on a Pi Zero W has 7", EndpointMax)
+	}
+	for k, v := range want {
+		if got := EndpointCostOf(k); got != v {
+			t.Errorf("%s costs %d here, %d in the service", k, got, v)
+		}
+	}
+	// Everything the panel offers must be costed, or the total lies.
+	for _, t2 := range usbToggles {
+		if EndpointCostOf(t2.Key) == 0 {
+			t.Errorf("%s is offered on the Cable screen but costs nothing in the budget", t2.Key)
+		}
+	}
+}

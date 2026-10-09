@@ -334,6 +334,94 @@ def check_go_client(messages, rpcs):
     return problems, checked
 
 
+
+# ---------------------------------------------------------------------------
+# The USB endpoint budget, in two places that must agree.
+#
+# service/SubSysUSB.go refuses a composition that needs more endpoints than
+# the controller has, and the OLED panel counts the same budget so it can say
+# so BEFORE the deploy rather than after. Two copies of the same seven.
+#
+# A panel that thinks the ceiling is higher than the service does will offer
+# compositions that cannot deploy; one that thinks it is lower will refuse
+# ones that would have worked. Both are worse than no counting at all,
+# because the operator now has a second opinion that is wrong.
+# ---------------------------------------------------------------------------
+
+def check_endpoint_budget():
+    problems = []
+    svc = (ROOT / "service/SubSysUSB.go").read_text()
+    panel = (ROOT / "oled/client.go").read_text()
+
+    svc_consts = dict(
+        (m.group(1), int(m.group(2)))
+        for m in re.finditer(r"USB_EP_USAGE_(\w+)\s*=\s*(\d+)", svc)
+    )
+    if not svc_consts:
+        return ["could not read USB_EP_USAGE_* from service/SubSysUSB.go"]
+
+    svc_max = svc_consts.pop("MAX", None)
+    panel_max = re.search(r"EndpointMax\s*=\s*(\d+)", panel)
+    if svc_max is None or not panel_max:
+        return ["could not read the endpoint ceiling from both sides"]
+    if int(panel_max.group(1)) != svc_max:
+        problems.append(
+            f"endpoint ceiling disagrees: service says {svc_max}, "
+            f"oled/client.go says {panel_max.group(1)}")
+
+    # service name -> the proto field the panel keys on
+    want = {
+        "HID_KEYBOARD": "use_HID_KEYBOARD", "HID_MOUSE": "use_HID_MOUSE",
+        "HID_RAW": "use_HID_RAW", "RNDIS": "use_RNDIS",
+        "CDC_ECM": "use_CDC_ECM", "CDC_SERIAL": "use_SERIAL", "UMS": "use_UMS",
+    }
+    panel_costs = dict(
+        (m.group(1), int(m.group(2)))
+        for m in re.finditer(r'"(use_[A-Za-z_]+)":\s*(\d+)', panel)
+    )
+    for sname, cost in svc_consts.items():
+        key = want.get(sname)
+        if key is None:
+            problems.append(f"service has USB_EP_USAGE_{sname} and this checker does not know it")
+            continue
+        if key not in panel_costs:
+            problems.append(f"the panel does not cost {key} (service charges {cost})")
+        elif panel_costs[key] != cost:
+            problems.append(
+                f"{key} costs {cost} in the service but {panel_costs[key]} in the panel")
+    for key in panel_costs:
+        if key not in want.values():
+            problems.append(f"the panel costs {key}, which the service does not charge for")
+
+    # THREE copies now, not two: the web console counts as well, so it can
+    # refuse before making someone confirm a disconnect warning for a
+    # composition that cannot deploy.
+    js = (ROOT / "dist/www/app/js/app.js").read_text()
+    js_max = re.search(r"USB_ENDPOINT_MAX\s*=\s*(\d+)", js)
+    if not js_max:
+        problems.append("the web console does not define USB_ENDPOINT_MAX")
+    elif int(js_max.group(1)) != svc_max:
+        problems.append(
+            f"endpoint ceiling disagrees: service says {svc_max}, "
+            f"the web console says {js_max.group(1)}")
+
+    m = re.search(r"const USB_ENDPOINT_COST = \{(.*?)\}", js, re.S)
+    if not m:
+        problems.append("the web console does not define USB_ENDPOINT_COST")
+    else:
+        js_costs = dict((k, int(v)) for k, v in re.findall(r"(use_\w+):\s*(\d+)", m.group(1)))
+        for sname, cost in svc_consts.items():
+            key = want.get(sname)
+            if key is None:
+                continue
+            if key not in js_costs:
+                problems.append(f"the web console does not cost {key} (service charges {cost})")
+            elif js_costs[key] != cost:
+                problems.append(
+                    f"{key} costs {cost} in the service but {js_costs[key]} in the web console")
+    return problems
+
+
 def main():
     messages, rpcs = parse_proto()
     print(f"proto: {len(messages)} messages, {len(rpcs)} rpcs")
@@ -362,6 +450,7 @@ def main():
 
     go_problems, go_checked = check_go_client(messages, rpcs)
     problems.extend(go_problems)
+    problems.extend(check_endpoint_budget())
     print(f"checked {checked} console call sites with literal payloads, "
           f"{go_checked} OLED client call sites, "
           f"plus the keys the console reads off GadgetSettings")
@@ -370,7 +459,8 @@ def main():
         for p in problems:
             print("  - " + p)
         return 1
-    print("PASS -- every field the console and the OLED client send or read exists")
+    print("PASS -- every field the console and the OLED client send or read exists,")
+    print("        and the USB endpoint budget agrees between the service and the panel")
     return 0
 
 
