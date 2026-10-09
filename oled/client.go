@@ -22,19 +22,33 @@ import (
 type Client interface {
 	Status() (Status, error)
 
-	// LiveSSID returns the SSID the access point is ACTUALLY broadcasting.
+	// LiveAP returns the SSID and pre-shared key the access point is ACTUALLY
+	// broadcasting right now.
 	//
-	// Not the one configured at install time. Those are different values and
-	// the device had been telling operators the wrong one: install.sh writes
-	// its --ssid into /etc/p4wnp1/initial.conf, which the first-boot card
-	// prints, while the AP itself broadcasts whatever is in the shipped
-	// template database. On a stock v0.6.0 the card said "HackProKP" and the
-	// radio was on air as an entirely different name.
+	// NOT the values configured at install time. Those differ, and the device
+	// had been telling operators the wrong name: install.sh writes its --ssid
+	// into /etc/p4wnp1/initial.conf, which the first-boot card prints, while
+	// the AP itself broadcasts whatever is in the shipped template database. On
+	// a stock v0.6.0 the card said "HackProKP" and the radio was on air as an
+	// entirely different name.
 	//
-	// Harmless when it is only printed -- irritating, you scan and find a
-	// network with another name. Not harmless in a QR join code, which would
-	// confidently encode a network that does not exist.
-	LiveSSID() (string, error)
+	// A wrong name is irritating when printed and useless in a QR join code,
+	// which would confidently encode a network that does not exist.
+	//
+	// THE KEY IS RETURNED FOR A SPECIFIC REASON. It used to reach the panel
+	// only through the first-boot handoff, which copies it out of
+	// /etc/p4wnp1/generated-ap.psk -- a file the SERVICE creates, the first
+	// time it refuses to broadcast a published PSK. Nothing orders those two
+	// events. When first boot got there first the line was simply absent, the
+	// WiFi card did not exist, and KEY1 then shredded
+	// /root/INITIAL_CREDENTIALS.txt, which held the only other copy. The
+	// operator destroyed a credential they had never been shown.
+	//
+	// Reading it live cannot race: whatever the AP is using is what the card
+	// shows. This adds no exposure -- GetWiFiState already returns the key to
+	// any authenticated console caller, and it is the same endpoint this asks
+	// for the SSID.
+	LiveAP() (ssid string, psk string, err error)
 
 	// List returns the names stored under a kind.
 	List(kind Kind) ([]string, error)
@@ -649,13 +663,35 @@ func (c *APIClient) Status() (Status, error) {
 	return s, nil
 }
 
-// LiveSSID asks the service what the access point is broadcasting right now.
-func (c *APIClient) LiveSSID() (string, error) {
-	var wifi struct {
-		Ssid string `json:"ssid"`
-	}
+// LiveAP asks the service what the access point is broadcasting right now.
+//
+// The field names are the ones protojson actually emits, which are NOT the Go
+// field names and not uniformly snake_case either -- "ssid" at the top level,
+// "currentSettings", then "ap_BSS" with "SSID" and "PSK" in caps. A wrong tag
+// here does not fail: encoding/json leaves the field at its zero value and the
+// card silently loses the key again. oled/liveap_test.go decodes a response
+// captured from a real device to keep that honest.
+func (c *APIClient) LiveAP() (string, string, error) {
+	var wifi wifiStateReply
 	if err := c.call("GetWiFiState", nil, &wifi); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return strings.TrimSpace(wifi.Ssid), nil
+	ssid := strings.TrimSpace(wifi.Ssid)
+	if ssid == "" {
+		// The top-level field is what hostapd reports; fall back to the
+		// deployed settings when the radio has not answered yet.
+		ssid = strings.TrimSpace(wifi.CurrentSettings.ApBSS.SSID)
+	}
+	return ssid, strings.TrimSpace(wifi.CurrentSettings.ApBSS.PSK), nil
+}
+
+// wifiStateReply is the slice of GetWiFiState the panel needs.
+type wifiStateReply struct {
+	Ssid            string `json:"ssid"`
+	CurrentSettings struct {
+		ApBSS struct {
+			SSID string `json:"SSID"`
+			PSK  string `json:"PSK"`
+		} `json:"ap_BSS"`
+	} `json:"currentSettings"`
 }

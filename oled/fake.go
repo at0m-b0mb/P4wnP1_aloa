@@ -20,6 +20,10 @@ type FakeClient struct {
 	St      Status
 	Startup string
 	SSID    string
+	// PSK is the access point key LiveAP reports. Empty means "the service
+	// has no key to offer", which is how the panel's pre-fix behaviour is
+	// reproduced in tests.
+	PSK string
 
 	// Fail makes the named RPC-ish operation return an error, so the error
 	// paths get exercised as thoroughly as the happy ones.
@@ -87,17 +91,18 @@ func (f *FakeClient) fail(op string) error {
 	return nil
 }
 
-// SSID is what LiveSSID reports. Deliberately different from anything a
+// SSID and PSK are what LiveAP reports. Deliberately different from anything a
 // handoff would carry, so a test that confuses the two fails.
-func (f *FakeClient) LiveSSID() (string, error) {
-	f.note("LiveSSID")
-	if err := f.fail("LiveSSID"); err != nil {
-		return "", err
+func (f *FakeClient) LiveAP() (string, string, error) {
+	f.note("LiveAP")
+	if err := f.fail("LiveAP"); err != nil {
+		return "", "", err
 	}
-	if f.SSID == "" {
-		return "live-ap", nil
+	ssid := f.SSID
+	if ssid == "" {
+		ssid = "live-ap"
 	}
-	return f.SSID, nil
+	return ssid, f.PSK, nil
 }
 
 func (f *FakeClient) Status() (Status, error) {

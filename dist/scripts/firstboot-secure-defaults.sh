@@ -54,7 +54,7 @@ LOG_TAG=p4wnp1-firstboot
 # Defaults if /etc/p4wnp1/initial.conf doesn't exist (e.g. the user installed
 # manually without the installer). These match service/defaults.go.
 P4WNP1_INITIAL_SSID=💥P4wnP1
-P4WNP1_INITIAL_PSK="(unset -- still on service default 'MaMe82-P4wnP1')"
+P4WNP1_INITIAL_PSK=""
 
 # Syntax-check before sourcing.
 #
@@ -456,6 +456,24 @@ fi
 
 # --- write credentials file -------------------------------------------------
 umask 077
+# What to print for the access point key.
+#
+# This used to be a hardcoded string saying the PSK was "still on service
+# default 'MaMe82-P4wnP1'". That stopped being true when the PSK guard landed:
+# the service now REFUSES to broadcast that value and substitutes a per-device
+# random key, persisted at /etc/p4wnp1/generated-ap.psk. So the file was
+# telling an operator to go and change a key the device was not using, and
+# naming a key it specifically declines to use.
+#
+# Report what is actually in force, and say where it came from.
+if [ -r /etc/p4wnp1/generated-ap.psk ]; then
+    REPORT_PSK="$(cat /etc/p4wnp1/generated-ap.psk) (generated for this device)"
+elif [ -n "${P4WNP1_INITIAL_PSK}" ]; then
+    REPORT_PSK="${P4WNP1_INITIAL_PSK} (chosen at install time)"
+else
+    REPORT_PSK="not set yet -- the service generates one the first time it brings the AP up, at /etc/p4wnp1/generated-ap.psk"
+fi
+
 cat > "${CREDS_FILE}" <<EOF
 ==============================================================================
  P4wnP1 A.L.O.A. -- initial credentials (generated on first boot)
@@ -489,16 +507,31 @@ ${SSH_FPS}
   access.
 
 ------------------------------------------------------------------------------
- WiFi credentials chosen at install time
+ WiFi access point
 ------------------------------------------------------------------------------
 
   WiFi AP SSID:         ${P4WNP1_INITIAL_SSID}
-  WiFi AP PSK:          ${P4WNP1_INITIAL_PSK}
+  WiFi AP PSK:          ${REPORT_PSK}
 
-  These values were captured by install.sh. The running P4wnP1 service still
-  has to be told to broadcast them. Setting the SSID and PSK is a CLI job --
-  there is no field for it in the web console:
+  The key is NOT a shared default. The shipped template database still carries
+  the upstream PSK, which is published in this project's source and therefore
+  not a secret, so the service refuses to broadcast it and substitutes a
+  random per-device key the first time it brings the access point up. That key
+  is kept at /etc/p4wnp1/generated-ap.psk (0600, root) and is stable across
+  reboots, so it is safe to write down.
+
+  To see what is actually on air, rather than what any file claims: the web
+  console's Radio -> WiFi page, or the OLED panel if a HAT is fitted. The CLI
+  has no WiFi read command -- wifiGetCmd is commented out in
+  cli_client/cmd_wifi.go -- so it can only set, never report.
+
+  To choose your own name and key:
       P4wnP1_cli wifi set ap --ssid '<SSID>' --psk '<PSK>'
+  There is no field for this in the web console. Keep the SSID to 15 BYTES or
+  fewer if you want the OLED panel to be able to show a scan-to-join QR code;
+  emoji cost 3-4 bytes each, and over budget the card falls back to printing
+  the key for you to type.
+
   Then, to keep that configuration and have it load on every boot:
       web console -> Radio -> WiFi -> "Store as template"
       web console -> Loadouts -> "Compose a loadout" -> name the WiFi template
@@ -587,7 +620,11 @@ fi
 # Also log a short summary to journal so an operator who SSHs in immediately
 # sees something useful. The full creds file stays on disk (mode 0600).
 log "first-boot security setup complete; see ${CREDS_FILE} for new credentials"
-log "WiFi PSK and Bluetooth PIN are STILL at shared defaults -- change via web UI"
+if [ -r /etc/p4wnp1/generated-ap.psk ]; then
+    log "WiFi AP PSK is per-device (see /etc/p4wnp1/generated-ap.psk); Bluetooth PIN is STILL a shared default"
+else
+    log "WiFi PSK and Bluetooth PIN are STILL at shared defaults -- change via CLI/web UI"
+fi
 
 touch "${FLAG_FILE}"
 chmod 0600 "${FLAG_FILE}"

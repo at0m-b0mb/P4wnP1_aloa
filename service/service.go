@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/mame82/P4wnP1_aloa/common"
 	"github.com/mame82/P4wnP1_aloa/common_web"
@@ -20,6 +21,29 @@ import (
 // installer + first-boot helper write it; the service reads it. Mode 0600
 // owned by root.
 const AuthFilePath = "/etc/p4wnp1/auth.json"
+
+// startupNeedsFallback reports whether a startup-template outcome leaves the
+// device with NOTHING deployed -- the only case in which the hardcoded
+// fallback script should run.
+//
+// servicestart.sh re-deploys USB, networking and the access point from values
+// written into the script. For a device whose datastore cannot be read that is
+// the only route back to reachable. For a device whose template deployed with
+// one subsystem failing it is destructive: it overwrites the subsystems that
+// SUCCEEDED. A Pi Zero W reaches that state on an ordinary boot, because the
+// service starts before sysinit.target and BlueZ answers a bare "Failed" that
+// early, so the old "fall back on any error" rule fired every single time and
+// replaced a correctly-deployed access point with the script's hardcoded SSID.
+func startupNeedsFallback(deployErr error) bool {
+	if deployErr == nil {
+		return false
+	}
+	var partial *PartialDeployError
+	if errors.As(deployErr, &partial) {
+		return false
+	}
+	return true
+}
 
 func RegisterDefaultTriggerActions(tam *TriggerActionManager) {
 	// create test trigger
@@ -242,6 +266,26 @@ func (s *Service) Start() (context.Context, context.CancelFunc) {
 		RegisterDefaultTriggerActions(s.SubSysTriggerActions)
 	*/
 
+	// THE FALLBACK IS A LAST RESORT, NOT AN ERROR HANDLER.
+	//
+	// servicestart.sh re-deploys USB, networking and the WiFi access point
+	// from values hardcoded into the script. That is the right thing to do for
+	// a device whose datastore cannot be read at all -- it is the only way
+	// such a device becomes reachable. It is the WRONG thing to do when the
+	// master template deployed and merely had a subsystem fail, because it
+	// overwrites the subsystems that SUCCEEDED with those hardcoded values.
+	//
+	// This used to fall back on ANY error from the deploy. DeployMasterTemplate
+	// is best-effort per subsystem and returns a combined error when any of
+	// them failed, so a Pi Zero W whose Bluetooth was not ready at sysinit --
+	// which is the normal case, BlueZ answers a bare "Failed" that far ahead of
+	// udev -- took the fallback every single boot. The access point it had just
+	// brought up correctly from the shipped template was immediately replaced
+	// by the SSID written into the script, and the panel then could not build a
+	// scan-to-join QR because that SSID is 32 bytes of emoji.
+	//
+	// So: fall back only when NOTHING was deployed. A partial failure is
+	// reported and left alone.
 	scriptFallback := false
 	//retrieve Startup MasterTemplate name from store
 	msgTemplateName := &pb.StringMessage{}
@@ -252,9 +296,23 @@ func (s *Service) Start() (context.Context, context.CancelFunc) {
 
 		// Deploy MasterTemplate
 		_, errDeployStartupTemplate := s.SubSysRPC.DeployStoredMasterTemplate(context.Background(), &pb.StringMessage{Msg: startupTemplate})
-		if errDeployStartupTemplate != nil {
+		scriptFallback = startupNeedsFallback(errDeployStartupTemplate)
+
+		var partial *PartialDeployError
+		switch {
+		case errDeployStartupTemplate == nil:
+			// nothing to report
+		case errors.As(errDeployStartupTemplate, &partial):
+			// Some subsystems are up. Say exactly which are not, and keep what
+			// worked -- running the fallback here would throw it away.
+			fmt.Printf("... Startup MasterTemplate '%s' deployed with %d failed subsystem(s):\n",
+				startupTemplate, len(partial.Failures))
+			for _, f := range partial.Failures {
+				fmt.Printf("      - %s\n", f)
+			}
+			fmt.Println("... keeping what deployed; NOT running the hardcoded fallback script")
+		default:
 			fmt.Printf("... error deploying Startup MasterTemplate '%s': %v\n", startupTemplate, errDeployStartupTemplate)
-			scriptFallback = true
 		}
 	} else {
 		fmt.Println("... error retrieving name for Startup MasterTemplate")

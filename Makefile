@@ -3,7 +3,7 @@ PATH := /usr/local/go/bin:$(PATH)
 
 .PHONY: all help compile build-armv6 build-service-armv6 build-cli-armv6 build-hashpw-armv6 \
         build-arm64 build-service-arm64 build-cli-arm64 build-hashpw-arm64 \
-        image image-plain image-oled image-armhf image-arm64 contrast smoke feature-test access-control check-quoting oled-sim oled-shots verify check-js check-rpc check-render mock dep install installkali remove lint test
+        image image-plain image-oled image-armhf image-arm64 contrast smoke feature-test access-control check-quoting oled-sim oled-shots verify check-js check-rpc check-render check-cli mock dep install installkali remove lint test
 
 all: build-armv6
 
@@ -20,6 +20,7 @@ help:
 	@echo "  make image-oled    Only the images with the OLED console"
 	@echo "  make contrast      Check the web console palette against WCAG AA"
 	@echo "  make check-api-auth Every JSON API handler authenticates"
+	@echo "  make check-cli     Every P4wnP1_cli command the scripts print is runnable"
 	@echo "  make smoke         Run the service in a container and verify it works"
 	@echo "  make feature-test  Exercise all 83 RPCs against the real binary and"
 	@echo "                     report PASS / expected-without-hardware / FAIL"
@@ -182,6 +183,12 @@ verify:
 	# was written, which is its own small lesson -- a security gate that is
 	# not in `verify` is a security gate that does not run.
 	./tools/check-api-auth.sh
+	# Second, and also cheap: every P4wnP1_cli command the shipped scripts
+	# PRINT must be runnable. Twice now the first-boot credentials file has
+	# told an operator to run a command group with no action, which prints
+	# help and changes nothing -- and because the scripts print those lines
+	# rather than run them, nothing failed.
+	./tools/check-cli-commands.sh
 	./tools/check-js.sh
 	./tools/check-render.sh
 	./tools/check-shell-quoting.sh
@@ -196,6 +203,9 @@ verify:
 	$(MAKE) access-control
 	@echo
 	@echo "All gates passed."
+
+check-cli:
+	./tools/check-cli-commands.sh
 
 build-armv6: build-service-armv6 build-cli-armv6 build-hashpw-armv6 build-oled-armv6
 	@echo

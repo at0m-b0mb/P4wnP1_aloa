@@ -14,10 +14,24 @@ P4wnP1_cli usb set --vid 0x1d6c --pid 0x1347 --manufacturer "MaMe82" --sn "deadb
 #   - add a DHCP range from 172.16.0.2 to 172.16.0.2 (single IP) with a lease time of 1 minute
 P4wnP1_cli net set server -i usbeth -a 172.16.0.1 -m 255.255.255.248 -o "3:" -o "6:" -r "172.16.0.2|172.16.0.2|5m"
 
-# Enable WiFi AP (reg US, channel 6, SSID/AP name: "P4wnP1", pre shared key: "MaMe82-P4wnP1", don't use nexmon firmware)
-# Note: As a pre-shared key is given, P4wnP1 assume the AP should use WPA2-PSK
-# Note 2: The SSID uses Unicode characters not necessarily supported by the console, but P4wnP1 supports UTF-8 ;-)
-P4wnP1_cli wifi set ap -r US -c 6 -s "💥🖥💥 Ⓟ➃ⓌⓃ🅟❶" -k "MaMe82-P4wnP1" --nonexmon
+# Enable WiFi AP (reg US, channel 6, don't use nexmon firmware)
+#
+# THE SSID HAS A SIZE BUDGET. Keep it at 15 bytes or fewer.
+#
+# It was "💥🖥💥 Ⓟ➃ⓌⓃ🅟❶" -- 32 bytes of emoji, which is legal 802.11 but
+# does not fit a scan-to-join QR. Such a code is the WIFI: structure plus the
+# 20-character key plus the WHOLE SSID, and a panel-sized symbol holds 53
+# bytes. Over budget, the OLED first-run card silently drops the join code and
+# shows the key to be typed with a thumb instead. Keep this in step with
+# dist/db/init.db (see tools/initdb) and P4WNP1_INITIAL_SSID in
+# dist/scripts/firstboot-secure-defaults.sh.
+#
+# The key here is the published upstream default ON PURPOSE: it is a value the
+# PSK guard recognises, so the service refuses to broadcast it and substitutes
+# a per-device random key instead, persisted at /etc/p4wnp1/generated-ap.psk.
+# See service/wifi_psk_guard.go. Giving a key at all is what selects WPA2-PSK;
+# omitting it would stand up an OPEN access point.
+P4wnP1_cli wifi set ap -r US -c 6 -s "💥P4wnP1" -k "MaMe82-P4wnP1" --nonexmon
 
 # Configure USB ethernet interface "wlan0" to run a DHCP server
 #   - use IPv4 172.24.0.1 for interface with netmask 255.255.255.0

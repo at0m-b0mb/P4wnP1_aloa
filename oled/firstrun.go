@@ -183,26 +183,51 @@ type FirstRunView struct {
 	// the service; ssidDone records that we asked, so a device with no WiFi
 	// is not re-queried on every redraw.
 	liveSSID string
+	// livePSK is the key the radio is actually using. See resolveAP: taking
+	// it from the service instead of the handoff is what stops the WiFi card
+	// from vanishing on a boot that lost a race with the PSK guard.
+	livePSK  string
 	ssidDone bool
 }
 
 func NewFirstRunView(c *FirstRunCreds) *FirstRunView { return &FirstRunView{c: c} }
 
-// resolveSSID asks the service what the AP is actually broadcasting, once.
+// resolveAP asks the service what the AP is actually broadcasting, once.
 //
-// The handoff's wifi_ssid comes from install.sh via /etc/p4wnp1/initial.conf,
-// and that is NOT necessarily what is on air: the AP broadcasts whatever the
-// deployed template says, and on a stock image those differ. Printing the
-// wrong one is irritating. Encoding the wrong one in a join QR produces a
-// code that cannot work and gives no clue why, so the live value wins and the
-// handoff is only a fallback for when the service cannot be reached.
-func (v *FirstRunView) resolveSSID(app *App) {
+// THE NAME. The handoff's wifi_ssid comes from install.sh via
+// /etc/p4wnp1/initial.conf, and that is NOT necessarily what is on air: the AP
+// broadcasts whatever the deployed template says, and on a stock image those
+// differ. Printing the wrong one is irritating. Encoding the wrong one in a
+// join QR produces a code that cannot work and gives no clue why, so the live
+// value wins and the handoff is only a fallback for when the service cannot be
+// reached.
+//
+// THE KEY, which is the part that was losing an entire card. The handoff
+// carries wifi_psk only when /etc/p4wnp1/generated-ap.psk already existed at
+// the moment first boot wrote the file. That file is written by the SERVICE,
+// the first time it refuses to broadcast a published PSK, and nothing orders
+// the two. Lose the race and there was no WiFi card at all -- and then KEY1
+// shredded /root/INITIAL_CREDENTIALS.txt, the only other copy, so the operator
+// erased a credential they were never shown. Reported from real hardware as
+// "I don't see the WiFi creds": the panel showed 3 cards where it should have
+// shown 4.
+//
+// The live key cannot race, so it is preferred, and the handoff's copy is the
+// fallback for a service that cannot be reached.
+func (v *FirstRunView) resolveAP(app *App) {
 	if v.ssidDone || app == nil || app.Client == nil {
 		return
 	}
 	v.ssidDone = true
-	if live, err := app.Client.LiveSSID(); err == nil && live != "" {
+	live, psk, err := app.Client.LiveAP()
+	if err != nil {
+		return
+	}
+	if live != "" {
 		v.liveSSID = live
+	}
+	if psk != "" {
+		v.livePSK = psk
 	}
 }
 
@@ -213,6 +238,15 @@ func (v *FirstRunView) ssid() string {
 		return v.liveSSID
 	}
 	return v.c.WiFiSSID
+}
+
+// psk is the access point key to show: live if we have it, otherwise whatever
+// first boot managed to write down.
+func (v *FirstRunView) psk() string {
+	if v.livePSK != "" {
+		return v.livePSK
+	}
+	return v.c.WiFiPSK
 }
 
 func (v *FirstRunView) Title() string { return "First boot" }
@@ -271,8 +305,8 @@ func (v *FirstRunView) cards() []credCard {
 			pass: v.c.WebPass,
 		})
 	}
-	if v.c.WiFiPSK != "" {
-		card := credCard{head: "WiFi join", user: "key:", pass: v.c.WiFiPSK}
+	if key := v.psk(); key != "" {
+		card := credCard{head: "WiFi join", user: "key:", pass: key}
 		// Encode a JOIN URI rather than the bare key when the SSID is known
 		// and the result still fits. A phone then offers "join this
 		// network" instead of handing over a string to retype -- and the AP
@@ -285,7 +319,7 @@ func (v *FirstRunView) cards() []credCard {
 		// key alone and SAYS so, because a QR that quietly means something
 		// other than what the operator expects is worse than no QR.
 		if ssid := v.ssid(); ssid != "" {
-			uri := WiFiURI(ssid, v.c.WiFiPSK)
+			uri := WiFiURI(ssid, key)
 			if _, err := NewQRMax([]byte(uri), qrMaxModules); err == nil {
 				card.qr, card.note = uri, "scan to join"
 			} else {
@@ -310,7 +344,7 @@ func (v *FirstRunView) Render(fb *Framebuffer, app *App) {
 		return
 	}
 
-	v.resolveSSID(app)
+	v.resolveAP(app)
 	cards := v.cards()
 	if v.page >= len(cards) {
 		v.page = len(cards) - 1

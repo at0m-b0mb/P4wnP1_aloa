@@ -124,6 +124,35 @@ func (s *server) GetAvailableGpios(context.Context, *pb.Empty) (res *pb.StringMe
 	return
 }
 
+// PartialDeployError reports that a master template WAS applied but that some
+// of its subsystems failed. It is a distinct type so that callers can tell it
+// apart from a failure to LOAD the template, which is a different situation
+// calling for a different response.
+//
+// DeployMasterTemplate is deliberately best-effort per subsystem (see below),
+// so "one subsystem failed" and "the template could not be loaded at all" are
+// very different outcomes. The boot path could not tell them apart, because
+// both arrived as a bare error, and it responded to either by registering the
+// hardcoded fallback startup script.
+//
+// That script re-deploys USB, networking and the WiFi access point from values
+// written into it years ago -- so a single failing subsystem silently UNDID
+// every subsystem that had just come up correctly. On this fork it is how a
+// device whose Bluetooth was not ready at sysinit ended up broadcasting the
+// old 32-byte emoji SSID instead of the one in its own database, which in turn
+// is why the panel could not build a scan-to-join QR for it.
+//
+// Observed on real hardware: DeployStoredBluetoothSettings("startup") returns
+// a bare BlueZ "Failed" this early in boot, which is not ErrBtSvcNotAvailable
+// and so was counted as a template failure.
+type PartialDeployError struct {
+	Failures []string
+}
+
+func (e *PartialDeployError) Error() string {
+	return "master template partially deployed -- " + strings.Join(e.Failures, "; ")
+}
+
 func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate) (e *pb.Empty, err error) {
 	e = &pb.Empty{}
 
@@ -198,7 +227,7 @@ func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate
 	}
 
 	if len(failures) > 0 {
-		err = errors.New("master template partially deployed -- " + strings.Join(failures, "; "))
+		err = &PartialDeployError{Failures: failures}
 		return e, err
 	}
 

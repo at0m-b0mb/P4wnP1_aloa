@@ -1,0 +1,25 @@
+{
+  "mode": "AP_UP",
+  "channel": 6,
+  "ssid": "💥P4wnP1",
+  "currentSettings": {
+    "name": "default",
+    "disabled": false,
+    "regulatory": "US",
+    "working_mode": "AP",
+    "auth_mode": "WPA2_PSK",
+    "channel": 6,
+    "ap_BSS": {
+      "SSID": "💥P4wnP1",
+      "PSK": "EXAMPLEKEY1234567890"
+    },
+    "client_BSS_list": [
+      {
+        "SSID": "",
+        "PSK": ""
+      }
+    ],
+    "hide_ssid": false,
+    "nexmon": false
+  }
+}
