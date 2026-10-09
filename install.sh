@@ -37,7 +37,17 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Defaults (override via CLI flags)
 # ---------------------------------------------------------------------------
-DEFAULT_SSID="HackProKP"
+# One emoji and the project name: 10 bytes.
+#
+# The size is the point. A scan-to-join QR on the first-boot panel has to fit
+# a 62-pixel symbol, which holds 53 bytes, and the WIFI: structure plus the
+# 20-character generated key already take 38 of them. That leaves 15 bytes
+# for the SSID. Emoji cost 3-4 bytes EACH, so a heavily decorated name blows
+# the budget and the WiFi card silently drops to a key-only QR -- the
+# operator loses one-tap joining and nothing says why.
+#
+# 802.11 allows 32 bytes; the join QR allows 15. The tighter one wins.
+DEFAULT_SSID="💥P4wnP1"
 WIFI_COUNTRY="${WIFI_COUNTRY:-US}"   # regulatory domain; hostapd needs one
 DEFAULT_PSK=""                       # empty -> generate random
 SKIP_REBOOT=0

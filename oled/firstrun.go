@@ -44,10 +44,17 @@ type FirstRunCreds struct {
 	SSHPass string
 	WebUser string
 	WebPass string
-	// WiFiPSK is the access point's per-device key. No SSID: the device
-	// broadcasts that, so it is discoverable by scanning and is not a
-	// secret -- and it is often emoji, which this font cannot draw.
+	// WiFiPSK is the access point's per-device key.
 	WiFiPSK string
+	// WiFiSSID is carried for the QR code ONLY, never drawn as text.
+	//
+	// The handoff used to omit it entirely, on the grounds that the SSID is
+	// broadcast anyway and is often emoji that a 5x7 font renders as a row
+	// of question marks. Both true, and neither applies to a QR: it encodes
+	// BYTES, not glyphs, and a join URI needs the network's name whether or
+	// not a human can read it off the panel. Without it the WiFi card can
+	// only offer the key, which still has to be typed with a thumb.
+	WiFiSSID string
 	// Erase lists every file holding a copy, including this one. The panel
 	// shreds exactly this list and nothing it inferred for itself.
 	Erase []string
@@ -84,6 +91,8 @@ func LoadFirstRunCreds(path string) *FirstRunCreds {
 			c.WebPass = v
 		case "wifi_psk":
 			c.WiFiPSK = v
+		case "wifi_ssid":
+			c.WiFiSSID = v
 		case "erase":
 			if v != "" {
 				c.Erase = append(c.Erase, v)
@@ -192,7 +201,22 @@ func (v *FirstRunView) Hint() string {
 	return fmt.Sprintf("%d/%d  KEY1 erase", v.page+1, len(v.cards()))
 }
 
-type credCard struct{ head, user, pass, note string }
+type credCard struct {
+	head, user, pass, note string
+	// qr overrides what the QR encodes, when that should differ from the
+	// text shown. The WiFi card uses it to carry a join URI while still
+	// printing the bare key for anyone without a camera.
+	qr string
+}
+
+// qrMaxModules is the largest symbol that fits the panel.
+//
+// 64 pixels high, two pixels per module to scan reliably, and at least one
+// module of quiet zone on each side: (31 + 2) * 2 = 66 is already too tall,
+// so 31 modules is the ceiling and version 3 (29 modules) is the largest
+// usable version. Stated once here because two places depend on it and they
+// must not drift apart.
+const qrMaxModules = 31
 
 func (v *FirstRunView) cards() []credCard {
 	var out []credCard
@@ -215,12 +239,27 @@ func (v *FirstRunView) cards() []credCard {
 		})
 	}
 	if v.c.WiFiPSK != "" {
-		out = append(out, credCard{
-			head: "WiFi access point",
-			user: "key:",
-			pass: v.c.WiFiPSK,
-			note: "SSID is broadcast; scan for it.",
-		})
+		card := credCard{head: "WiFi join", user: "key:", pass: v.c.WiFiPSK}
+		// Encode a JOIN URI rather than the bare key when the SSID is known
+		// and the result still fits. A phone then offers "join this
+		// network" instead of handing over a string to retype -- and the AP
+		// key is the one credential here that normally gets typed on a
+		// phone, with a thumb, standing up.
+		//
+		// It does not always fit: a join URI is the key plus ~18 bytes of
+		// structure plus the entire SSID, and a long or emoji-heavy SSID
+		// blows past what 31 modules hold. Then the card falls back to the
+		// key alone and SAYS so, because a QR that quietly means something
+		// other than what the operator expects is worse than no QR.
+		if v.c.WiFiSSID != "" {
+			uri := WiFiURI(v.c.WiFiSSID, v.c.WiFiPSK)
+			if _, err := NewQRMax([]byte(uri), qrMaxModules); err == nil {
+				card.qr, card.note = uri, "scan to join"
+			} else {
+				card.note = "key only: SSID long"
+			}
+		}
+		out = append(out, card)
 	}
 	return out
 }
@@ -314,19 +353,33 @@ func (v *FirstRunView) Chromeless() bool {
 func (v *FirstRunView) renderQRCard(fb *Framebuffer, c credCard, total int) {
 	const (
 		scale = 2
-		quiet = 2
 		gap   = 3
 	)
+	payload := c.pass
+	if c.qr != "" {
+		payload = c.qr
+	}
 	textX, dim := 0, 0
-	if q, err := NewQR([]byte(c.pass)); err == nil {
-		dim = QRPixels(q, scale, quiet)
-		if dim <= Height && dim+gap+6*4 <= Width {
-			fb.DrawQR(0, (Height-dim)/2, q, scale, quiet)
-			textX = dim + gap
-		} else {
-			dim = 0 // too big to be useful; fall through to text only
+	if q, err := NewQRMax([]byte(payload), qrMaxModules); err == nil {
+		// Quiet zone of 2 modules where there is room, 1 where there is not.
+		//
+		// Not a detail. A version 2 symbol (a bare password) is 58 pixels at
+		// quiet 2 and fits easily. A version 3 symbol (a WiFi join URI) is
+		// 66 at quiet 2, which is TALLER THAN THE PANEL -- so the fits-check
+		// below suppressed the code entirely and the card silently became
+		// text-only. The join URI was encoded correctly and never drawn.
+		// At quiet 1 it is 62 and fits, and quiet 1 is measured to decode.
+		// Zero is not an option: with no quiet zone nothing decodes at all.
+		for _, quiet := range []int{2, 1} {
+			d := QRPixels(q, scale, quiet)
+			if d <= Height && d+gap+CharW*9 <= Width {
+				fb.DrawQR(0, (Height-d)/2, q, scale, quiet)
+				textX, dim = d+gap, d
+				break
+			}
 		}
 	}
+	_ = dim
 	// A QR that could not be built is not a reason to show nothing: the
 	// password still has to reach the operator, so the text column simply
 	// takes the whole width instead.

@@ -53,7 +53,7 @@ LOG_TAG=p4wnp1-firstboot
 
 # Defaults if /etc/p4wnp1/initial.conf doesn't exist (e.g. the user installed
 # manually without the installer). These match service/defaults.go.
-P4WNP1_INITIAL_SSID=HackProKP
+P4WNP1_INITIAL_SSID=💥P4wnP1
 P4WNP1_INITIAL_PSK="(unset -- still on service default 'MaMe82-P4wnP1')"
 
 # Syntax-check before sourcing.
@@ -564,6 +564,11 @@ if [ -x /usr/local/bin/p4wnp1-oled ]; then
         # key is the part that has to reach a human.
         if [ -r /etc/p4wnp1/generated-ap.psk ]; then
             echo "wifi_psk=$(cat /etc/p4wnp1/generated-ap.psk)"
+            # The SSID goes with it, for the QR code only -- the panel never
+            # draws it, because it is frequently emoji and the 5x7 font has
+            # no glyphs for those. A QR encodes bytes, so it does not care,
+            # and a join URI is useless without the network's name.
+            [ -n "${P4WNP1_INITIAL_SSID:-}" ] && echo "wifi_ssid=${P4WNP1_INITIAL_SSID}"
         fi
         if [ -n "${OPERATOR_PW_SET}" ]; then
             echo "ssh_user=${OPERATOR_USER}"

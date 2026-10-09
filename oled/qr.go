@@ -3,6 +3,7 @@ package oled
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // A QR encoder, byte mode, versions 1 to 4, error correction level M.
@@ -34,7 +35,29 @@ import (
 // the wrong bytes is worse than no QR, because it fails silently and the
 // operator blames their phone. qr_test.go decodes what this produces.
 
-// qrVersion describes one version at error correction level M.
+// ECLevel is the error correction level.
+//
+// Only two are implemented, and the reason is capacity. A symbol has to fit a
+// 64-pixel panel at two pixels per module, which caps it at version 3 -- and
+// at that size the difference between M and L is 44 bytes versus 53. A WiFi
+// join URI for even a short SSID is 47 bytes, so without L it does not fit at
+// all. M is used wherever it fits, because on a display the realistic damage
+// is glare rather than print noise and more correction is still better.
+type ECLevel int
+
+const (
+	ECLow    ECLevel = iota // ~7% recovery; the format-info bits are 01
+	ECMedium                // ~15%;                                   00
+)
+
+func (e ECLevel) formatBits() int {
+	if e == ECLow {
+		return 0b01
+	}
+	return 0b00
+}
+
+// qrVersion describes one version at one error correction level.
 type qrVersion struct {
 	version    int
 	size       int // modules per side
@@ -43,20 +66,30 @@ type qrVersion struct {
 	blocks     int // ecc blocks
 	eccPerBlk  int // ecc codewords per block
 	alignAt    int // single alignment pattern centre, 0 for version 1
+	level      ECLevel
 }
 
-// Values from ISO/IEC 18004 tables 9 and 13-16, level M only.
+// Values from ISO/IEC 18004 tables 9 and 13-16.
+//
+// Ordered so that pickVersion walks smallest-symbol-first and, within a
+// size, strongest-correction-first: a payload that fits at M never silently
+// gets L.
 var qrVersions = []qrVersion{
-	{1, 21, 26, 16, 1, 10, 0},
-	{2, 25, 44, 28, 1, 16, 18},
-	{3, 29, 70, 44, 1, 26, 22},
-	{4, 33, 100, 64, 2, 18, 26},
+	{1, 21, 26, 16, 1, 10, 0, ECMedium},
+	{1, 21, 26, 19, 1, 7, 0, ECLow},
+	{2, 25, 44, 28, 1, 16, 18, ECMedium},
+	{2, 25, 44, 34, 1, 10, 18, ECLow},
+	{3, 29, 70, 44, 1, 26, 22, ECMedium},
+	{3, 29, 70, 55, 1, 15, 22, ECLow},
+	{4, 33, 100, 64, 2, 18, 26, ECMedium},
+	{4, 33, 100, 80, 1, 20, 26, ECLow},
 }
 
 // QRCode is a square bitmap of modules. true is dark.
 type QRCode struct {
 	Size    int
 	Version int
+	Level   ECLevel
 	mod     []bool
 	fixed   []bool // function module: not data, and never masked
 }
@@ -78,19 +111,27 @@ func (q *QRCode) set(x, y int, dark, isFixed bool) {
 
 func (q *QRCode) isFixed(x, y int) bool { return q.fixed[y*q.Size+x] }
 
-// NewQR encodes data as a QR symbol at error correction level M.
-func NewQR(data []byte) (*QRCode, error) {
+// NewQR encodes data in the smallest symbol that holds it, preferring the
+// stronger error correction level where both fit.
+func NewQR(data []byte) (*QRCode, error) { return NewQRMax(data, 0) }
+
+// NewQRMax is NewQR restricted to symbols no larger than maxModules across
+// (0 for no limit). The panel is 64 pixels high and a module has to be two
+// pixels to scan, so a caller that has to fit a symbol on screen cannot just
+// take whatever version the payload needs -- it has to know in advance
+// whether the payload fits at all, and do something else if it does not.
+func NewQRMax(data []byte, maxModules int) (*QRCode, error) {
 	if len(data) == 0 {
 		return nil, errors.New("qr: nothing to encode")
 	}
-	v, err := pickVersion(len(data))
+	v, err := pickVersionMax(len(data), maxModules)
 	if err != nil {
 		return nil, err
 	}
 
 	codewords := qrCodewords(v, data)
 
-	q := &QRCode{Size: v.size, Version: v.version,
+	q := &QRCode{Size: v.size, Version: v.version, Level: v.level,
 		mod: make([]bool, v.size*v.size), fixed: make([]bool, v.size*v.size)}
 	q.drawFunctionPatterns(v)
 	q.placeData(codewords)
@@ -116,15 +157,28 @@ func NewQR(data []byte) (*QRCode, error) {
 	return q, nil
 }
 
-func pickVersion(n int) (qrVersion, error) {
+func pickVersion(n int) (qrVersion, error) { return pickVersionMax(n, 0) }
+
+func pickVersionMax(n, maxModules int) (qrVersion, error) {
+	best := 0
 	for _, v := range qrVersions {
+		if maxModules > 0 && v.size > maxModules {
+			continue
+		}
+		if v.dataBytes-2 > best {
+			best = v.dataBytes - 2
+		}
 		// 4 bits of mode + 8 bits of length + 8 bits per byte, rounded up.
 		if (4+8+8*n+7)/8 <= v.dataBytes {
 			return v, nil
 		}
 	}
-	return qrVersion{}, fmt.Errorf("qr: %d bytes is more than version 4 level M holds (%d)",
-		n, qrVersions[len(qrVersions)-1].dataBytes-2)
+	if maxModules > 0 {
+		return qrVersion{}, fmt.Errorf(
+			"qr: %d bytes does not fit a symbol of %d modules or less (max %d bytes)",
+			n, maxModules, best)
+	}
+	return qrVersion{}, fmt.Errorf("qr: %d bytes is more than version 4 holds (%d)", n, best)
 }
 
 // qrCodewords builds the interleaved data+ecc stream.
@@ -375,8 +429,7 @@ func (q *QRCode) applyMask(m int) {
 // requires: once around the top-left finder and once split between the other
 // two. A decoder reads whichever copy is intact.
 func (q *QRCode) writeFormat(mask int) {
-	const eccM = 0b00 // level M's two-bit code
-	data := eccM<<3 | mask
+	data := q.Level.formatBits()<<3 | mask
 
 	// BCH(15,5) with generator 0x537, then XOR the standard's mask pattern.
 	rem := data
@@ -553,3 +606,38 @@ func (fb *Framebuffer) DrawQR(x, y int, q *QRCode, scale, quiet int) int {
 // QRPixels reports how wide a symbol for this payload would be, so a caller
 // can lay out around it before committing to draw.
 func QRPixels(q *QRCode, scale, quiet int) int { return (q.Size + 2*quiet) * scale }
+
+// WiFiURI builds the string a phone understands as "join this network".
+//
+//	WIFI:T:WPA;S:<ssid>;P:<key>;;
+//
+// iOS Camera and Android both offer a Join prompt for this, which turns the
+// WiFi card from something you squint at and retype into something you point
+// a camera at. That is the whole value: the AP key is the one credential on
+// this device that is normally typed on a phone, with a thumb, standing up.
+//
+// The escaping is not optional. Backslash, semicolon, comma, colon and
+// double quote are all structural in this format, so an SSID containing one
+// -- and "P4wnP1; guest" is a perfectly legal SSID -- would otherwise end the
+// field early and produce a QR that joins the wrong network, or no network,
+// without looking any different.
+func WiFiURI(ssid, key string) string {
+	esc := func(s string) string {
+		var b strings.Builder
+		for _, r := range s {
+			switch r {
+			case '\\', ';', ',', ':', '"':
+				b.WriteByte('\\')
+			}
+			b.WriteRune(r)
+		}
+		return b.String()
+	}
+	if key == "" {
+		// An open network. T:nopass is the format's way of saying so; naming
+		// WPA with no key would make a phone prompt for one that does not
+		// exist.
+		return "WIFI:T:nopass;S:" + esc(ssid) + ";;"
+	}
+	return "WIFI:T:WPA;S:" + esc(ssid) + ";P:" + esc(key) + ";;"
+}

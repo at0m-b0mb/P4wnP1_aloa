@@ -108,9 +108,13 @@ func findMask(t *testing.T, q *QRCode) int {
 		}
 	}
 	unmasked := bits ^ 0x5412
-	level := (unmasked >> 13) & 0b11
-	if level != 0b00 {
-		t.Errorf("format info says error correction level %02b, want 00 (M)", level)
+	// The level is read back too: it is written into the same 15 bits, and
+	// a decoder that disagrees with us about the level will apply the wrong
+	// error correction and recover nothing.
+	got := (unmasked >> 13) & 0b11
+	if got != q.Level.formatBits() {
+		t.Errorf("format info says level %02b, but the symbol was built at %02b",
+			got, q.Level.formatBits())
 	}
 	return (unmasked >> 10) & 0b111
 }
@@ -153,28 +157,61 @@ func TestQRRoundTripsItsPayload(t *testing.T) {
 }
 
 func TestQRVersionSelection(t *testing.T) {
+	// Smallest symbol first, and within one size the STRONGER correction
+	// level first -- so a payload that fits at M never silently drops to L.
+	// L exists only because a WiFi join URI does not fit a panel-sized
+	// symbol without it.
 	for _, c := range []struct {
 		n       int
 		version int
+		level   ECLevel
 	}{
-		{1, 1}, {14, 1}, // version 1 level M holds 14 bytes
-		{15, 2}, {26, 2},
-		{27, 3}, {42, 3},
-		{43, 4}, {62, 4},
+		{1, 1, ECMedium}, {14, 1, ECMedium}, // v1-M holds 14
+		{15, 1, ECLow}, {17, 1, ECLow}, //       v1-L holds 17
+		{18, 2, ECMedium}, {26, 2, ECMedium}, // v2-M holds 26
+		{27, 2, ECLow}, {32, 2, ECLow}, //       v2-L holds 32
+		{33, 3, ECMedium}, {42, 3, ECMedium}, // v3-M holds 42
+		{43, 3, ECLow}, {53, 3, ECLow}, //       v3-L holds 53
+		{54, 4, ECMedium}, {62, 4, ECMedium}, // v4-M holds 62
+		{63, 4, ECLow}, {78, 4, ECLow}, //       v4-L holds 78
 	} {
 		q, err := NewQR(bytes.Repeat([]byte("x"), c.n))
 		if err != nil {
 			t.Fatalf("%d bytes: %v", c.n, err)
 		}
-		if q.Version != c.version {
-			t.Errorf("%d bytes chose version %d, want %d", c.n, q.Version, c.version)
+		if q.Version != c.version || q.Level != c.level {
+			t.Errorf("%d bytes chose v%d level %v, want v%d level %v",
+				c.n, q.Version, q.Level, c.version, c.level)
 		}
 	}
-	if _, err := NewQR(bytes.Repeat([]byte("x"), 63)); err == nil {
-		t.Error("63 bytes was accepted; version 4 level M does not hold it")
+	if _, err := NewQR(bytes.Repeat([]byte("x"), 79)); err == nil {
+		t.Error("79 bytes was accepted; version 4 level L does not hold it")
 	}
 	if _, err := NewQR(nil); err == nil {
 		t.Error("an empty payload was accepted")
+	}
+}
+
+// The panel caps the symbol at 31 modules, so a caller has to be able to ask
+// "does this fit?" and get an error rather than an oversized code it cannot
+// draw. This is what lets the WiFi card fall back honestly.
+func TestQRRespectsAModuleLimit(t *testing.T) {
+	// 47 bytes: a join URI for a short SSID. Fits version 3 at level L.
+	q, err := NewQRMax(bytes.Repeat([]byte("x"), 47), 31)
+	if err != nil {
+		t.Fatalf("47 bytes should fit 31 modules: %v", err)
+	}
+	if q.Size > 31 {
+		t.Errorf("got a %d-module symbol under a 31-module limit", q.Size)
+	}
+	if q.Level != ECLow {
+		t.Errorf("47 bytes in 31 modules needs level L, got %v", q.Level)
+	}
+	// 70 bytes: the same URI with an emoji SSID. Needs version 4, which is
+	// 33 modules and does not fit, so it must be refused rather than
+	// returned at a size the panel cannot show.
+	if _, err := NewQRMax(bytes.Repeat([]byte("x"), 70), 31); err == nil {
+		t.Error("70 bytes was accepted under a 31-module limit; version 4 is 33 modules")
 	}
 }
 

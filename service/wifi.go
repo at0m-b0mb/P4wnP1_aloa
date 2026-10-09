@@ -764,6 +764,21 @@ func wifiCreateHostapdConfString(ws *pb.WiFiSettings) (config string, err error)
 		return "", errors.New("WiFiSettings don't contain a BSS configuration for an AP")
 	}
 
+	// 802.11 caps an SSID at 32 BYTES, not 32 characters, and hostapd
+	// refuses to start if it is longer. Refused here instead, with the byte
+	// count, because the alternative is hostapd exiting during deploy and
+	// the operator seeing "the WiFi does not work" with nothing pointing at
+	// the name they just chose. The distinction matters now that the
+	// default SSID contains an emoji: one of those is four bytes, so eight
+	// of them is already a quarter of the budget.
+	if n := len(ws.Ap_BSS.SSID); n > 32 {
+		return "", fmt.Errorf(
+			"the SSID is %d bytes; 802.11 allows 32 (an emoji costs 3-4 bytes each)", n)
+	}
+	if ws.Ap_BSS.SSID == "" {
+		return "", errors.New("the SSID is empty; hostapd will not start without one")
+	}
+
 	config = fmt.Sprintf("interface=%s\n", wifi_if_name)
 
 	config += fmt.Sprintf("driver=nl80211\n")                            //netlink capable driver
@@ -774,6 +789,13 @@ func wifiCreateHostapdConfString(ws *pb.WiFiSettings) (config string, err error)
 	config += fmt.Sprintf("macaddr_acl=0\n")                             //Accept all MAC addresses
 
 	config += fmt.Sprintf("ssid=%s\n", ws.Ap_BSS.SSID)
+	// Tell hostapd the SSID is UTF-8, so the beacon carries the flag that
+	// says so. Without it an emoji or accented name is advertised as opaque
+	// bytes and clients are left to guess the encoding -- most guess right,
+	// which is exactly the kind of "works on my phone" difference that is
+	// painful to debug later. The default SSID on this image has an emoji
+	// in it, so this is not hypothetical.
+	config += fmt.Sprintf("utf8_ssid=1\n")
 	config += fmt.Sprintf("channel=%d\n", ws.Channel)
 
 	if ws.AuthMode == pb.WiFiAuthMode_WPA2_PSK {
