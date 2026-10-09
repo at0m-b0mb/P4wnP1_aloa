@@ -485,3 +485,30 @@ func TestTimeoutIsNotReportedAsUnreachable(t *testing.T) {
 		t.Errorf("a timeout was reported as %q, want it to say so", err)
 	}
 }
+
+// The Cable screen must be able to bring a dead gadget back.
+//
+// GetDeployedGadgetSetting reports configfs as it is right now, so on a
+// device whose gadget has been torn down it returns enabled:false. The
+// read-modify-write sent that straight back, so ticking every function and
+// deploying produced another disabled gadget -- the one screen whose job is
+// to restore USB could not, and said nothing about why.
+func TestSetUSBFunctionsForcesTheGadgetEnabled(t *testing.T) {
+	c, rec := withClient(t)
+	// A torn-down gadget: everything off, enabled false.
+	rec.reply["GetDeployedGadgetSetting"] = `{"enabled":false,"vid":"0x1d6b","pid":"0x1347",
+		"use_HID_KEYBOARD":false,"use_RNDIS":false}`
+	if err := c.SetUSBFunctions(map[string]bool{"use_HID_KEYBOARD": true, "use_RNDIS": true}); err != nil {
+		t.Fatal(err)
+	}
+	body := rec.body("DeployGadgetSetting")
+	if !strings.Contains(body, `"enabled":true`) {
+		t.Errorf("deployed a gadget that is still disabled: %s", body)
+	}
+	// And it must still preserve the rest of the message.
+	for _, keep := range []string{`"vid":"0x1d6b"`, `"pid":"0x1347"`, `"use_HID_KEYBOARD":true`} {
+		if !strings.Contains(body, keep) {
+			t.Errorf("deploy lost %s: %s", keep, body)
+		}
+	}
+}

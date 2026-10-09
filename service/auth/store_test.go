@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // newStoreTempfile gives each subtest its own auth.json under t.TempDir, so
@@ -164,5 +165,65 @@ func TestStore_ReplacePassword(t *testing.T) {
 	}
 	if !s.Verify(user, "second-password-12chars") {
 		t.Fatal("new password should verify after replacement")
+	}
+}
+
+// A store created before the auth file exists must pick it up when it
+// appears, with no restart.
+//
+// This is load-bearing for first boot. The service starts early, before the
+// first-boot helper has bootstrapped an admin, so NewStore runs against a
+// path with no file behind it. load() treats that as "no users" rather than
+// an error, so the store keeps its path -- and reloadIfChanged then sees the
+// file the moment it is written.
+//
+// The first-boot helper did not trust this and ran `systemctl restart
+// P4wnP1.service` instead. On a USB-gadget appliance that restart tears down
+// the gadget and the host cannot re-enumerate without a physical replug, so
+// the device silently vanished from its operator a few minutes into every
+// first boot. The restart was never needed; this test is why it could go.
+func TestStoreAdoptsAnAuthFileThatAppearsLater(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+
+	// No file yet -- exactly the state at service start on a fresh image.
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("NewStore on a missing file failed: %v", err)
+	}
+	if s.HasAnyUsers() {
+		t.Fatal("a store with no file reported users")
+	}
+	if s.Verify("admin", "whatever") {
+		t.Fatal("a store with no file verified a password")
+	}
+
+	// First boot bootstraps the admin, by writing the file.
+	other, err := NewStore(filepath.Join(dir, "scratch.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.SetPassword("admin", "correct-horse-battery"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "scratch.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Written after a beat so the mtime differs from the zero value.
+	time.Sleep(10 * time.Millisecond)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The SAME store object, no restart, must now accept the new password.
+	if !s.Verify("admin", "correct-horse-battery") {
+		t.Error("the store did not pick up an auth file written after it started")
+	}
+	if s.Verify("admin", "wrong") {
+		t.Error("the store accepted a wrong password")
+	}
+	if !s.HasAnyUsers() {
+		t.Error("HasAnyUsers still reports none after the file appeared")
 	}
 }

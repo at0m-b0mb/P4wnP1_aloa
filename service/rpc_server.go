@@ -127,61 +127,79 @@ func (s *server) GetAvailableGpios(context.Context, *pb.Empty) (res *pb.StringMe
 func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate) (e *pb.Empty, err error) {
 	e = &pb.Empty{}
 
-	fmt.Println("Deploying master template ...")
-
-	//ignore templates with name of length 0
-	if len(mt.TemplateNameTriggerActions) > 0 {
-		fmt.Printf("... deploying TriggerActions '%s' ...\n", mt.TemplateNameTriggerActions)
-		_, err = s.DeployStoredTriggerActionSetReplace(ctx, &pb.StringMessage{Msg: mt.TemplateNameTriggerActions})
-		if err != nil {
-			fmt.Printf("... error deploying TriggerActions '%s'\n", mt.TemplateNameTriggerActions)
+	// BEST EFFORT, AND USB FIRST.
+	//
+	// This used to deploy five subsystems in order -- reflexes, network,
+	// Bluetooth, USB, WiFi -- and `return` on the first failure. USB was
+	// fourth. So anything earlier going wrong left the device with no USB
+	// gadget at all, which on this appliance is the only link most operators
+	// have to it.
+	//
+	// The Bluetooth step was worse than that. Its error went into a LOCAL
+	// variable btErr, and the failure branch then ran a bare `return`, which
+	// returns the NAMED return value err -- still nil from the previous
+	// successful step. So a Bluetooth failure reported SUCCESS and silently
+	// skipped USB and WiFi. On a Pi Zero W, whose Bluetooth is frequently
+	// not up when this runs, that is a device that boots, says everything is
+	// fine, and presents nothing to the host. It cost a whole evening of
+	// chasing a "USB bug" that was a Bluetooth bug wearing a nil error.
+	//
+	// Now: every subsystem is attempted whatever the others did, USB goes
+	// first because it is the lifeline, and the errors are collected and
+	// returned together. A boot-time template should bring up as much as it
+	// can and say what it could not -- not stop at the first obstacle and
+	// leave the operator with a brick.
+	var failures []string
+	try := func(what string, fn func() error) {
+		if err := fn(); err != nil {
+			log.Printf("master template: %s FAILED: %v", what, err)
+			failures = append(failures, fmt.Sprintf("%s: %v", what, err))
 			return
 		}
-		fmt.Printf("... succeeded deploying TriggerActions '%s'\n", mt.TemplateNameTriggerActions)
+		log.Printf("master template: %s ok", what)
 	}
 
-	for _, nnw := range mt.TemplateNamesNetwork {
-		fmt.Printf("... deploying Network Interface Settings '%s' ...\n", nnw)
-		_, err = s.DeployStoredEthernetInterfaceSettings(ctx, &pb.StringMessage{Msg: nnw})
-		if err != nil {
-			fmt.Printf("... error deploying Network Interface Settings '%s'\n", nnw)
-			return
-		}
-		fmt.Printf("... succeeded deploying Network Interface Settings '%s'\n", nnw)
-	}
-
-	if len(mt.TemplateNameBluetooth) > 0 {
-		fmt.Printf("... deploying Bluetooth settings '%s' ...\n", mt.TemplateNameBluetooth)
-		_, btErr := s.DeployStoredBluetoothSettings(ctx, &pb.StringMessage{Msg: mt.TemplateNameBluetooth})
-		if btErr != nil {
-			if btErr == bluetooth.ErrBtSvcNotAvailable {
-				fmt.Printf("... ignoring Bluetooth error '%s'\n", mt.TemplateNameBluetooth)
-
-			} else {
-				fmt.Printf("... error deploying Bluetooth settings '%s'\n", mt.TemplateNameBluetooth)
-				return
-			}
-			fmt.Printf("... error deploying Bluetooth settings '%s'\n", mt.TemplateNameBluetooth)
-		}
-		fmt.Printf("... succeeded deploying Bluetooth settings '%s'\n", mt.TemplateNameBluetooth)
-	}
 	if len(mt.TemplateNameUsb) > 0 {
-		fmt.Printf("... deploying USB settings '%s' ...\n", mt.TemplateNameUsb)
-		_, err = s.DeployStoredUSBSettings(ctx, &pb.StringMessage{Msg: mt.TemplateNameUsb})
-		if err != nil {
-			fmt.Printf("... error deploying USB settings '%s'\n", mt.TemplateNameUsb)
-			return
-		}
-		fmt.Printf("... succeeded deploying USB settings '%s'\n", mt.TemplateNameUsb)
+		try("USB "+mt.TemplateNameUsb, func() error {
+			_, e := s.DeployStoredUSBSettings(ctx, &pb.StringMessage{Msg: mt.TemplateNameUsb})
+			return e
+		})
+	}
+	if len(mt.TemplateNameTriggerActions) > 0 {
+		try("reflexes "+mt.TemplateNameTriggerActions, func() error {
+			_, e := s.DeployStoredTriggerActionSetReplace(ctx, &pb.StringMessage{Msg: mt.TemplateNameTriggerActions})
+			return e
+		})
+	}
+	for _, nnw := range mt.TemplateNamesNetwork {
+		name := nnw
+		try("network "+name, func() error {
+			_, e := s.DeployStoredEthernetInterfaceSettings(ctx, &pb.StringMessage{Msg: name})
+			return e
+		})
+	}
+	if len(mt.TemplateNameBluetooth) > 0 {
+		try("bluetooth "+mt.TemplateNameBluetooth, func() error {
+			_, e := s.DeployStoredBluetoothSettings(ctx, &pb.StringMessage{Msg: mt.TemplateNameBluetooth})
+			// No Bluetooth hardware is a fact about the board, not a
+			// failure of the template.
+			if e == bluetooth.ErrBtSvcNotAvailable {
+				log.Printf("master template: no Bluetooth on this board, skipping")
+				return nil
+			}
+			return e
+		})
 	}
 	if len(mt.TemplateNameWifi) > 0 {
-		fmt.Printf("... deploying WiFi settings '%s' ...\n", mt.TemplateNameWifi)
-		_, err = s.DeployStoredWifiSettings(ctx, &pb.StringMessage{Msg: mt.TemplateNameWifi})
-		if err != nil {
-			fmt.Printf("... error deploying WiFi settings '%s'\n", mt.TemplateNameWifi)
-			return
-		}
-		fmt.Printf("... succeeded deploying WiFi settings '%s'\n", mt.TemplateNameWifi)
+		try("wifi "+mt.TemplateNameWifi, func() error {
+			_, e := s.DeployStoredWifiSettings(ctx, &pb.StringMessage{Msg: mt.TemplateNameWifi})
+			return e
+		})
+	}
+
+	if len(failures) > 0 {
+		err = errors.New("master template partially deployed -- " + strings.Join(failures, "; "))
+		return e, err
 	}
 
 	fmt.Println("... master template deployed successfully")

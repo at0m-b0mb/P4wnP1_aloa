@@ -446,12 +446,32 @@ log "WiFi PSK and Bluetooth PIN are STILL at shared defaults -- change via web U
 touch "${FLAG_FILE}"
 chmod 0600 "${FLAG_FILE}"
 
-# Kick the P4wnP1 service so it reloads /etc/p4wnp1/auth.json. The service
-# starts early in boot and may have already initialised with no users
-# (rejecting all requests); a restart re-reads the freshly-bootstrapped file.
-if [[ "${ADMIN_BOOTSTRAP_OK}" = "1" ]] && systemctl is-active --quiet P4wnP1.service; then
-    log "restarting P4wnP1.service to pick up new auth.json"
-    systemctl restart P4wnP1.service || log "warning: P4wnP1.service restart failed"
-fi
+# DO NOT RESTART P4wnP1 HERE.
+#
+# This used to run `systemctl restart P4wnP1.service`, to make the service
+# re-read the auth.json we just wrote. It was never necessary, and it was
+# actively destructive.
+#
+# Never necessary: the service starts before this script runs, so NewStore
+# opens a path with no file behind it -- and load() treats a missing file as
+# "no users yet" rather than an error, so the store KEEPS ITS PATH. Its
+# reloadIfChanged() then stats the file on every Verify and picks up our
+# auth.json the moment we write it. Pinned by
+# TestStoreAdoptsAnAuthFileThatAppearsLater in service/auth.
+#
+# Actively destructive: this is a USB-gadget appliance, and restarting the
+# service tears the gadget down. Every service start unbinds the UDC and
+# rebuilds an empty, disabled gadget before it reads any template, and a USB
+# host cannot re-enumerate a device that has stopped presenting itself. So
+# the device dropped off its operator's machine a few minutes into every
+# first boot -- cable still plugged in, panel still lit, simply gone -- and
+# only a physical replug brought it back. It cost an evening to find,
+# because every symptom pointed at USB and the cause was a line about
+# passwords.
+#
+# If this service ever does need a nudge, send it SIGHUP and make the
+# service handle it. Do not restart the thing that owns the only link the
+# operator has.
+log "auth.json written; the service picks it up on its own (no restart)"
 
 exit 0

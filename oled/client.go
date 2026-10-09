@@ -477,6 +477,20 @@ func (c *APIClient) SetUSBFunctions(on map[string]bool) error {
 	for k, v := range on {
 		gs[k] = v
 	}
+	// FORCE enabled.
+	//
+	// GetDeployedGadgetSetting reports what is in configfs RIGHT NOW, not
+	// the stored intent. When the gadget is torn down -- which every service
+	// start does, and every failed deploy leaves behind -- that read comes
+	// back with enabled:false, and this read-modify-write faithfully sent it
+	// straight back. So the Cable screen could tick every function, deploy,
+	// report success, and build another DISABLED gadget: the one screen on
+	// the device whose entire job is to bring USB back could not do it, and
+	// gave no sign of why.
+	//
+	// Found the hard way, on a board with no USB link, by an operator
+	// ticking all four boxes and watching nothing happen.
+	gs["enabled"] = true
 	return c.call("DeployGadgetSetting", gs, nil)
 }
 
