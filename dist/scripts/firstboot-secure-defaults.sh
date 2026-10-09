@@ -496,17 +496,20 @@ ${SSH_FPS}
   WiFi AP PSK:          ${P4WNP1_INITIAL_PSK}
 
   These values were captured by install.sh. The running P4wnP1 service still
-  has to be told to broadcast them. After your first web-client login at
-  http://172.24.0.1:8000 (or 172.16.0.1 via USB), apply them:
-      web client -> WiFi -> Settings -> set SSID + PSK -> save as template
-                                                       -> set as default
+  has to be told to broadcast them. Setting the SSID and PSK is a CLI job --
+  there is no field for it in the web console:
+      P4wnP1_cli wifi set ap --ssid '<SSID>' --psk '<PSK>'
+  Then, to keep that configuration and have it load on every boot:
+      web console -> Radio -> WiFi -> "Store as template"
+      web console -> Loadouts -> "Compose a loadout" -> name the WiFi template
+                             -> "Use at boot"
 
 ------------------------------------------------------------------------------
  ITEMS STILL ON SHARED DEFAULTS -- change these manually:
 ------------------------------------------------------------------------------
 
   Bluetooth PIN:        1337
-                          -> web client -> Bluetooth -> Settings -> new PIN
+                          -> web console -> Radio -> "Bluetooth pairing"
                           -> or: systemctl disable --now bluetooth if unused
 
   Transport:            NO TLS. The API authenticates every request with a

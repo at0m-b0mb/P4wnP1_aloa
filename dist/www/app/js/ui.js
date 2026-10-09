@@ -228,12 +228,42 @@ function promptForm({ title, intro, fields, confirmLabel = 'Save', validate }) {
     const body = [
       intro ? h('p', intro) : null,
       ...fields.map(f => {
-        const input = h('input', {
-          type: f.type || 'text',
-          value: f.value || '',
-          placeholder: f.placeholder || '',
-          autocomplete: f.autocomplete || 'off',
-        });
+        /* A field with `options` is a picker, not a text box.
+         *
+         * This matters more than it looks. The reflex builder used to take a
+         * template name as free text: a typo armed a rule that pointed at
+         * nothing, and nothing said so -- not at save time, because the name
+         * is not resolved then, and not at fire time, because a trigger
+         * action logs its failure to the journal and carries on. The
+         * operator is left believing the device will react to something it
+         * will ignore. A list of what actually exists cannot be mistyped.
+         *
+         * `emptyLabel` gives the picker a "leave this alone" entry, which a
+         * loadout needs -- it may deliberately set only some subsystems. */
+        /* `multiple` exists because some proto fields are `repeated` and a
+           single picker would quietly drop the rest. A loadout's
+           template_names_network is the case in hand: one stored network
+           template per interface, so a loadout usually names several. */
+        const input = f.options
+          ? h('select', f.multiple
+            ? { autocomplete: 'off', multiple: true, size: String(Math.min(Math.max(f.options.length, 2), 6)) }
+            : { autocomplete: 'off' },
+            ...(f.emptyLabel && !f.multiple ? [h('option', { value: '' }, f.emptyLabel)] : []),
+            ...f.options.map(o => h('option', { value: o }, o)))
+          : h('input', {
+            type: f.type || 'text',
+            value: f.value || '',
+            placeholder: f.placeholder || '',
+            autocomplete: f.autocomplete || 'off',
+          });
+        /* Setting .value on a <select> only takes once the options exist, so
+           it happens here rather than in the h() props above. A value that is
+           not among the options leaves the select on its first entry, which
+           is the honest outcome: the stored name is gone. */
+        if (f.options && !f.multiple && f.value) input.value = f.value;
+        if (f.options && f.multiple && Array.isArray(f.value)) {
+          for (const o of input.options) o.selected = f.value.includes(o.value);
+        }
         inputs[f.key] = input;
         input.addEventListener('keydown', e => {
           if (e.key === 'Enter') { e.preventDefault(); submit(); }
@@ -248,7 +278,13 @@ function promptForm({ title, intro, fields, confirmLabel = 'Save', validate }) {
 
     function submit() {
       const values = {};
-      for (const k of Object.keys(inputs)) values[k] = inputs[k].value;
+      for (const k of Object.keys(inputs)) {
+        const el = inputs[k];
+        /* A <select multiple>'s .value is just its FIRST selected option --
+           reading it like a text box silently discards every other choice,
+           which is the exact failure `multiple` was added to prevent. */
+        values[k] = el.multiple ? [...el.selectedOptions].map(o => o.value) : el.value;
+      }
       const problem = validate ? validate(values) : null;
       if (problem) {
         clear(error).append(problem);

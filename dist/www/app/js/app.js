@@ -302,6 +302,47 @@ function renderCable() {
   );
 }
 
+/* "Save what is running, under a name."
+ *
+ * Nine Store* RPCs are implemented in the service. Until this helper existed
+ * exactly one of them -- StoreDeployedUSBSettings -- had a caller anywhere:
+ * not in the CLI (cmd_template.go offers deploy and list), not on the panel
+ * (oled/client.go's kindMeta has List/Deploy/Delete columns and no Store, so
+ * storing is not merely unwired there but inexpressible). The template
+ * library was read-only in practice: an operator could deploy and delete
+ * whatever init.db happened to ship and could not keep anything they built.
+ *
+ * Two places promised otherwise. The console's own Overview primer says
+ * "Store a Loadout when you have something worth keeping", and first boot
+ * prints a WiFi procedure ending "save as template -> set as default" for
+ * the one task it reports as still outstanding. Both named a screen that did
+ * not exist.
+ *
+ * The StoreDeployed* family takes a name and nothing else -- the service
+ * snapshots the running configuration itself (rpc_server.go:681 for WiFi,
+ * :359 for Bluetooth) -- so there is no settings payload to assemble here
+ * and no way for this to store something other than what is actually live.
+ */
+function storeDeployedButton({ rpc, title, placeholder, hint, onDone }) {
+  return h('button.btn.btn-quiet', {
+    onclick: async () => {
+      const name = await promptValue({
+        title,
+        label: 'Template name',
+        placeholder,
+        hint,
+        validate: v => v ? null : 'Give the template a name.',
+      });
+      if (!name) return;
+      /* guard() returns undefined on failure; an Empty reply is {} , which is
+         truthy, but a bare `if (r)` would still be wrong if the reply were
+         ever a falsy scalar. Compare against undefined explicitly. */
+      const r = await guard(() => Api.rpc(rpc, { msg: name }), 'store the template');
+      if (r !== undefined) { toast('Stored as "' + name + '".'); if (onDone) onDone(); }
+    },
+  }, 'Store as template');
+}
+
 function figure(n, label) {
   return h('div.figure', h('span.figure-n', n), h('span.figure-l', label));
 }
@@ -540,20 +581,12 @@ Views.cable = async function () {
         },
       }, 'Deploy composition'),
       h('button.btn', { onclick: () => { State.formDirty = false; Views.cable(); } }, 'Discard changes'),
-      h('button.btn.btn-quiet', {
-        onclick: async () => {
-          const name = await promptValue({
-            title: 'Store this USB composition',
-            label: 'Template name',
-            placeholder: 'hid-and-storage',
-            hint: 'Reusable later from Loadouts, and as part of a whole-device template.',
-            validate: v => v ? null : 'Give the template a name.',
-          });
-          if (!name) return;
-          const r = await guard(() => Api.rpc('StoreDeployedUSBSettings', { msg: name }), 'store the template');
-          if (r !== undefined) toast('Stored as "' + name + '".');
-        },
-      }, 'Store as template')));
+      storeDeployedButton({
+        rpc: 'StoreDeployedUSBSettings',
+        title: 'Store this USB composition',
+        placeholder: 'hid-and-storage',
+        hint: 'Reusable later from Loadouts, and as part of a whole-device template.',
+      })));
   main.append(form);
 };
 
@@ -592,7 +625,21 @@ Views.radio = async function () {
           kvRow('Nexmon features', cs.nexmon ? 'enabled' : 'off',
             cs.nexmon ? 'KARMA and multi-SSID need a Nexmon-patched firmware blob installed.' : null),
           kvRow('Disabled', cs.disabled ? 'yes' : 'no'),
-          kvRow('Template name', cs.name || '--')))));
+          kvRow('Template name', cs.name || '--'))),
+      /* First boot prints, for the SSID and PSK it generated:
+             web client -> WiFi -> Settings -> set SSID + PSK
+                                            -> save as template
+                                            -> set as default
+         The saving half of that had no implementation in any client. The
+         setting half is in the CLI (cmd_wifi.go). */
+      h('div.btn-row', { style: 'margin-top:20px' },
+        storeDeployedButton({
+          rpc: 'StoreDeployedWifiSettings',
+          title: 'Store the running WiFi configuration',
+          placeholder: 'ap-engagement',
+          hint: 'Captures what is live now -- mode, SSID, PSK, channel and regulatory domain. '
+              + 'Deployable later from Loadouts, or as part of a whole-device template.',
+        }))));
   }
 
   if (bt) {
@@ -610,7 +657,14 @@ Views.radio = async function () {
             kvRow('NAP server', bt.service_network_server_nap ? 'on' : 'off',
               bt.service_network_server_nap ? 'The device offers network access over Bluetooth PAN.' : null),
             kvRow('PANU', bt.service_network_server_panu ? 'on' : 'off'),
-            kvRow('GN', bt.service_network_server_gn ? 'on' : 'off')))));
+            kvRow('GN', bt.service_network_server_gn ? 'on' : 'off'))),
+      bt.is_available === false ? null : h('div.btn-row', { style: 'margin-top:20px' },
+        storeDeployedButton({
+          rpc: 'StoreDeployedBluetoothSettings',
+          title: 'Store the running Bluetooth configuration',
+          placeholder: 'bt-nap',
+          hint: 'Captures the controller settings and the pairing PIN together.',
+        }))));
   }
 
   /* THE PAIRING PIN.
@@ -1051,7 +1105,12 @@ const ACTIONS = [
     fields: [
       { name: 'templateName', label: 'Template', required: true },
       { name: 'type', label: 'Kind', value: 'NETWORK',
-        choices: ['USB', 'NETWORK', 'WIFI', 'BLUETOOTH', 'TRIGGER_ACTIONS'] },
+        // FULL_SETTINGS deploys a whole loadout (SubSysTriggerAction.go:344
+        // -> DeployStoredMasterTemplate). It is the enum's ZERO value, so
+        // omitting it from this list did not merely hide it -- it made the
+        // default-selected 'NETWORK' the only way to express anything, and a
+        // reflex could not deploy a loadout at all.
+        choices: ['FULL_SETTINGS', 'USB', 'NETWORK', 'WIFI', 'BLUETOOTH', 'TRIGGER_ACTIONS'] },
     ] },
 ];
 
@@ -1266,12 +1325,27 @@ Views.loadouts = async function () {
   main.append(pageHead('Loadouts',
     'A loadout is a whole-device configuration: USB, WiFi, Bluetooth, network and reflexes together. Deploying one changes everything at once.'));
 
-  const [list, startup] = await Promise.all([
+  /* The five subsystem lists are what a loadout is composed FROM, so they
+     are fetched here rather than inside the editor: a picker that cannot be
+     populated should not be offered at all. Unguarded -- a device with no
+     Bluetooth controller answers these with an error, and a toast per empty
+     list on every visit to this page is noise, not information. */
+  const [list, startup, usbT, wifiT, btT, netT, tasT] = await Promise.all([
     guard(() => Api.rpc('ListStoredMasterTemplate'), 'list loadouts'),
     guard(() => Api.rpc('GetStartupMasterTemplate'), 'read startup loadout'),
+    Api.rpc('ListStoredUSBSettings').catch(() => null),
+    Api.rpc('ListStoredWifiSettings').catch(() => null),
+    Api.rpc('ListStoredBluetoothSettings').catch(() => null),
+    Api.rpc('ListStoredEthernetInterfaceSettings').catch(() => null),
+    Api.rpc('ListStoredTriggerActionSets').catch(() => null),
   ]);
   const names = (list && list.msgArray) || [];
   const startupName = (startup && startup.msg) || null;
+  const arr = r => (r && r.msgArray) || [];
+  const parts = {
+    usb: arr(usbT), wifi: arr(wifiT), bt: arr(btT),
+    net: arr(netT), tas: arr(tasT),
+  };
 
   main.append(h('div.card',
     h('h2.card-title', 'Stored loadouts'),
@@ -1304,8 +1378,108 @@ Views.loadouts = async function () {
               const r = await guard(() => Api.rpc('SetStartupMasterTemplate', { msg: n }), 'set the boot default');
               if (r !== undefined) { toast('"' + n + '" will load at boot.'); Views.loadouts(); }
             },
-          }, 'Use at boot'))))))
+          }, 'Use at boot'),
+          ' ',
+          /* GetStoredMasterTemplate had no caller in any client, which made
+             Deploy the most destructive action in the product AND a blind
+             one: the operator chose from a list of names with no way to see
+             what any of them would do. A loadout is five names, so showing
+             it costs one RPC and a table. */
+          h('button.btn.btn-sm.btn-quiet', {
+            onclick: async () => {
+              const t = await guard(() => Api.rpc('GetStoredMasterTemplate', { msg: n }),
+                'read loadout "' + n + '"');
+              if (t === undefined) return;
+              const net = t.template_names_network || [];
+              const row = (k, v) => k + ': ' + (v && v.length ? v : '(unset -- left as-is)');
+              await showDetail({
+                title: 'Loadout "' + n + '"',
+                body: [
+                  row('USB        ', t.template_name_usb),
+                  row('WiFi       ', t.template_name_wifi),
+                  row('Bluetooth  ', t.template_name_bluetooth),
+                  row('Reflexes   ', t.template_name_trigger_actions),
+                  row('Network    ', net.join(', ')),
+                  '',
+                  'Deploying applies only the subsystems named above.',
+                  'Anything left unset keeps its current configuration.',
+                ].join('\n'),
+                mono: true,
+              });
+            },
+          }, 'Inspect'))))))
       : h('div.empty', 'No loadouts stored yet.')));
+
+  /* THE EDITOR.
+   *
+   * StoreMasterTemplate had no caller in any client, so the set of
+   * deployable loadouts was frozen at whatever dist/db/init.db shipped. The
+   * Overview primer told the operator to "Store a Loadout when you have
+   * something worth keeping" and no client could.
+   *
+   * A MasterTemplate is five names and nothing else (proto/grpc.proto:144),
+   * so this needs no settings plumbing -- only the lists already fetched
+   * above. Pickers rather than text boxes because a loadout that names a
+   * template which does not exist fails at DEPLOY time, which is the worst
+   * moment: mid-reconfiguration, over a link the loadout is itself changing. */
+  const anyParts = Object.values(parts).some(a => a.length);
+  main.append(h('div.card',
+    h('h2.card-title', 'Compose a loadout'),
+    h('p.field-hint', { style: 'margin-bottom:14px' },
+      'A loadout names one stored template per subsystem. Leave a subsystem unset and '
+      + 'deploying the loadout will not touch it.'),
+    anyParts
+      ? h('div.btn-row', h('button.btn.btn-primary', {
+        onclick: async () => {
+          const none = '-- leave unset --';
+          const r = await promptForm({
+            title: 'Compose a loadout',
+            intro: 'Only the subsystems you name are applied when this loadout is deployed.',
+            confirmLabel: 'Store loadout',
+            fields: [
+              { key: 'name', label: 'Loadout name', placeholder: 'engagement-a',
+                hint: 'Storing under an existing name replaces it.' },
+              { key: 'usb', label: 'USB', options: parts.usb, emptyLabel: none },
+              { key: 'wifi', label: 'WiFi', options: parts.wifi, emptyLabel: none },
+              { key: 'bt', label: 'Bluetooth', options: parts.bt, emptyLabel: none },
+              { key: 'tas', label: 'Reflexes', options: parts.tas, emptyLabel: none },
+              { key: 'net', label: 'Network', options: parts.net, multiple: true,
+                hint: 'One template per interface, so several may apply. Ctrl-click or '
+                    + 'cmd-click to select more than one; select none to leave networking alone.' },
+            ],
+            validate: v => {
+              if (!v.name) return 'Give the loadout a name.';
+              /* A loadout that names nothing is accepted by the service and
+                 deploys nothing -- it would sit in the list looking like a
+                 configuration. Refuse it here instead. */
+              if (!v.usb && !v.wifi && !v.bt && !v.tas && !v.net.length) {
+                return 'Name at least one template, or the loadout would do nothing.';
+              }
+              return null;
+            },
+          });
+          if (!r) return;
+          /* Field names are the proto names exactly (the bridge uses
+             UseProtoNames), and an unknown key is DISCARDED rather than
+             rejected -- a misspelling here would store an empty loadout
+             that deploys nothing. tools/check-rpc-shapes.py checks these
+             against proto/grpc.proto so a typo fails the build, not the
+             device. */
+          const tpl = {};
+          if (r.usb) tpl.template_name_usb = r.usb;
+          if (r.wifi) tpl.template_name_wifi = r.wifi;
+          if (r.bt) tpl.template_name_bluetooth = r.bt;
+          if (r.tas) tpl.template_name_trigger_actions = r.tas;
+          if (r.net.length) tpl.template_names_network = r.net;
+          const res = await guard(
+            () => Api.rpc('StoreMasterTemplate', { TemplateName: r.name, template: tpl }),
+            'store the loadout');
+          if (res !== undefined) { toast('Stored loadout "' + r.name + '".'); Views.loadouts(); }
+        },
+      }, 'New loadout'))
+      : h('div.empty',
+        'Nothing to compose from yet. Store a USB, WiFi, Bluetooth, network or reflex '
+        + 'template first -- the Cable and Radio screens have a "Store as template" button.')));
 
   main.append(h('div.card',
     h('h2.card-title', 'Device'),
