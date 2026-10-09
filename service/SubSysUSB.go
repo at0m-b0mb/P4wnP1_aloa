@@ -660,11 +660,55 @@ func (gm *UsbGadgetManager) ParseGadgetState(gadgetName string) (result *pb.Gadg
 
 // This command is working on the active gadget directly, so changes aren't reflected back
 // to the GadgetSettingsState
-func MountUMSFile(filename string) error {
+// umsBackingPath turns the name the operator chose into the absolute path the
+// kernel needs.
+//
+// The two callers used to disagree. DeployGadgetSettings prefixed the image
+// directory; MountUMSFile wrote the caller's string unchanged. Since
+// ListUmsImageFlashdrive and ListUmsImageCdrom both return BARE NAMES, the
+// natural call -- pick a name from the list, mount it -- could only ever fail,
+// with the kernel reporting ENOENT against the configfs attribute rather than
+// against the image. One function now, so they cannot drift again.
+//
+// An empty name is passed through: writing "" to lun.0/file DETACHES the LUN,
+// which is a legitimate thing to ask for. An absolute path is honoured, for an
+// image kept somewhere else.
+func umsBackingPath(name string, cdrom bool) string {
+	if name == "" || filepath.IsAbs(name) {
+		return name
+	}
+	dir := common.PATH_IMAGE_FLASHDRIVE
+	if cdrom {
+		dir = common.PATH_IMAGE_CDROM
+	}
+	return filepath.Join(dir, name)
+}
+
+func MountUMSFile(filename string, cdrom bool) error {
+	// Resolve a bare name against the image directory.
+	//
+	// This used to write the caller's string straight into configfs, with no
+	// directory at all. ListUmsImageFlashdrive and ListUmsImageCdrom return
+	// BARE NAMES -- "test.bin" -- so the only natural way to call this was
+	// guaranteed to fail: the kernel resolves the backing path itself and
+	// returned ENOENT for a file that exists. DeployGadgetSettings got this
+	// right and prefixed the directory; this did not, and the two have
+	// disagreed since they were written.
+	//
+	// An absolute path is still honoured, for a caller mounting an image
+	// from somewhere else.
+	filename = umsBackingPath(filename, cdrom)
+	// An empty string is meaningful: it detaches the LUN. Anything else has
+	// to exist, and saying so here beats the kernel's bare ENOENT, which
+	// names the configfs attribute rather than the image the operator chose.
+	if filename != "" {
+		if _, err := os.Stat(filename); err != nil {
+			return fmt.Errorf("USB Mass Storage image %q cannot be used: %v", filename, err)
+		}
+	}
 	funcdir := USB_GADGET_DIR + "/functions/mass_storage.ms1"
-	err := os.WriteFile(funcdir+"/lun.0/file", []byte(filename), os.ModePerm)
-	if err != nil {
-		return errors.New(fmt.Sprintf("settings backing file for USB Mass Storage failed: %v", err))
+	if err := os.WriteFile(funcdir+"/lun.0/file", []byte(filename), os.ModePerm); err != nil {
+		return fmt.Errorf("setting backing file %q for USB Mass Storage failed: %v", filename, err)
 	}
 	return nil
 }
@@ -873,13 +917,22 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 		os.WriteFile(funcdir+"/lun.0/nofua", []byte("0"), os.ModePerm) // Don't restrict to read-only (is implied by cdrom=1 if needed, but causes issues on backend FS if enabled)
 
 		//Provide the backing image
-		file := settings.UmsSettings.File
-		if settings.UmsSettings.Cdrom {
-			file = common.PATH_IMAGE_CDROM + "/" + file
-		} else {
-			file = common.PATH_IMAGE_FLASHDRIVE + "/" + file
+		//
+		// The error here is CHECKED, which it was not. Every write in this
+		// block used to discard its result, so a gadget whose storage could
+		// not be attached was composed, bound, and reported as deployed --
+		// the console said success and the host saw no disk. The read-back
+		// then reported the backing file as "." , because filepath.Base("")
+		// is ".", which is not a filename anyone would recognise as "empty".
+		file := umsBackingPath(settings.UmsSettings.File, settings.UmsSettings.Cdrom)
+		if file != "" {
+			if _, serr := os.Stat(file); serr != nil {
+				return fmt.Errorf("USB Mass Storage image %q cannot be used: %v", file, serr)
+			}
 		}
-		os.WriteFile(funcdir+"/lun.0/file", []byte(file), os.ModePerm) // Set backing file (or block device) for USB Mass Storage
+		if werr := os.WriteFile(funcdir+"/lun.0/file", []byte(file), os.ModePerm); werr != nil {
+			return fmt.Errorf("attaching USB Mass Storage image %q failed: %v", file, werr)
+		}
 
 		err := os.Symlink(funcdir, USB_GADGET_DIR+"/configs/c.1/"+"mass_storage.ms1")
 		if err != nil {

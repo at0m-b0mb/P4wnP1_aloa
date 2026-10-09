@@ -1152,7 +1152,7 @@ func (s *server) ListStoredEthernetInterfaceSettings(ctx context.Context, empty 
 func (s *server) MountUMSFile(ctx context.Context, gsu *pb.GadgetSettingsUMS) (*pb.Empty, error) {
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_USB))
 	log.Printf("Trying to mount iamge `%s` to UMS ...", gsu.File)
-	err := MountUMSFile(gsu.File)
+	err := MountUMSFile(gsu.File, gsu.Cdrom)
 	return nil, err
 }
 
