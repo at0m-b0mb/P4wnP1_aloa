@@ -92,7 +92,11 @@ compose() {  # keyboard mouse raw serial ums [umsfile]
     rpc GetDeployedGadgetSetting | python3 -I -c '
 import json,sys
 gs = json.load(sys.stdin)
-kb, mo, raw, ser, ums, f = (sys.argv[1:6] + [""])[:6]
+# argv[1:7], not [1:6]. The slice stopped one short, so the filename --
+# the sixth argument -- was never read and every UMS deploy went out
+# with an empty backing image. The device said so once the error
+# stopped being discarded; before that it was just "internal error".
+kb, mo, raw, ser, ums, f = (sys.argv[1:7] + [""])[:6]
 b = lambda v: v == "true"
 gs["enabled"] = True
 gs["use_RNDIS"] = True          # never drop the link this test runs over
