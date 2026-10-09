@@ -29,12 +29,82 @@ import (
 // nothing said why.
 func TestPartialDeployDoesNotTriggerTheDestructiveFallback(t *testing.T) {
 	// Exactly what a Zero W produced: everything up, Bluetooth failed.
-	partial := &PartialDeployError{Failures: []string{
-		"bluetooth startup: Failed",
-	}}
+	partial := &PartialDeployError{
+		Failures:  []string{"bluetooth startup: Failed"},
+		Succeeded: 6, Attempted: 7,
+	}
 	if startupNeedsFallback(partial) {
 		t.Fatal("a partial deploy still runs servicestart.sh, which overwrites " +
 			"the USB, network and WiFi configuration that DID deploy")
+	}
+}
+
+// THE REGRESSION THE FIRST FIX INTRODUCED
+//
+// startupNeedsFallback originally decided by error TYPE: any
+// *PartialDeployError meant "something is up, keep it". But that error is
+// built whenever len(failures) > 0, so an all-subsystems-failed deploy was
+// the same value as a one-subsystem-failed deploy, and BOTH suppressed the
+// fallback. A device that deployed nothing got no fallback either -- no USB
+// gadget, no DHCP, no access point, nothing retrying. Recovery meant pulling
+// the SD card. Before the fix, v0.7.1 recovered from this state by running
+// servicestart.sh, which is exactly what its own header says it is for.
+//
+// Reachable on this appliance: datastore.Restore writes keys one at a time in
+// sorted order and runs only when the DB directory does not yet exist, so
+// pulling the power mid-first-boot -- the normal way this device is switched
+// off -- permanently keeps master_startup and tas_startup while losing
+// usbs_startup and ws_startup, which sort after them.
+func TestNothingDeployedStillRunsTheFallback(t *testing.T) {
+	// Every hardware subsystem failed; only the reflex set, which touches no
+	// hardware, would have succeeded -- and here not even that.
+	allFailed := &PartialDeployError{
+		Failures: []string{
+			"USB usbs_startup: ErrGet",
+			"reflexes tas_startup: ErrGet",
+			"network usbeth_startup: no such interface",
+			"network wlan0_startup_dhcp_server: no such interface",
+			"bluetooth bt_startup: Failed",
+			"wifi ws_startup: ErrGet",
+		},
+		Succeeded: 0, Attempted: 6,
+	}
+	if !startupNeedsFallback(allFailed) {
+		t.Fatal("NOTHING deployed and the fallback was suppressed: no USB gadget, " +
+			"no DHCP, no access point, and nothing retries. The device is " +
+			"unreachable and recovery means pulling the SD card.")
+	}
+	if !allFailed.NothingDeployed() {
+		t.Error("NothingDeployed() is false with Succeeded == 0")
+	}
+}
+
+// The boundary. One subsystem up is still "something to protect", so the
+// fallback must stay suppressed -- otherwise this fix would undo the one
+// before it and the emoji SSID would come back.
+func TestExactlyOneSubsystemUpSuppressesTheFallback(t *testing.T) {
+	oneUp := &PartialDeployError{
+		Failures:  []string{"bluetooth bt_startup: Failed", "wifi ws_startup: ErrGet"},
+		Succeeded: 1, Attempted: 3,
+	}
+	if startupNeedsFallback(oneUp) {
+		t.Error("one subsystem up still runs the fallback, which would overwrite it")
+	}
+}
+
+// The error message is the only thing an operator sees in the journal when a
+// subsystem silently does not come up, so it must carry the counts that drove
+// the decision -- not just the failures.
+func TestPartialDeployErrorStatesTheCounts(t *testing.T) {
+	e := &PartialDeployError{
+		Failures:  []string{"bluetooth bt_startup: Failed"},
+		Succeeded: 6, Attempted: 7,
+	}
+	msg := e.Error()
+	for _, want := range []string{"6 of 7", "bluetooth", "partially deployed"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message %q does not mention %q", msg, want)
+		}
 	}
 }
 
@@ -43,7 +113,10 @@ func TestPartialDeployDoesNotTriggerTheDestructiveFallback(t *testing.T) {
 // have silently reverted to the old behaviour.
 func TestPartialDeployIsRecognisedThroughWrapping(t *testing.T) {
 	wrapped := fmt.Errorf("deploying startup template: %w",
-		&PartialDeployError{Failures: []string{"wifi startup: no wlan0"}})
+		&PartialDeployError{
+			Failures:  []string{"wifi startup: no wlan0"},
+			Succeeded: 6, Attempted: 7,
+		})
 	if startupNeedsFallback(wrapped) {
 		t.Error("a wrapped PartialDeployError was not recognised; the fallback " +
 			"would run and overwrite what deployed")
@@ -75,7 +148,10 @@ func TestSuccessNeedsNoFallback(t *testing.T) {
 // PartialDeployError must name the subsystems, because that message is the
 // only thing an operator sees when a subsystem silently does not come up.
 func TestPartialDeployErrorNamesWhatFailed(t *testing.T) {
-	e := &PartialDeployError{Failures: []string{"bluetooth startup: Failed", "wifi startup: no wlan0"}}
+	e := &PartialDeployError{
+		Failures:  []string{"bluetooth startup: Failed", "wifi startup: no wlan0"},
+		Succeeded: 5, Attempted: 7,
+	}
 	msg := e.Error()
 	for _, want := range []string{"bluetooth", "wifi", "no wlan0", "partially deployed"} {
 		if !strings.Contains(msg, want) {

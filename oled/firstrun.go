@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // First-boot credentials, shown on the panel instead of left on the card.
@@ -179,15 +180,25 @@ type FirstRunView struct {
 	done bool     // the erase has run
 	left []string // what the erase could not remove
 
-	// liveSSID is what the radio is actually broadcasting, read once from
-	// the service; ssidDone records that we asked, so a device with no WiFi
-	// is not re-queried on every redraw.
+	// liveSSID and livePSK are what the radio is ACTUALLY broadcasting,
+	// read from the service rather than from the first-boot handoff. See
+	// resolveAP for why the key has to come from here.
 	liveSSID string
-	// livePSK is the key the radio is actually using. See resolveAP: taking
-	// it from the service instead of the handoff is what stops the WiFi card
-	// from vanishing on a boot that lost a race with the PSK guard.
 	livePSK  string
-	ssidDone bool
+	// apFirstAsk/apLastAsk bound the retrying in resolveAP.
+	//
+	// These replaced a single `ssidDone bool` that was set BEFORE the call
+	// and never cleared, so exactly one attempt was ever made. That is a
+	// race with the service's own startup: the RPC listener comes up before
+	// the startup master template deploys, and until it does GetWiFiState
+	// answers from its initial state, whose AP BSS is empty. Ask in that
+	// window -- which is exactly when a freshly booted panel asks -- and the
+	// panel caches "no key" for the life of the process and shows three
+	// cards again. That is the very bug reading the key live was meant to
+	// end, reintroduced one layer up.
+	apFirstAsk time.Time
+	apLastAsk  time.Time
+	apAsked    bool
 }
 
 func NewFirstRunView(c *FirstRunCreds) *FirstRunView { return &FirstRunView{c: c} }
@@ -215,10 +226,29 @@ func NewFirstRunView(c *FirstRunCreds) *FirstRunView { return &FirstRunView{c: c
 // The live key cannot race, so it is preferred, and the handoff's copy is the
 // fallback for a service that cannot be reached.
 func (v *FirstRunView) resolveAP(app *App) {
-	if v.ssidDone || app == nil || app.Client == nil {
+	if app == nil || app.Client == nil {
 		return
 	}
-	v.ssidDone = true
+	// Got what we came for. The key is the thing that decides whether there
+	// is a card at all, so it is the thing that stops the asking.
+	if v.livePSK != "" {
+		return
+	}
+
+	now := nowFunc()
+	if v.apAsked {
+		// Bounded, in both directions. Render runs every frame, so without
+		// a rate limit a device with no access point would issue an RPC per
+		// frame forever; without a deadline it would do so for as long as
+		// the operator stood there.
+		if now.Sub(v.apFirstAsk) > apRetryWindow || now.Sub(v.apLastAsk) < apRetryInterval {
+			return
+		}
+	} else {
+		v.apAsked, v.apFirstAsk = true, now
+	}
+	v.apLastAsk = now
+
 	live, psk, err := app.Client.LiveAP()
 	if err != nil {
 		return
@@ -230,6 +260,19 @@ func (v *FirstRunView) resolveAP(app *App) {
 		v.livePSK = psk
 	}
 }
+
+// How hard resolveAP tries. One second apart is slow enough that a panel
+// redrawing many times a second does not flood the service, and two minutes
+// is longer than a Pi Zero W takes to get from "RPC listener up" to "startup
+// WiFi template deployed" even on a cold first boot.
+const (
+	apRetryInterval = time.Second
+	apRetryWindow   = 2 * time.Minute
+)
+
+// nowFunc is time.Now, replaceable so the retry logic can be tested without
+// sleeping.
+var nowFunc = time.Now
 
 // ssid is the name to put in a join code: live if we have it, otherwise
 // whatever first boot wrote down.
@@ -427,6 +470,28 @@ func (v *FirstRunView) renderQRCard(fb *Framebuffer, c credCard, total int) {
 	if c.qr != "" {
 		payload = c.qr
 	}
+
+	// How many rows the secret may occupy: everything between the header
+	// lines and the footer.
+	//
+	// THE FOOTER IS DRAWN UNCONDITIONALLY at a fixed y, and Framebuffer.Text
+	// only ORs pixels, so anything still sitting there is not replaced but
+	// overlapped into illegible porridge. That did not matter while the key
+	// was always the 20-character generated one, which fits the narrow
+	// column in two rows. It matters now: psk() returns whatever key the AP
+	// is actually using, and WPA2 allows 63 characters. At 41 the fifth
+	// chunk landed on the page counter; at 51 the sixth swallowed
+	// "KEY1 erase" as well, with no mark to say anything had been cut.
+	headRows := 1
+	if c.user != "" {
+		headRows++
+	}
+	footerY := Height - 2*LineH
+	passRows := (footerY - headRows*LineH) / LineH
+	if passRows < 1 {
+		passRows = 1
+	}
+
 	textX, dim := 0, 0
 	if q, err := NewQRMax([]byte(payload), qrMaxModules); err == nil {
 		// Quiet zone of 2 modules where there is room, 1 where there is not.
@@ -440,11 +505,23 @@ func (v *FirstRunView) renderQRCard(fb *Framebuffer, c credCard, total int) {
 		// Zero is not an option: with no quiet zone nothing decodes at all.
 		for _, quiet := range []int{2, 1} {
 			d := QRPixels(q, scale, quiet)
-			if d <= Height && d+gap+CharW*9 <= Width {
-				fb.DrawQR(0, (Height-d)/2, q, scale, quiet)
-				textX, dim = d+gap, d
+			if d > Height || d+gap+CharW*9 > Width {
+				continue
+			}
+			// THE WHOLE SECRET BEATS THE QR. A key too long for the narrow
+			// column beside the code is rendered full width instead, where
+			// 21 columns over these rows hold far more than WPA2's 63-
+			// character maximum. Losing the code costs a scan; losing the
+			// end of the key costs the credential, and an operator typing a
+			// silently clipped key has no way to know why it is rejected.
+			// Only a key over 40 characters reaches this -- the generated
+			// one is 20.
+			if len(c.pass) > ((Width-(d+gap))/CharW)*passRows {
 				break
 			}
+			fb.DrawQR(0, (Height-d)/2, q, scale, quiet)
+			textX, dim = d+gap, d
+			break
 		}
 	}
 	_ = dim
@@ -476,7 +553,19 @@ func (v *FirstRunView) renderQRCard(fb *Framebuffer, c credCard, total int) {
 	}
 	// The secret itself, wrapped rather than cut, and inverted so it is
 	// obvious where it starts and stops.
-	for _, part := range chunkString(c.pass, cols) {
+	// Clamped to the rows that exist. Dropping the QR above should already
+	// have made it fit, so this is belt and braces -- but if it ever does
+	// bite, the cut is MARKED rather than silent, the same rule Truncate
+	// follows.
+	chunks := chunkString(c.pass, cols)
+	if len(chunks) > passRows {
+		chunks = chunks[:passRows]
+		last := chunks[passRows-1]
+		if len(last) > 0 {
+			chunks[passRows-1] = last[:len(last)-1] + "~"
+		}
+	}
+	for _, part := range chunks {
 		line(part, true)
 	}
 	// The page counter and the erase key, which the hint line would normally

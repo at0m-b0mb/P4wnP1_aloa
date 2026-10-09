@@ -40,7 +40,12 @@ func startupNeedsFallback(deployErr error) bool {
 	}
 	var partial *PartialDeployError
 	if errors.As(deployErr, &partial) {
-		return false
+		// PARTIAL means some subsystems are up, and overwriting those with
+		// the script's hardcoded values would be destructive. NOTHING up is
+		// not partial, whatever the type says: that is precisely the state
+		// the fallback exists for, and the first version of this function
+		// suppressed it because it decided by error type alone.
+		return partial.NothingDeployed()
 	}
 	return true
 }
@@ -303,14 +308,16 @@ func (s *Service) Start() (context.Context, context.CancelFunc) {
 		case errDeployStartupTemplate == nil:
 			// nothing to report
 		case errors.As(errDeployStartupTemplate, &partial):
-			// Some subsystems are up. Say exactly which are not, and keep what
-			// worked -- running the fallback here would throw it away.
-			fmt.Printf("... Startup MasterTemplate '%s' deployed with %d failed subsystem(s):\n",
-				startupTemplate, len(partial.Failures))
+			fmt.Printf("... Startup MasterTemplate '%s': %d of %d subsystems up, %d failed:\n",
+				startupTemplate, partial.Succeeded, partial.Attempted, len(partial.Failures))
 			for _, f := range partial.Failures {
 				fmt.Printf("      - %s\n", f)
 			}
-			fmt.Println("... keeping what deployed; NOT running the hardcoded fallback script")
+			if partial.NothingDeployed() {
+				fmt.Println("... NOTHING deployed -- falling back to the startup script to make the device reachable")
+			} else {
+				fmt.Println("... keeping what deployed; NOT running the hardcoded fallback script")
+			}
 		default:
 			fmt.Printf("... error deploying Startup MasterTemplate '%s': %v\n", startupTemplate, errDeployStartupTemplate)
 		}

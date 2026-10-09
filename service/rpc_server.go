@@ -146,12 +146,43 @@ func (s *server) GetAvailableGpios(context.Context, *pb.Empty) (res *pb.StringMe
 // a bare BlueZ "Failed" this early in boot, which is not ErrBtSvcNotAvailable
 // and so was counted as a template failure.
 type PartialDeployError struct {
+	// Failures names each subsystem that did not come up, with its error.
 	Failures []string
+	// Succeeded counts the subsystems that DID come up.
+	//
+	// WITHOUT THIS THE TYPE CANNOT ANSWER THE QUESTION IT EXISTS FOR.
+	//
+	// The first version carried Failures alone, and the boot path decided by
+	// error TYPE: any *PartialDeployError meant "something is up, keep it".
+	// But this error is built whenever len(failures) > 0, so "six of seven
+	// succeeded" and "NONE of seven succeeded" were the same value, and both
+	// suppressed the fallback. A device that deployed nothing therefore got
+	// no fallback either -- no USB gadget, no DHCP, no access point, and
+	// nothing that retries. Recovery meant pulling the SD card.
+	//
+	// That state is reachable on this appliance. datastore.Restore copies
+	// keys one at a time in sorted order, each in its own synced
+	// transaction, and runs ONLY when the database directory does not yet
+	// exist -- so it never re-runs. The sort order in the shipped init.db is
+	// master_startup, startup_master, tas_startup, usbs_startup,
+	// ws_startup. Pull the power during the first-boot restore -- and the
+	// normal way to switch this device off is to pull it out of a USB port
+	// -- and you permanently keep the master template and the reflex set
+	// while losing the USB and WiFi settings it names. Every hardware
+	// subsystem then fails, the reflex deploy succeeds because it touches no
+	// hardware, and the old code called that "partially deployed".
+	Succeeded int
+	// Attempted counts the subsystems the template named.
+	Attempted int
 }
 
 func (e *PartialDeployError) Error() string {
-	return "master template partially deployed -- " + strings.Join(e.Failures, "; ")
+	return fmt.Sprintf("master template partially deployed (%d of %d subsystems up) -- %s",
+		e.Succeeded, e.Attempted, strings.Join(e.Failures, "; "))
 }
+
+// NothingDeployed reports that every subsystem the template named failed.
+func (e *PartialDeployError) NothingDeployed() bool { return e.Succeeded == 0 }
 
 func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate) (e *pb.Empty, err error) {
 	e = &pb.Empty{}
@@ -179,12 +210,15 @@ func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate
 	// can and say what it could not -- not stop at the first obstacle and
 	// leave the operator with a brick.
 	var failures []string
+	succeeded, attempted := 0, 0
 	try := func(what string, fn func() error) {
+		attempted++
 		if err := fn(); err != nil {
 			log.Printf("master template: %s FAILED: %v", what, err)
 			failures = append(failures, fmt.Sprintf("%s: %v", what, err))
 			return
 		}
+		succeeded++
 		log.Printf("master template: %s ok", what)
 	}
 
@@ -227,7 +261,7 @@ func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate
 	}
 
 	if len(failures) > 0 {
-		err = &PartialDeployError{Failures: failures}
+		err = &PartialDeployError{Failures: failures, Succeeded: succeeded, Attempted: attempted}
 		return e, err
 	}
 
