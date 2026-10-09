@@ -28,6 +28,18 @@ type walk struct {
 // renderText returns what the screen says, as text, by reading the
 // framebuffer back through the font. Cheaper and far more legible in a
 // failure message than comparing pixels.
+// renderFlat is renderText with the layout taken out: all whitespace removed
+// so a secret that WRAPS across lines still matches as one string.
+//
+// Needed since the first-run secret cards gained a QR code. The text column
+// beside a 58-pixel symbol is eleven characters wide, so a 20-character
+// password is shown on two lines instead of one. It is still entirely on the
+// panel -- which is the property these tests care about -- but it is no
+// longer a contiguous substring of the rendered screen.
+func renderFlat(app *App) string {
+	return strings.Join(strings.Fields(renderText(app)), "")
+}
+
 func renderText(app *App) string {
 	fb := NewFramebuffer()
 	app.Render(fb)

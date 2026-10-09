@@ -232,27 +232,50 @@ func (a *App) Render(fb *Framebuffer) {
 		return
 	}
 
+	// A chromeless view gets the whole 64 pixels. Exactly one screen needs
+	// this: the QR code beside a password. A version 2 symbol with the quiet
+	// zone it requires to decode is 58 pixels square, and the body between
+	// the title bar and the hint line is 48 -- so either the chrome goes or
+	// the code does not scan. Everything else keeps the title and the hint,
+	// because on a device with eight unlabelled controls the hint line is
+	// what stops an operator having to remember.
+	chrome := true
+	if c, ok := v.(Chromeless); ok && c.Chromeless() {
+		chrome = false
+	}
+
 	// Title bar, inverted. A back arrow when there is somewhere to go back to,
 	// so the stack depth is visible rather than something to keep in your head.
-	title := v.Title()
-	if a.Depth() > 1 {
-		title = "<" + title
+	if chrome {
+		title := v.Title()
+		if a.Depth() > 1 {
+			title = "<" + title
+		}
+		fb.Text(1, titleRow*LineH, Truncate(title, Cols-1))
+		fb.Invert(0, titleRow*LineH, Width, LineH)
 	}
-	fb.Text(1, titleRow*LineH, Truncate(title, Cols-1))
-	fb.Invert(0, titleRow*LineH, Width, LineH)
 
 	v.Render(fb, a)
 
 	// Hint line: a toast if one is live, otherwise the screen's own hint.
-	hint := a.activeToast()
-	if hint == "" {
-		hint = v.Hint()
-	}
-	if hint != "" {
-		fb.HLine(0, hintRow*LineH-1, Width, true)
-		fb.Text(1, hintRow*LineH, Truncate(hint, Cols-1))
+	// Drawn AFTER the view, so a chromeless view is not partly overwritten by
+	// it -- which is the bug this flag exists to avoid, and it would have
+	// landed exactly across the bottom rows of the QR code.
+	if chrome {
+		hint := a.activeToast()
+		if hint == "" {
+			hint = v.Hint()
+		}
+		if hint != "" {
+			fb.HLine(0, hintRow*LineH-1, Width, true)
+			fb.Text(1, hintRow*LineH, Truncate(hint, Cols-1))
+		}
 	}
 }
+
+// Chromeless is implemented by a view that draws the entire panel itself,
+// title bar and hint line included or deliberately omitted.
+type Chromeless interface{ Chromeless() bool }
 
 // --- scrolling list ---------------------------------------------------------
 

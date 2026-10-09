@@ -243,6 +243,14 @@ func (v *FirstRunView) Render(fb *Framebuffer, _ *App) {
 		v.page = len(cards) - 1
 	}
 	c := cards[v.page]
+
+	// A card carrying a secret is drawn as a QR code with the text beside
+	// it, using the whole panel. See renderQRCard.
+	if c.pass != "" {
+		v.renderQRCard(fb, c, len(cards))
+		return
+	}
+
 	y := bodyPxTop
 	fb.Text(0, y, Truncate(c.head, Cols))
 	y += LineH
@@ -274,6 +282,104 @@ func (v *FirstRunView) Render(fb *Framebuffer, _ *App) {
 			y += LineH
 		}
 	}
+}
+
+// Chromeless reports that the secret cards draw the whole panel themselves.
+// Only those: the opening card and the "erased" summary are ordinary screens
+// and keep the title bar and the hint line.
+func (v *FirstRunView) Chromeless() bool {
+	if v.done {
+		return false
+	}
+	cards := v.cards()
+	if v.page < 0 || v.page >= len(cards) {
+		return false
+	}
+	return cards[v.page].pass != ""
+}
+
+// renderQRCard draws a secret as a QR code with its text beside it.
+//
+// The arithmetic is forced and worth stating, because it is why this screen
+// looks the way it does. A 20-character password needs a version 2 symbol,
+// 25 modules square. Two pixels per module is the smallest that decodes
+// reliably off a 1.3 inch panel, and the quiet zone cannot be dropped -- at
+// zero quiet modules nothing decodes at all, measured, not assumed. That is
+// (25 + 2*2) * 2 = 58 pixels, on a panel 64 pixels high. The title bar and
+// hint line together are 16 of those, so they go: hence Chromeless.
+//
+// What is left is 128-58-2 = 68 pixels of width, eleven characters per line.
+// The password is split across two of them rather than truncated, because a
+// password you can only see half of is no better than one you cannot see.
+func (v *FirstRunView) renderQRCard(fb *Framebuffer, c credCard, total int) {
+	const (
+		scale = 2
+		quiet = 2
+		gap   = 3
+	)
+	textX, dim := 0, 0
+	if q, err := NewQR([]byte(c.pass)); err == nil {
+		dim = QRPixels(q, scale, quiet)
+		if dim <= Height && dim+gap+6*4 <= Width {
+			fb.DrawQR(0, (Height-dim)/2, q, scale, quiet)
+			textX = dim + gap
+		} else {
+			dim = 0 // too big to be useful; fall through to text only
+		}
+	}
+	// A QR that could not be built is not a reason to show nothing: the
+	// password still has to reach the operator, so the text column simply
+	// takes the whole width instead.
+	cols := (Width - textX) / CharW
+
+	// Text sits on exact LineH boundaries. Not cosmetic: ReadBack scans rows
+	// at multiples of LineH, and it is what serves /panel.txt to the web
+	// console and what the tests read. Drawing this column at y=2 looked
+	// perfect on the glass and rendered a COMPLETELY EMPTY card to both --
+	// the password was on the panel and nowhere else.
+	y := 0
+	line := func(sv string, invert bool) {
+		if y+GlyphH > Height {
+			return
+		}
+		fb.Text(textX, y, Truncate(sv, cols))
+		if invert {
+			fb.Invert(textX, y-1, Width-textX, LineH)
+		}
+		y += LineH
+	}
+
+	line(c.head, false)
+	if c.user != "" {
+		line(c.user, false)
+	}
+	// The secret itself, wrapped rather than cut, and inverted so it is
+	// obvious where it starts and stops.
+	for _, part := range chunkString(c.pass, cols) {
+		line(part, true)
+	}
+	// The page counter and the erase key, which the hint line would normally
+	// carry. Pushed to the bottom of the column so they do not crowd the
+	// password.
+	y = Height - 2*LineH
+	line(fmt.Sprintf("%d/%d", v.page+1, total), false)
+	line("KEY1 erase", false)
+}
+
+// chunkString splits s into runs of at most n characters.
+func chunkString(s string, n int) []string {
+	if n <= 0 {
+		return []string{s}
+	}
+	var out []string
+	for len(s) > n {
+		out = append(out, s[:n])
+		s = s[n:]
+	}
+	if s != "" {
+		out = append(out, s)
+	}
+	return out
 }
 
 func (v *FirstRunView) doneLines() []string {

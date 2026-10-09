@@ -150,7 +150,8 @@ func TestFirstRunShowsEveryCredential(t *testing.T) {
 
 	seen := map[string]bool{}
 	for i := 0; i < 6; i++ {
-		s := renderText(app)
+		// Flattened: the secret cards wrap their password beside the QR code.
+		s := renderFlat(app)
 		for _, want := range []string{"SSHPASS87654321", "WEBPASS12345678", "p4wnp1", "admin"} {
 			if strings.Contains(s, want) {
 				seen[want] = true
@@ -180,7 +181,11 @@ func TestFirstRunIsHonestAfterErasing(t *testing.T) {
 	app.Handle(BtnConfirm)
 
 	s := renderText(app)
-	if strings.Contains(s, "WEBPASS12345678") {
+	// Flattened for the ABSENCE check specifically: a password still on
+	// screen but wrapped across two lines would slip past a plain substring
+	// search, and "we erased it but it is still displayed" is the one thing
+	// this test exists to catch.
+	if strings.Contains(renderFlat(app), "WEBPASS12345678") {
 		t.Errorf("the password is still on screen after the erase:\n%s", s)
 	}
 	if !strings.Contains(s, "Erased") {
@@ -219,7 +224,10 @@ func TestEveryCredentialTheEraseDestroysIsShownFirst(t *testing.T) {
 	app.Push(NewFirstRunView(c))
 	seen := map[string]bool{}
 	for i := 0; i < 6; i++ {
-		s := renderText(app)
+		// Flattened: beside the QR code the text column is eleven characters
+		// wide, so these passwords wrap onto a second line. Still shown in
+		// full, which is what "KEY1 erases it, so show it first" requires.
+		s := renderFlat(app)
 		for _, want := range []string{"WEBPASSWORD1234", "WIFIKEY123456789abc", "WiFi"} {
 			if strings.Contains(s, want) {
 				seen[want] = true
@@ -252,7 +260,10 @@ func TestHandoffLoadsWithAnySingleCredential(t *testing.T) {
 			app.Push(NewFirstRunView(c))
 			found := false
 			for i := 0; i < 5 && !found; i++ {
-				if strings.Contains(renderText(app), tc.want) {
+				// renderFlat, not renderText: beside the QR code the
+				// column is eleven characters wide, so these passwords
+				// wrap. Still shown in full, just not on one line.
+				if strings.Contains(renderFlat(app), tc.want) {
 					found = true
 				}
 				app.Handle(BtnDown)
