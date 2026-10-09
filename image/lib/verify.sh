@@ -40,8 +40,29 @@ fi
 ok "MBR signature present"
 
 LOOP="$(losetup --find --show --partscan "$IMG")"
-[ -b "${LOOP}p1" ] || die "partition 1 (boot) missing"
-[ -b "${LOOP}p2" ] || die "partition 2 (root) missing"
+
+# WAIT for the partition nodes. --partscan asks the kernel to read the
+# partition table, but ${LOOP}p1 and ${LOOP}p2 are created by UDEV, and that
+# happens asynchronously. Testing for them on the next line is a race.
+#
+# It lost that race on a CI runner building four images at once: a perfectly
+# good armhf/oled image was rejected with "partition 1 (boot) missing" while
+# the other three variants passed. The image was fine. The check was early.
+#
+# A gate that fails good artifacts is not merely annoying, it is corrosive:
+# it teaches everyone to re-run until green, and that is exactly the habit
+# that waves a real failure through. So this waits up to ten seconds and
+# only then calls it missing -- which is still a hard failure, because an
+# image with no partition table really must not ship.
+if command -v udevadm >/dev/null 2>&1; then
+    udevadm settle --timeout=10 >/dev/null 2>&1 || true
+fi
+for _ in $(seq 1 50); do
+    [ -b "${LOOP}p1" ] && [ -b "${LOOP}p2" ] && break
+    sleep 0.2
+done
+[ -b "${LOOP}p1" ] || die "partition 1 (boot) missing after waiting 10s"
+[ -b "${LOOP}p2" ] || die "partition 2 (root) missing after waiting 10s"
 ok "two partitions present"
 
 # The partition must not claim space past the end of the file -- that is what a
