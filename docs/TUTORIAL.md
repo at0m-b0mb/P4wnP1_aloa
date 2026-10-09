@@ -7,8 +7,7 @@ pentesting, red teaming and physical engagements ... or into "A Little Offensive
 
 The latest image could be found under release tab.
 
-The easiest way to access a fresh P4wnP1 A.L.O.A. installation is to use the web client via the spawned WiFi (the PSK
-is `MaMe82-P4wnP1`, the URL `http://172.24.0.1:8000`) or SSH (default password `toor`).
+The easiest way to reach a freshly flashed device is the USB ethernet link it brings up at **172.16.0.1:8000**. The WiFi access point works too, but its key is generated per device at first boot -- read it off the OLED panel (as a scan-to-join QR code) or from `p4wnp1-credentials.txt` on the boot partition. **The old shared PSK `MaMe82-P4wnP1` is gone:** the service refuses to broadcast on any key published in this repository and generates a per-device one instead.
 
 ## 1. Features
 
@@ -168,7 +167,9 @@ The default configuration of P4wnP1's (unmodified image) meets these requirement
 - P4wnP1 could already be accessed remotely, using one of the following methods:
 	- WiFi
 	  - the Access Point name should be obvious
-	  - the password is `MaMe82-P4wnP1`
+	  - the key is generated per device at first boot, NOT `MaMe82-P4wnP1`
+	    any more -- the service refuses to broadcast on a key published in
+	    this repository. Read it off the panel or from the boot partition.
 	  - the IP of P4wnP1 is `172.24.0.1`
 	- USB Ethernet
 	  - the IP of P4wnP1 is `172.16.0.1`

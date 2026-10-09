@@ -5,7 +5,7 @@ PATH := /usr/local/go/bin:$(PATH)
         build-arm64 build-service-arm64 build-cli-arm64 build-hashpw-arm64 \
         image image-plain image-oled image-armhf image-arm64 contrast smoke feature-test access-control check-quoting oled-sim oled-shots verify check-js check-rpc check-render mock dep install installkali remove lint test
 
-all: compile
+all: build-armv6
 
 help:
 	@echo "P4wnP1 A.L.O.A. -- Makefile targets"
@@ -237,54 +237,6 @@ lint:
 	./tools/check-render.sh
 
 # make dep runs without sudo
-dep:
-	# sudo apt-get -y install git screen hostapd autossh bluez bluez-tools bridge-utils policykit-1 genisoimage iodine haveged
-	# sudo apt-get -y install tcpdump
-	# sudo apt-get -y install python-pip python-dev
-
-	# before installing dnsmasq, the nameserver from /etc/resolv.conf should be saved
-	# to restore after install (gets overwritten by dnsmasq package)
-	# cp /etc/resolv.conf /tmp/backup_resolv.conf
-	# sudo apt-get -y install dnsmasq
-	# sudo /bin/bash -c 'cat /tmp/backup_resolv.conf > /etc/resolv.conf'
-
-	# python dependencies for HIDbackdoor
-	# sudo pip install pycrypto # already present on stretch
-	# sudo pip install pydispatcher
-
-	# install go
-	# wget https://storage.googleapis.com/golang/go1.10.linux-armv6l.tar.gz
-	# sudo tar -C /usr/local -xzf go1.10.linux-armv6l.tar.gz
-
-	export PATH="$$PATH:/usr/local/go/bin"
-
-	# put into ~/.profile
-	# ToDo: check if already present
-	# echo "export PATH=\$$PATH:/usr/local/go/bin" >> ~/.profile
-	# sudo bash -c 'echo export PATH=\$$PATH:/usr/local/go/bin >> ~/.profile'
-
-	# No gopherjs. The web client it compiled is gone; the console is plain
-	# JavaScript served as-is from dist/www/app/.
-
-	# we don't need protoc + protoc-grpc-web, because the proto file is shipped pre-compiled
-
-	# go dependencies for webapp (without my own)
-	#go get google.golang.org/grpc
-	#go get -u github.com/improbable-eng/grpc-web/go/grpcweb
-	#go get -u github.com/gorilla/websocket
-
-# This target probably needs to be run at least once to get the dependencies on
-# the go path. But after that, you probably actually want to run:
-# $ cd build_support && ./build.sh && cd ..
-# instead, to build with the right GOOS and GOARCH settings.
-compile:
-	go get github.com/mame82/P4wnP1_aloa/... # partially downloads again, but we need the library packages in go path to build
-	# <--- second compilation, maybe -d flag on go get above is better
-	env GOBIN=$(CURDIR)/build go install ./cmd/... # compile all main packages to the build folder
-
-	# No web app build step. There is nothing to compile: the console is
-	# hand-written files under dist/www/app/, copied as-is.
-
 installkali:
 	#apt-get -y install git screen hostapd autossh bluez bluez-tools bridge-utils policykit-1 genisoimage iodine haveged
 	#apt-get -y install tcpdump

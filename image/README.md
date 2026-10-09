@@ -58,7 +58,9 @@ build tags that turned out to be incidental rather than a real dependency.
 --no-shrink          skip shrinking the finished image
 --no-compress        leave a raw .img instead of .img.xz
 --ssh-user NAME      operator account name                    (default p4wnp1)
---ssh-pass PASS      operator initial password                (default p4wnp1)
+--ssh-pass PASS      operator password baked into the image.
+                     NOT RECOMMENDED: identical on every device built
+                     from it. Omit for a per-device password at first boot.
 --wifi-country CC    regulatory domain                        (default US)
 --pios-date DATE     Raspberry Pi OS release to base on       (default 2026-09-15)
 ```
@@ -67,9 +69,18 @@ build tags that turned out to be incidental rather than a real dependency.
 
 Nothing shared between devices survives first boot:
 
-- **SSH**: the account is created with a known password and immediately
-  expired (`chage -d 0`), so the first login is forced to set a new one. Use
-  `--ssh-pass` to set a per-unit password at build time instead.
+- **SSH**: the account is created **locked**. First boot generates a password
+  for that one device and writes it to `p4wnp1-credentials.txt` on the boot
+  partition (and `/root/INITIAL_CREDENTIALS.txt`); the OLED panel shows it as
+  a QR code if a HAT is fitted. If you left an `authorized_keys` on the boot
+  partition, or set a user in Raspberry Pi Imager, first boot adopts that and
+  generates nothing.
+
+  `--ssh-pass` bakes one password into the image instead. It is the shared-
+  password escape hatch, not a per-unit mechanism: every device flashed from
+  that image has the same one, and the build prints two warnings when you use
+  it. `chage -d 0` was deliberately abandoned -- forcing a change at first
+  login only means whoever logs in first chooses the new password.
 - **SSH host keys**: deleted from the image. If they shipped baked in, anyone
   who downloaded the image could impersonate every device built from it.
   `p4wnp1-firstboot.service` regenerates them per device.

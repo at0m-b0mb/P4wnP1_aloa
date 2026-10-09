@@ -140,11 +140,6 @@ func GetDefaultDHCPConfigWiFi() (settings *pb.DHCPServerSettings) {
 	return
 }
 
-func GetDefaultLEDSettings() (res *pb.LEDSettings) {
-	return &pb.LEDSettings{
-		BlinkCount: 254,
-	}
-}
 
 // Note: If no single function is enabled, the gadget mustn't be enabled itself in order to be deployable
 func GetDefaultGadgetSettings() (res pb.GadgetSettings) {

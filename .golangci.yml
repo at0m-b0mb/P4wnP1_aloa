@@ -6,10 +6,7 @@
 
 run:
   timeout: 5m
-  # The web_client/ package is GopherJS-tagged and won't compile under normal
-  # `go build`, which confuses some linters. Skip it for now.
   skip-dirs:
-    - web_client
     - common_web
 
 linters:

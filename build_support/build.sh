@@ -9,10 +9,11 @@ env GOOS=linux GOARCH=arm GOARM=6 go build -o build/P4wnP1_cli cmd/P4wnP1_cli/P4
 env GOOS=linux GOARCH=arm GOARM=6 go build -o build/p4wnp1-hashpw ./cmd/p4wnp1-hashpw
 env GOOS=linux GOARCH=arm GOARM=6 go build -o build/p4wnp1-oled ./cmd/p4wnp1-oled
 
-# No gopherjs step. The console is hand-written JavaScript served straight
-# from dist/www/app/ -- there is nothing to compile. The original client's
-# source is still in web_client/ for reference, but it no longer builds and
-# nothing ships from it.
+# No web-app build step. The console is hand-written JavaScript served
+# straight from dist/www/app/ -- there is nothing to compile. The original
+# GopherJS client that used to be compiled here has been deleted: it could
+# not work (it predates the auth layer and never sent a bearer token) and
+# nothing built it.
 
 echo "...Results stored in ./build directory"
 echo

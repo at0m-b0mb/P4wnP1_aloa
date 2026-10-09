@@ -1,3 +1,0 @@
-- input validation
-- additional modes for WiFi client connections (providing a custom wpa_supplicant.conf -> interferes with failover top AP mode currently)
-

@@ -100,10 +100,15 @@ sudo cat /root/INITIAL_CREDENTIALS.txt     # console password and WiFi PSK for T
 
 Open **<http://172.16.0.1:8000>**.
 
-Nothing is shared between devices: there is no password in the image at all, host keys are
-generated per device, and the console password and WiFi PSK are random per device. That is why
-the first login has to come over USB or serial — the WiFi key is not knowable until you have
-read it off the device.
+Almost nothing is shared between devices: there is no password in the image at all, host keys
+are generated per device, and the console password and WiFi PSK are random per device. That is
+why the first login has to come over USB or serial — the WiFi key is not knowable until you
+have read it off the device.
+
+**One exception, and it is a real one:** the Bluetooth pairing PIN is `1337` on every image
+until you change it. It is a compile-time constant, not a generated value, so it is as public
+as this repository. Change it under **Radio → Bluetooth pairing** in the console, or disable
+Bluetooth with `systemctl disable --now bluetooth` if you are not using it.
 
 Earlier images shipped `p4wnp1:p4wnp1`. If you flashed one of those, change that password: the
 forced change at first login did not protect it, because whoever logs in first is the one who
@@ -473,10 +478,12 @@ This is a tool for attacking systems, which makes its own security worth stating
   flashed devices, and the access point refuses to broadcast on a PSK published in this
   repository. The image ships with **no usable account at all** -- every password is generated
   on the device at first boot, and the image build refuses to publish an image in which any
-  account has a password. Set your own at flash time (Raspberry Pi Imager's "Set username and
-  password") and the device uses that; otherwise first boot writes a per-device password to
-  `p4wnp1-credentials.txt` on the boot partition, where you can read it by putting the card back
-  in your laptop. Log in, change it, delete the file -- the file says so itself.
+  account has a password. Three ways in, in the order first boot tries them: drop an
+  `authorized_keys` on the boot partition before flashing and it adopts your key and generates
+  no password at all; set a user in Raspberry Pi Imager and it leaves that account alone;
+  otherwise it writes a per-device password to `p4wnp1-credentials.txt` on the boot partition,
+  which you read by putting the card back in your laptop. Log in, change it, delete the file --
+  the file says so itself.
 - **Path handling is allowlisted**, and reads are bounds-checked. The allowlist
   resolves symlinks rather than only cleaning the string, and the file opens use
   `O_NOFOLLOW`. Both are needed: before this, a local user could leave a symlink
