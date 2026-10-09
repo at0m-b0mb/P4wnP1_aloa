@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // The boot splash.
@@ -310,6 +311,47 @@ func DrawSetupWarning(fb *Framebuffer, detail string, progress float64) {
 		fb.TextCentered(48, Truncate(detail, Cols))
 	}
 	drawProgress(fb, 14, 57, Width-28, 6, progress)
+}
+
+// FormatElapsed renders a duration for the setup screen as m:ss.
+//
+// It used to print raw seconds, which reads fine for the first minute and
+// then becomes "187s" -- a number an operator has to stop and divide before
+// it means anything, on the one screen where they are already wondering
+// whether to pull the plug.
+func FormatElapsed(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	s := int(d.Seconds())
+	return fmt.Sprintf("%d:%02d", s/60, s%60)
+}
+
+// SetupDetail is the line under DO NOT POWER OFF.
+//
+// Two states, and the difference between them is the point. While setup is
+// within its expected time it says so, which answers "is this normal?"
+// without the operator having to guess from a number. Once it runs over, it
+// SAYS it has run over.
+//
+// That second case is the one that matters. The progress bar is elapsed time
+// against a typical boot, not real progress -- there is nothing to measure --
+// and it is clamped just short of full so it never claims to have finished.
+// The effect was that an overrunning setup and a hung one looked identical:
+// bar nearly full, number climbing. Someone watching that has no way to tell
+// patience from a dead device, and the thing they do next is pull the power,
+// which is exactly what this screen exists to prevent. Saying "still working"
+// is not reassurance for its own sake -- the LED is the corroborating signal,
+// and the text points at it.
+func SetupDetail(elapsed, typical time.Duration) string {
+	if typical > 0 && elapsed > typical {
+		return FormatElapsed(elapsed) + " - still working"
+	}
+	mins := int((typical + 30*time.Second) / time.Minute)
+	if mins < 1 {
+		mins = 1
+	}
+	return fmt.Sprintf("%s of ~%d min", FormatElapsed(elapsed), mins)
 }
 
 // DrawSetupDone is the handover: setup finished, the device is safe to unplug

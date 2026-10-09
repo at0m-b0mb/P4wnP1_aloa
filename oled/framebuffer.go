@@ -154,6 +154,19 @@ func (f *Framebuffer) TextCentered(y int, s string) {
 	if x < 0 {
 		x = 0
 	}
+	// Snap to the character grid.
+	//
+	// ReadBack scans cells at multiples of CharW, and it is what serves
+	// /panel.txt to the web console as well as what the tests read. Centred
+	// text landing on an odd pixel put every glyph half-way across two
+	// cells, and the scanner simply dropped the ones it could not resolve:
+	// "1:30 of ~4 min" came back as ":30 of ~4 min", silently missing its
+	// first character. The panel looked perfect; the mirror was wrong.
+	//
+	// The cost is up to five pixels of centring, which nobody can see, and
+	// it applies to every centred string on the device rather than only the
+	// one that exposed it.
+	x -= x % CharW
 	f.Text(x, y, s)
 }
 

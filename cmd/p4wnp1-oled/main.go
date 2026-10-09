@@ -224,11 +224,11 @@ func waitForFirstBoot(disp oled.Display, fb *oled.Framebuffer, flag string) {
 		if p > 0.97 {
 			p = 0.97 // never show full while it is still going
 		}
-		oled.DrawSetupWarning(fb, fmt.Sprintf("%ds elapsed", int(el.Seconds())), p)
+		oled.DrawSetupWarning(fb, oled.SetupDetail(el, typical), p)
 		_ = disp.Show(fb)
 		time.Sleep(time.Second)
 	}
-	oled.DrawSetupDone(fb, fmt.Sprintf("took %ds", int(time.Since(start).Seconds())))
+	oled.DrawSetupDone(fb, "took "+oled.FormatElapsed(time.Since(start)))
 	_ = disp.Show(fb)
 	time.Sleep(3 * time.Second)
 }
