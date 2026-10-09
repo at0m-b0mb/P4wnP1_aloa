@@ -443,3 +443,74 @@ func TestPayloadsExplainTheOptInKeyboard(t *testing.T) {
 		t.Errorf("a payload did not start with a keyboard deployed: %v", c2.Calls)
 	}
 }
+
+// KEY3 must land you somewhere you can predict without looking.
+//
+// Home used to pop the stack and leave the root menu's selection wherever it
+// was, so "press KEY3 then down twice to reach Cable" was a guess rather
+// than an instruction. It also made the panel unscriptable: driving it over
+// the mirror, KEY3 followed by two downs reached Net configs instead of
+// Cable, because Home had preserved a selection I could not see.
+func TestHomeLandsOnAKnownState(t *testing.T) {
+	app := NewApp(NewFakeClient(), NewRoot())
+
+	// Wander: down the root menu, into a screen, around inside it.
+	for i := 0; i < 5; i++ {
+		app.Handle(BtnDown)
+	}
+	app.Handle(BtnEnter)
+	for i := 0; i < 3; i++ {
+		app.Handle(BtnDown)
+	}
+	app.Handle(BtnHome)
+
+	if app.Depth() != 1 {
+		t.Fatalf("KEY3 left the stack at depth %d", app.Depth())
+	}
+	m, ok := app.Top().(*Menu)
+	if !ok {
+		t.Fatalf("the root is %T", app.Top())
+	}
+	if m.cur.sel != 0 || m.cur.first != 0 {
+		t.Errorf("KEY3 left the selection at row %d (window from %d), want the top", m.cur.sel, m.cur.first)
+	}
+
+	// The property that matters, stated the way an operator would: from
+	// anywhere, KEY3 then N downs reaches the Nth entry, every time.
+	wantRow := rowOf(NewRoot(), "Cable (USB)")
+	for _, wander := range [][]Button{
+		{BtnDown, BtnDown, BtnDown, BtnDown, BtnDown, BtnDown, BtnDown},
+		{BtnUp, BtnUp},
+		{BtnDown, BtnEnter, BtnDown, BtnBack, BtnDown},
+	} {
+		for _, b := range wander {
+			app.Handle(b)
+		}
+		app.Handle(BtnHome)
+		for i := 0; i < wantRow; i++ {
+			app.Handle(BtnDown)
+		}
+		app.Handle(BtnEnter)
+		if _, ok := app.Top().(*USBView); !ok {
+			t.Errorf("after KEY3 + %d downs + enter, landed on %T, want the Cable screen", wantRow, app.Top())
+		}
+		app.Handle(BtnHome)
+	}
+}
+
+// And at a root that is already tidy, KEY3 must still answer -- otherwise it
+// is the one press most likely to look like a dead key.
+func TestHomeStillSpeaksAtATidyRoot(t *testing.T) {
+	app := NewApp(NewFakeClient(), NewRoot())
+	app.Handle(BtnHome) // already at the top, nothing to do
+	if s := renderText(app); !strings.Contains(s, "already home") {
+		t.Errorf("KEY3 at a tidy root said nothing:\n%s", s)
+	}
+	// But with the selection moved, it reports doing something.
+	app.Handle(BtnDown)
+	app.Handle(BtnDown)
+	app.Handle(BtnHome)
+	if s := renderText(app); !strings.Contains(s, "home") {
+		t.Errorf("KEY3 with the cursor moved said nothing:\n%s", s)
+	}
+}

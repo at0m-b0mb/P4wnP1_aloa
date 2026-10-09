@@ -817,8 +817,10 @@ func NewSystemMenu() *Menu {
 			return NewTextView("About", "P4wnP1 A.L.O.A. on-device console. "+
 				"Up/down move, right or press enters, left goes back. "+
 				"KEY1 is the action named on the bottom line, KEY2 refreshes, "+
-				"KEY3 returns to the root. Every key always answers: if it has "+
-				"nothing to do on a screen it says so. "+
+				"KEY3 returns to the top of the root menu -- always the same "+
+				"place, so KEY3 then N downs reaches the Nth entry every time. "+
+				"Every key always answers: if it has nothing to do on a screen "+
+				"it says so. "+
 				"The HAT uses GPIO 5,6,13,16,19,20,21 for its controls and "+
 				"24,25 for the panel -- a reflex set that drives any of those "+
 				"as an output will fight this screen. "+

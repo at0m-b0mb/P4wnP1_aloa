@@ -39,6 +39,11 @@ type View interface {
 	Hint() string
 }
 
+// Resettable is implemented by a view whose selection should return to the
+// top when the operator asks to go home. ResetCursor reports whether it
+// actually moved, so the caller can tell a real change from a no-op.
+type Resettable interface{ ResetCursor() bool }
+
 // Refresher is implemented by views whose content comes from the device, so
 // the refresh key and the periodic poll reach them without the App knowing
 // what any particular screen holds.
@@ -107,9 +112,24 @@ func (a *App) Pop() {
 	}
 }
 
+// Home returns to a KNOWN STATE, not merely to the root screen.
+//
+// It used to pop the stack and leave the root menu's selection wherever it
+// happened to be, so KEY3 from deep in the tree landed you on the root with
+// the cursor halfway down it. On a device with eight unlabelled controls the
+// single reliable escape should put you somewhere you can predict without
+// looking -- and it is the difference between "press KEY3 then down twice to
+// reach Cable" being a usable instruction and being a guess.
+//
+// It also makes the panel scriptable. Driving it over the mirror, I pressed
+// KEY3 and then two downs expecting Cable, and landed on Net configs,
+// because Home had preserved a selection I could not see.
 func (a *App) Home() {
 	if len(a.stack) > 1 {
 		a.stack = a.stack[:1]
+		a.changes++
+	}
+	if r, ok := a.stack[0].(Resettable); ok && r.ResetCursor() {
 		a.changes++
 	}
 }
@@ -176,13 +196,16 @@ func (a *App) Handle(b Button) {
 		a.Refresh()
 		a.Toast("refreshed")
 	case BtnHome:
-		if a.Depth() > 1 {
-			a.Home()
+		// Home from here too: at the root with the selection partway down,
+		// KEY3 still has work to do -- it puts the cursor back on the first
+		// row. Only when there is genuinely nothing left to change does it
+		// say so, because pressing KEY3 at a tidy root is the single most
+		// likely way to conclude the key is dead.
+		before := a.changes
+		a.Home()
+		if a.changes != before {
 			a.Toast("home")
 		} else {
-			// Saying so matters: pressing KEY3 at the root is the single most
-			// likely way to conclude the key is dead, because the correct
-			// behaviour there is to change nothing.
 			a.Toast("already home")
 		}
 	case BtnAction:
@@ -350,6 +373,15 @@ func NewMenu(title string, items []MenuItem) *Menu {
 	m := &Menu{title: title, items: items}
 	m.cur.setLen(len(items))
 	return m
+}
+
+// ResetCursor puts the selection back on the first row.
+func (m *Menu) ResetCursor() bool {
+	if m.cur.sel == 0 && m.cur.first == 0 {
+		return false
+	}
+	m.cur.sel, m.cur.first = 0, 0
+	return true
 }
 
 func (m *Menu) Title() string { return m.title }

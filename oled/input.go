@@ -48,7 +48,8 @@ func (b Button) String() string {
 //	left          back
 //	KEY1          context action (varies per screen, always labelled)
 //	KEY2          refresh
-//	KEY3          jump home
+//	KEY3          jump to the TOP of the root menu -- a known state, so
+//	              "KEY3 then two downs" is an instruction, not a guess
 //
 // Left-is-back rather than a dedicated key, because on a 5-way stick the
 // horizontal axis is the one your thumb finds without looking, and this device
