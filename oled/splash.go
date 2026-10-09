@@ -272,3 +272,72 @@ func LoadBrand(path string) Brand {
 	}
 	return b
 }
+
+// FirstBootFlag is the file first boot creates when it has finished. Its
+// ABSENCE means setup is still running.
+const FirstBootFlag = "/var/lib/p4wnp1/firstboot.done"
+
+// DrawSetupWarning is the screen shown while first boot is still working.
+//
+// First boot on a Pi Zero W takes minutes: it resizes the root filesystem,
+// generates three SSH host keys on a single 1GHz core, bootstraps the web
+// admin and adopts any key left on the card. For all of that the device looks
+// idle -- no network yet, nothing on the panel but a splash -- and the
+// obvious thing for an operator to do with an appliance that appears to have
+// hung is pull the plug.
+//
+// Pulling the plug in the middle of that is the one genuinely destructive
+// thing available: a half-written auth.json, host keys that exist but were
+// never installed, a resize interrupted partway. So the panel says so, in
+// the largest type the screen has, for as long as it is true.
+func DrawSetupWarning(fb *Framebuffer, detail string, progress float64) {
+	fb.Clear()
+
+	// Every 1x line sits on an exact LineH boundary. Not cosmetic: the
+	// framebuffer reader that the tests use scans those rows, so text drawn
+	// one pixel off is text no test can see. The first version put the
+	// heading at y=1 and the detail at y=46, and both read back as noise --
+	// the screen looked right and was unverifiable.
+	fb.Text(2, 0, Truncate("SETTING UP", Cols-1))
+	fb.Invert(0, 0, Width, LineH+1)
+
+	// The one line that matters, at double height so it cannot be mistaken
+	// for ordinary status text.
+	fb.TextScaledCentered(14, 2, "DO NOT")
+	fb.TextScaledCentered(30, 2, "POWER OFF")
+
+	if detail != "" {
+		fb.TextCentered(48, Truncate(detail, Cols))
+	}
+	drawProgress(fb, 14, 57, Width-28, 6, progress)
+}
+
+// DrawSetupDone is the handover: setup finished, the device is safe to unplug
+// from here on. Shown briefly so an operator who looked away still learns
+// that the dangerous window has closed.
+func DrawSetupDone(fb *Framebuffer, detail string) {
+	fb.Clear()
+	fb.Text(2, 0, Truncate("SETUP COMPLETE", Cols-1))
+	fb.Invert(0, 0, Width, LineH+1)
+	fb.TextScaledCentered(16, 2, "READY")
+	fb.HLine(12, 37, Width-24, true)
+	if detail != "" {
+		fb.TextCentered(40, Truncate(detail, Cols))
+	}
+	fb.TextCentered(56, "Safe to power off")
+}
+
+// FirstBootRunning reports whether first boot is still working, by the
+// absence of its completion flag.
+//
+// Deliberately a FILE check rather than asking systemd. The daemon would
+// otherwise need dbus access to query a unit, and the flag is the same thing
+// the firstboot script itself gates on -- so the panel and the script cannot
+// disagree about whether setup has finished.
+func FirstBootRunning(flagPath string) bool {
+	if flagPath == "" {
+		return false
+	}
+	_, err := os.Stat(flagPath)
+	return os.IsNotExist(err)
+}

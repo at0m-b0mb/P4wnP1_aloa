@@ -39,6 +39,7 @@ func main() {
 		brand    = flag.String("brand", "", "operator name on the boot splash (default: read "+oled.BrandFile+")")
 		tagline  = flag.String("tagline", "", "second line under the operator name")
 		firstRun = flag.String("firstrun-creds", oled.FirstRunFile, "first-boot credentials handoff")
+		bootFlag = flag.String("firstboot-flag", oled.FirstBootFlag, "file first boot creates when it is done")
 		mirror   = flag.String("mirror-socket", oled.MirrorSocket, "serve the panel here; empty to disable")
 	)
 	flag.Parse()
@@ -98,6 +99,19 @@ func main() {
 	_ = disp.Show(fb)
 
 	client := oled.NewAPIClient(*baseURL, *token)
+
+	// FIRST BOOT: hold the panel on a warning until setup finishes.
+	//
+	// Setup takes minutes on a Pi Zero W -- resize, three SSH host keys on
+	// one 1GHz core, the web admin, the key off the card -- and for all of
+	// it the device looks idle. Pulling the plug there is the one genuinely
+	// destructive thing on offer: a half-written auth.json, host keys that
+	// were generated but never installed, an interrupted resize. So say so,
+	// for exactly as long as it is true.
+	if oled.FirstBootRunning(*bootFlag) {
+		log.Printf("first boot still running; holding the panel on the warning")
+		waitForFirstBoot(disp, fb, *bootFlag)
+	}
 
 	// Wait for the service. The daemon usually starts alongside it, so a
 	// first call that fails means "not up yet", not "broken" -- and a splash
@@ -174,6 +188,34 @@ func main() {
 var panel = &oled.PanelSource{}
 
 func publish(app *oled.App, fb *oled.Framebuffer) { panel.Publish(app, fb) }
+
+// waitForFirstBoot holds the DO NOT POWER OFF screen until the flag appears.
+//
+// There is no upper bound on purpose. A resize on a slow card can take a
+// while, and a timeout here would replace a true warning with a false
+// all-clear -- which is worse than making someone wait. If setup really is
+// wedged the operator still has every other signal: the LED, the journal,
+// and the fact that the panel is plainly still saying "SETTING UP".
+func waitForFirstBoot(disp oled.Display, fb *oled.Framebuffer, flag string) {
+	// The bar is elapsed time against a typical first boot, not real
+	// progress -- there is nothing to measure. It is there so the screen is
+	// visibly alive; a frozen panel is what makes people pull the plug.
+	const typical = 4 * time.Minute
+	start := time.Now()
+	for oled.FirstBootRunning(flag) {
+		el := time.Since(start)
+		p := float64(el) / float64(typical)
+		if p > 0.97 {
+			p = 0.97 // never show full while it is still going
+		}
+		oled.DrawSetupWarning(fb, fmt.Sprintf("%ds elapsed", int(el.Seconds())), p)
+		_ = disp.Show(fb)
+		time.Sleep(time.Second)
+	}
+	oled.DrawSetupDone(fb, fmt.Sprintf("took %ds", int(time.Since(start).Seconds())))
+	_ = disp.Show(fb)
+	time.Sleep(3 * time.Second)
+}
 
 // waitForService polls until the API answers, animating the splash so the
 // screen is visibly alive rather than apparently frozen.

@@ -84,6 +84,39 @@ Earlier images shipped `p4wnp1:p4wnp1`. If you flashed one of those, change that
 forced change at first login did not protect it, because whoever logs in first is the one who
 answers the prompt.
 
+### First boot takes a few minutes. Do not pull the power.
+
+On a Pi Zero W the first boot after flashing takes **two to five minutes**, and for most of it
+the device looks idle: no network yet, no obvious activity. It is not idle. It is growing the
+root filesystem to fill the card, generating this device's own three SSH host keys on a single
+1&nbsp;GHz core, creating the web console administrator, and adopting any `authorized_keys` you
+left on the boot partition.
+
+Pulling the power in that window is the one genuinely destructive thing available. You can end
+up with a half-written credentials file, host keys that were generated but never installed, or
+an interrupted resize — and the symptoms turn up much later, looking like something else.
+
+So the device tells you, three ways, and you only need one of them:
+
+| | while setting up | when finished |
+|---|---|---|
+| **OLED panel** | `DO NOT POWER OFF` in double-height type, with an elapsed-time bar | `SETUP COMPLETE / READY / Safe to power off` |
+| **Green ACT LED** | steady heartbeat, about four blinks a second | back to ordinary flickering on card access |
+| **The card itself** | `DO-NOT-POWER-OFF.txt` on the boot partition | replaced by `SETUP-COMPLETE.txt` |
+
+The LED and the two files are on **every** image, with or without a screen — a plain build has
+no panel to read, which is exactly when a blinking LED earns its keep.
+
+The file pair is deliberately a pair rather than a flag inside one file. If you ever take a card
+out of a device and find `DO-NOT-POWER-OFF.txt` still on it, that tells you something true and
+useful: **setup never finished on that card**, and it should be reflashed. The completion file
+also records when it finished, and how to reach the device given what you did or did not leave
+on the partition.
+
+Nothing claims success it has not got. If first boot fails partway, the warning file **stays**
+and no completion file is written — checked by reintroducing a mid-script failure and asserting
+exactly that.
+
 ---
 
 ## The OLED screen

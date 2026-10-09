@@ -193,6 +193,7 @@ footer a{color:var(--muted)}
     <nav>
       <a href="#consoles">Consoles</a>
       <a href="#download">Download</a>
+      <a href="#firstboot">First boot</a>
       <a href="#verified">Verified</a>
       <a href="https://github.com/at0m-b0mb/P4wnP1_aloa">GitHub</a>
       <button id="theme" type="button" aria-label="Switch theme">Theme</button>
@@ -327,6 +328,49 @@ sudo cat /root/INITIAL_CREDENTIALS.txt   <span class="c"># console password + Wi
 
     <p class="lead" style="margin-top:22px">
       Then open <code>http://172.16.0.1:8000</code>.
+    </p>
+  </div>
+</section>
+
+<section id="firstboot">
+  <div class="wrap">
+    <p class="eyebrow">After you flash</p>
+    <h2>First boot takes a few minutes. Do not pull the power.</h2>
+    <p class="lead">
+      On a Pi Zero W the first boot takes two to five minutes, and for most of it the device
+      looks idle. It is not: it is growing the filesystem, generating this device&rsquo;s own SSH
+      host keys on a single 1&nbsp;GHz core, creating the console administrator, and adopting any
+      key you left on the card. Pulling the power there is the one genuinely destructive thing
+      on offer &mdash; and the damage shows up later, looking like something else.
+    </p>
+    <div class="grid two">
+      <div class="card">
+        <h3>While it is setting up</h3>
+        <ul class="checks">
+          <li><strong>OLED:</strong> <code>DO NOT POWER OFF</code> in double-height type, with an
+              elapsed-time bar</li>
+          <li><strong>Green ACT LED:</strong> a steady heartbeat, about four blinks a second</li>
+          <li><strong>The card:</strong> <code>DO-NOT-POWER-OFF.txt</code> on the boot
+              partition</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>When it has finished</h3>
+        <ul class="checks">
+          <li><strong>OLED:</strong> <code>SETUP COMPLETE &middot; READY &middot; Safe to power
+              off</code></li>
+          <li><strong>LED:</strong> back to ordinary flickering on card access</li>
+          <li><strong>The card:</strong> <code>SETUP-COMPLETE.txt</code>, with the time it
+              finished and how to reach the device</li>
+        </ul>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:22px">
+      The LED and the files are on <strong>every</strong> image, screen or no screen &mdash; a
+      plain build is exactly when a blinking LED earns its keep. And nothing claims success it
+      has not got: if first boot fails partway the warning file <em>stays</em> and no completion
+      file is written. If you ever pull a card and find <code>DO-NOT-POWER-OFF.txt</code> still
+      on it, that card never finished setting up and should be reflashed.
     </p>
   </div>
 </section>

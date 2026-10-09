@@ -32,6 +32,19 @@
 
 set -euo pipefail
 
+# Whatever happens below -- success, failure, or a signal -- the busy marker
+# and the LED must not be left as they are. A device that finished an hour ago
+# and is still flashing "do not power off" trains people to ignore the signal,
+# which is worse than not having one.
+cleanup_announce() {
+    local rc=$?
+    if [ "${ANNOUNCED:-0}" = "1" ]; then
+        if [ "$rc" -eq 0 ]; then announce_done; else led_setup_done; fi
+    fi
+    return $rc
+}
+trap cleanup_announce EXIT
+
 FLAG_DIR=/var/lib/p4wnp1
 FLAG_FILE="${FLAG_DIR}/firstboot.done"
 CREDS_FILE=/root/INITIAL_CREDENTIALS.txt
@@ -73,10 +86,121 @@ fi
 
 mkdir -p "${FLAG_DIR}"
 
+# --- tell the operator not to pull the plug ---------------------------------
+#
+# First boot takes minutes on a Pi Zero W: resize, three SSH host keys on one
+# 1GHz core, the web admin, the key off the card. For all of it the device
+# looks idle -- no network yet, nothing obvious happening -- and the natural
+# thing to do with an appliance that seems hung is unplug it. That is the one
+# genuinely destructive act available here: a half-written auth.json, host
+# keys generated but never installed, an interrupted resize.
+#
+# A device WITH a panel says so on the panel. This is for every other device,
+# and for anyone who looks at the card afterwards and wonders.
+#
+# Two signals, because neither is enough alone:
+#
+#   the ACT LED   fast heartbeat while setup runs, normal activity after.
+#                 Visible across a room, needs nothing but eyes.
+#   a file on     /boot/firmware/DO-NOT-POWER-OFF.txt exists only while setup
+#   the card      is in progress; SETUP-COMPLETE.txt replaces it at the end.
+#                 Readable from any laptop, and if someone DID pull the plug
+#                 early, the file left behind tells them exactly that.
+BOOT_DIR_EARLY=/boot/firmware
+[ -d "$BOOT_DIR_EARLY" ] || BOOT_DIR_EARLY=/boot
+BUSY_FILE="${BOOT_DIR_EARLY}/DO-NOT-POWER-OFF.txt"
+DONE_FILE="${BOOT_DIR_EARLY}/SETUP-COMPLETE.txt"
+
+# The LED is ACT on most boards and led0 on others. Try both, care about
+# neither failing -- a device with no LED must still boot.
+led_path() {
+    for p in /sys/class/leds/ACT /sys/class/leds/led0 /sys/class/leds/mmc0::; do
+        [ -d "$p" ] && { printf '%s' "$p"; return 0; }
+    done
+    return 1
+}
+led_setup_running() {
+    local l; l=$(led_path) || return 0
+    echo timer > "$l/trigger" 2>/dev/null || return 0
+    echo 120   > "$l/delay_on"  2>/dev/null || true
+    echo 120   > "$l/delay_off" 2>/dev/null || true
+}
+led_setup_done() {
+    local l; l=$(led_path) || return 0
+    # Back to whatever the board normally does with it.
+    echo mmc0 > "$l/trigger" 2>/dev/null || echo none > "$l/trigger" 2>/dev/null || true
+}
+
+announce_busy() {
+    led_setup_running
+    rm -f "$DONE_FILE" 2>/dev/null || true
+    cat > "$BUSY_FILE" 2>/dev/null <<BUSY || true
+P4wnP1 A.L.O.A. -- FIRST BOOT IN PROGRESS. DO NOT POWER THE DEVICE OFF.
+
+While this file exists, the device is still setting itself up:
+
+  * growing the root filesystem to fill the card
+  * generating this device's own SSH host keys
+  * creating the web console administrator
+  * adopting any authorized_keys you left on this partition
+
+On a Raspberry Pi Zero W that takes a few minutes, and for most of it the
+device looks idle. It is not. The green LED is blinking steadily while setup
+runs; it returns to normal card-activity flicker when it is finished.
+
+Pulling the power during this window can leave a half-written credentials
+file, SSH host keys that were generated but never installed, or an
+interrupted filesystem resize.
+
+When setup finishes this file is replaced by SETUP-COMPLETE.txt. If you are
+reading THIS file on a card you have taken out of a device, setup did not
+finish -- reflash it.
+BUSY
+    sync 2>/dev/null || true
+}
+
+announce_done() {
+    led_setup_done
+    rm -f "$BUSY_FILE" 2>/dev/null || true
+    cat > "$DONE_FILE" 2>/dev/null <<DONE || true
+P4wnP1 A.L.O.A. -- first boot completed. Safe to power off.
+
+Finished: $(date -u +'%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo unknown)
+Host:     $(hostname 2>/dev/null || echo unknown)
+
+This device now has its own SSH host keys and its own credentials. Nothing
+here is shared with any other device built from the same image.
+
+  ssh ${OPERATOR_USER:-p4wnp1}@172.16.0.1     (over the USB cable)
+  web http://172.16.0.1:8000
+
+How to reach it depends on what you left on this partition before first boot:
+
+  authorized_keys present  -> the account is reachable by that key and its
+                              password is LOCKED. Nothing secret is on this
+                              card. This is the recommended way.
+  nothing present          -> a password was generated and written next to
+                              this file as p4wnp1-credentials.txt. Read it,
+                              then delete it.
+
+The web console password is NOT on this card. On a device with the OLED HAT
+the panel shows it once and then erases every copy. Otherwise it is in
+/root/INITIAL_CREDENTIALS.txt, readable once you are on the device.
+DONE
+    sync 2>/dev/null || true
+}
+
 if [[ -e "${FLAG_FILE}" ]]; then
     log "flag file ${FLAG_FILE} exists; firstboot already completed, exiting"
     exit 0
 fi
+
+# Past here we are genuinely setting up, so start saying so. ANNOUNCED gates
+# the EXIT trap: an early return above must not clear a marker it never set,
+# or a reboot during someone else's setup would wrongly report completion.
+ANNOUNCED=1
+announce_busy
+log "setup starting -- LED on heartbeat, ${BUSY_FILE} written"
 
 # --- random password generation ---------------------------------------------
 # Prefer openssl, fall back to /dev/urandom + tr. The Pi has haveged enabled
