@@ -850,6 +850,34 @@ async function refreshJobs() {
         h('button.btn.btn-sm', {
           type: 'button',
           onclick: async () => {
+            /* NEVER ask for the result of a job that is still running.
+             *
+             * HIDGetScriptJobResult WAITS on the job and takes the request
+             * context, and the service turns a cancelled request into
+             * job.Cancel(), which interrupts the Otto VM. api.js aborts
+             * every RPC after 20 seconds. So clicking "Result" on a payload
+             * with more than 20 seconds left to run does not read it --
+             * it KILLS it, part-way through typing into the target host,
+             * and then reports "the device did not answer within 20
+             * seconds", blaming the network for our own deadline.
+             *
+             * Same bug the OLED panel had; the panel's gate is in
+             * oled/screens.go (RunningView polls JobRunning and only
+             * collects once the id is gone). This is that gate.
+             *
+             * Re-listing is cheap and returns at once. */
+            const live = await guard(() => Api.rpc('HIDGetRunningScriptJobs'), 'list jobs');
+            if (live && (live.ids || []).includes(id)) {
+              await showDetail({
+                title: 'Job ' + id + ' — still running',
+                body: 'This job has not finished, so its result cannot be read yet.\n\n'
+                    + 'Asking for it would hold a request open on the running script, and '
+                    + 'when that request times out the service cancels the job — stopping '
+                    + 'the payload part-way through typing into the host.\n\n'
+                    + 'Wait for it to leave this list, or press Cancel to stop it deliberately.',
+              });
+              return;
+            }
             const r = await guard(() => Api.rpc('HIDGetScriptJobResult', { id }), 'read the job result');
             if (!r) return;
             let pretty = r.resultJson || '';
