@@ -139,6 +139,26 @@ func (a *apiHandler) handlePanelImage(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusMethodNotAllowed, "GET only")
 		return
 	}
+	/* Authenticate BEFORE touching the panel.
+	 *
+	 * This was missing. These three routes shipped with no auth and no
+	 * origin guard at all, while every other handler on the same mux called
+	 * authenticate() -- and the comment where they are registered claimed
+	 * they had "Same auth and same origin guard as the RPCs", which made the
+	 * hole read as a decision someone had already checked.
+	 *
+	 * What it exposed: panel.png and panel.txt handed the device's screen to
+	 * anyone who could reach port 8000, and panel/press let them PRESS THE
+	 * BUTTONS -- unauthenticated remote control of the physical console, on
+	 * a box whose whole purpose is to be plugged into someone else's
+	 * machine, over an AP that is deliberately broadcasting. The one saving
+	 * grace was the secret guard in PanelSource.Publish, which withholds the
+	 * first-boot credentials screen, so the password itself did not leak.
+	 * That guard was never meant to be the only thing standing there.
+	 */
+	if _, ok := a.authenticate(w, r); !ok {
+		return
+	}
 	buf, err := panelAsk("FRAME")
 	if err != nil {
 		a.panelErr(w, err)
@@ -160,6 +180,9 @@ func (a *apiHandler) handlePanelText(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusMethodNotAllowed, "GET only")
 		return
 	}
+	if _, ok := a.authenticate(w, r); !ok {
+		return
+	}
 	buf, err := panelAsk("TEXT")
 	if err != nil {
 		a.panelErr(w, err)
@@ -174,6 +197,9 @@ func (a *apiHandler) handlePanelText(w http.ResponseWriter, r *http.Request) {
 func (a *apiHandler) handlePanelPress(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		apiError(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	if _, ok := a.authenticate(w, r); !ok {
 		return
 	}
 	var req struct {

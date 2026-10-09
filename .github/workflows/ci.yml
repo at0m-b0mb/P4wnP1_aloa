@@ -44,7 +44,13 @@ jobs:
             image/build.sh image/lib/stage.sh image/lib/customize.sh image/lib/verify.sh \
             tools/smoke-test.sh tools/check-js.sh tools/check-render.sh \
             tools/feature-test.sh tools/access-control-test.sh tools/live-console.sh \
-            tools/check-shell-quoting.sh tools/hardware-check.sh
+            tools/check-shell-quoting.sh tools/hardware-check.sh \
+            tools/check-api-auth.sh
+
+      # First, because it is the cheapest check of the most serious class of
+      # bug this repo has shipped: three API routes with no authentication.
+      - name: Every JSON API handler authenticates
+        run: ./tools/check-api-auth.sh
 
       - name: Console JavaScript parses
         run: ./tools/check-js.sh

@@ -19,6 +19,7 @@ help:
 	@echo "  make image-plain   Only the images without OLED support"
 	@echo "  make image-oled    Only the images with the OLED console"
 	@echo "  make contrast      Check the web console palette against WCAG AA"
+	@echo "  make check-api-auth Every JSON API handler authenticates"
 	@echo "  make smoke         Run the service in a container and verify it works"
 	@echo "  make feature-test  Exercise all 83 RPCs against the real binary and"
 	@echo "                     report PASS / expected-without-hardware / FAIL"
@@ -105,6 +106,12 @@ contrast:
 # Parse the console JavaScript. A missing paren makes the WHOLE file fail to
 # load, so the console renders nothing -- a total outage from one character,
 # invisible to every other check here.
+# Every HTTP handler on the JSON API must authenticate. Source-level, so it
+# needs no container, no device and no network -- and so it catches a NEW
+# route that forgets, which a hand-maintained endpoint list cannot.
+check-api-auth:
+	./tools/check-api-auth.sh
+
 check-js:
 	./tools/check-js.sh
 

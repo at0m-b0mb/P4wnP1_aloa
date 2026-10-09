@@ -30,3 +30,7 @@ image/cache/
 _readme_preview.html
 _markpreview.html
 _cardcheck.html
+
+# Python bytecode from the tools/ checkers
+__pycache__/
+*.pyc

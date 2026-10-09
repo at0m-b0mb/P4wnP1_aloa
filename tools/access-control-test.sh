@@ -81,6 +81,15 @@ check "POST /api/v1/rpc/{m} refuses"        "401" "$(code -X POST $JSON -d '{}' 
 check "GET  /api/v1/rpc (method list) refuses" "401" "$(code $B/api/v1/rpc)"
 check "GET  /api/v1/events (SSE) refuses"   "401" "$(code $B/api/v1/events)"
 check "GET  /api/auth/whoami refuses"       "401" "$(code $B/api/auth/whoami)"
+# The panel mirror. These three shipped with NO authentication at all while
+# every other handler on the same mux had it, and this file did not notice
+# because it enumerates endpoints by hand and nobody extended it when the
+# routes were added. An unauthenticated caller could read the device's screen
+# and press its buttons. tools/check-api-auth.sh now catches the general case
+# at source level; these keep the behaviour pinned against the real binary.
+check "GET  /api/v1/panel.png refuses"      "401" "$(code $B/api/v1/panel.png)"
+check "GET  /api/v1/panel.txt refuses"      "401" "$(code $B/api/v1/panel.txt)"
+check "POST /api/v1/panel/press refuses"    "401" "$(code -X POST $JSON -d '{"button":"key1"}' $B/api/v1/panel/press)"
 check "garbage token refuses"               "401" "$(code -X POST $JSON -H 'Authorization: Bearer not-a-real-token' -d '{}' $B/api/v1/rpc/GetLEDSettings)"
 check "non-bearer scheme refuses"           "401" "$(code -X POST $JSON -H 'Authorization: Basic YWRtaW46eA==' -d '{}' $B/api/v1/rpc/GetLEDSettings)"
 check "wrong password refuses"              "401" "$(code -X POST $JSON -d '{"username":"admin","password":"wrong"}' $B/api/auth/login)"
