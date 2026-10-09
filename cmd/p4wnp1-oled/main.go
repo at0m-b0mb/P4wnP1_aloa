@@ -21,6 +21,15 @@ import (
 
 var version = "dev" // set with -ldflags "-X main.version=..."
 
+// envOr lets a flag default come from the environment, so the systemd unit
+// can set it without anyone editing an ExecStart line.
+func envOr(key, def string) string {
+	if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {
+		return v
+	}
+	return def
+}
+
 func main() {
 	var (
 		busName  = flag.String("bus", "spi", "panel bus: spi or i2c")
@@ -41,6 +50,11 @@ func main() {
 		firstRun = flag.String("firstrun-creds", oled.FirstRunFile, "first-boot credentials handoff")
 		bootFlag = flag.String("firstboot-flag", oled.FirstBootFlag, "file first boot creates when it is done")
 		mirror   = flag.String("mirror-socket", oled.MirrorSocket, "serve the panel here; empty to disable")
+		// Which way up the image sits on the glass. The default matches the
+		// keys when the board hangs from a USB port; "180" is for a board
+		// mounted the other way round. Also readable from the environment so
+		// it can be set in the unit file without editing the command line.
+		rotate = flag.String("rotate", envOr("P4WNP1_OLED_ROTATE", "0"), "image rotation: 0 or 180")
 	)
 	flag.Parse()
 
@@ -66,6 +80,8 @@ func main() {
 	}
 	cfg.SPIPort, cfg.I2CBus, cfg.I2CAddr = *spiPort, *i2cBus, uint16(*i2cAddr)
 	cfg.DCPin, cfg.RSTPin = *dcPin, *rstPin
+	cfg.Rotate = oled.ParseRotation(*rotate)
+	log.Printf("panel rotation: %d degrees", int(cfg.Rotate))
 
 	var disp oled.Display
 	if *headless {

@@ -10,6 +10,14 @@ Wants=P4wnP1.service
 
 [Service]
 Type=simple
+# Which way up the image sits on the glass.
+#
+# The default (0) matches the keys when the board hangs from a USB port --
+# plug on the left, KEY1..KEY3 on the right -- which is how a Zero W is
+# normally used. If your board is mounted the other way round, set this to
+# 180 and restart: systemctl edit p4wnp1-oled, or change it here and
+# `systemctl daemon-reload && systemctl restart p4wnp1-oled`.
+Environment=P4WNP1_OLED_ROTATE=0
 ExecStart=/usr/local/bin/p4wnp1-oled
 Restart=on-failure
 RestartSec=5

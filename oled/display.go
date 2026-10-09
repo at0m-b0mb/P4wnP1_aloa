@@ -1,5 +1,7 @@
 package oled
 
+import "strings"
+
 // Display is the panel. Kept to three methods so the UI never learns anything
 // about SPI, I2C or GPIO, and so the simulator and the tests are first-class
 // implementations rather than shims bolted on afterwards.
@@ -76,7 +78,46 @@ const (
 // SSD1306 uses 0x8D 0x14, SH1106 uses 0xAD 0x8B. Sending the wrong one leaves
 // the panel initialised but unlit, which looks identical to a wiring fault and
 // is the single most common way this board is reported "dead".
-func (c Controller) initSequence() []byte {
+// Orientation of the image on the glass.
+//
+// The HAT can sit either way up depending on how the Pi is plugged in. With a
+// Zero W in a laptop's USB port the board hangs with its USB plug to the LEFT
+// and KEY1..KEY3 to the RIGHT, and in that position the panel's own native
+// orientation reads upside down -- every line mirrored, which is far harder
+// to read than small text has any right to be. RotateNone is therefore the
+// orientation that matches the keys in that position, and is the default.
+//
+// Done in the controller (segment remap + reversed COM scan) rather than by
+// transforming the framebuffer: it costs nothing per frame, which matters on
+// a single-core Zero W that is also running the service. The consequence is
+// that the web console's panel mirror shows the LOGICAL image, not the
+// rotated one -- which is the right thing for a mirror to show, but worth
+// knowing when the glass and the browser disagree about which way up they are.
+type Rotation int
+
+const (
+	// RotateNone matches the keys when the board hangs from a USB port.
+	RotateNone Rotation = 0
+	// Rotate180 is the panel's other orientation, for a board mounted the
+	// other way round.
+	Rotate180 Rotation = 180
+)
+
+// ParseRotation reads an operator-supplied value. Anything unrecognised is
+// the default rather than an error: a typo in a config file should not stop
+// the panel coming up at all.
+func ParseRotation(s string) Rotation {
+	switch strings.TrimSpace(s) {
+	case "180":
+		return Rotate180
+	default:
+		return RotateNone
+	}
+}
+
+func (c Controller) initSequence() []byte { return c.initSequenceRotated(RotateNone) }
+
+func (c Controller) initSequenceRotated(rot Rotation) []byte {
 	seq := []byte{
 		cmdDisplayOff,
 		cmdSetDisplayClock, 0x80,
@@ -90,9 +131,19 @@ func (c Controller) initSequence() []byte {
 	} else {
 		seq = append(seq, cmdSetDCDC, 0x8B)
 	}
+	if rot == Rotate180 {
+		// Together these are a 180 degree turn: SegRemap mirrors left/right
+		// (column 127 -> SEG0), ComScanDec mirrors top/bottom (COM63 -> COM0).
+		// One without the other would be a mirror image, not a rotation.
+		//
+		// The SH1106 column offset does NOT change with this. Its RAM is 132
+		// wide with the 128-pixel glass centred on SEG2..SEG129, so reversing
+		// the mapping sends pixel 0 to RAM column 131-129 = 2 -- the same
+		// offset from the other end. Centred wiring is what makes that come
+		// out even; it is not a general truth about SH1106 boards.
+		seq = append(seq, cmdSegRemap, cmdComScanDec)
+	}
 	seq = append(seq,
-		cmdSegRemap,   // column 127 -> SEG0, i.e. rotate 180 with ComScanDec
-		cmdComScanDec, // scan COM63 -> COM0
 		cmdSetComPins, 0x12,
 		cmdSetContrast, 0xCF,
 		cmdSetPrecharge, 0xF1,

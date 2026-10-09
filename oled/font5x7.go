@@ -92,7 +92,14 @@ var font5x7 = [95][5]byte{
 	{0x00, 0x44, 0x7D, 0x40, 0x00}, // 'i'
 	{0x20, 0x40, 0x44, 0x3D, 0x00}, // 'j'
 	{0x7F, 0x10, 0x28, 0x44, 0x00}, // 'k'
-	{0x00, 0x41, 0x7F, 0x40, 0x00}, // 'l'
+	// 'l' carries a foot that runs only to the RIGHT, and its top flag sits
+	// on the very top row. Before this it differed from '1' by a single
+	// pixel and from 'I' by one more, which is no difference at all in a
+	// random password read off a 1.3 inch panel at arm's length. Now:
+	//   '1'  flag below the top, symmetric foot   .###.
+	//   'I'  serifs top and bottom                .###. / .###.
+	//   'l'  flag on the top row, foot to the right   ..###
+	{0x00, 0x01, 0x7F, 0x40, 0x40}, // 'l'
 	{0x7C, 0x04, 0x18, 0x04, 0x78}, // 'm'
 	{0x7C, 0x08, 0x04, 0x04, 0x78}, // 'n'
 	{0x38, 0x44, 0x44, 0x44, 0x38}, // 'o'

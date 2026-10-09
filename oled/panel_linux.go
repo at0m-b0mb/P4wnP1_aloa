@@ -44,6 +44,11 @@ type PanelConfig struct {
 
 	DCPin  string // BCM 24 on the HAT
 	RSTPin string // BCM 25 on the HAT
+
+	// Rotate turns the image on the glass. See Rotation: the default matches
+	// the keys when the board hangs from a USB port, which is how a Zero W
+	// is normally used.
+	Rotate Rotation
 }
 
 // DefaultPanelConfig is the Waveshare 1.3inch OLED HAT as it arrives.
@@ -133,7 +138,7 @@ func OpenPanel(cfg PanelConfig) (Display, error) {
 		}
 	}
 
-	if err := p.commands(cfg.Controller.initSequence()); err != nil {
+	if err := p.commands(cfg.Controller.initSequenceRotated(cfg.Rotate)); err != nil {
 		p.Close()
 		return nil, fmt.Errorf("initialise panel: %w", err)
 	}
