@@ -440,14 +440,42 @@ type PayloadList struct {
 	err    string
 	loaded bool
 	cur    cursor
+	// hidOn is whether the cable is presenting a keyboard or a mouse.
+	//
+	// The shipped loadout deliberately composes ETHERNET ONLY. A device that
+	// offers a keyboard to every host it is plugged into, before anyone has
+	// asked it to, is a worse device -- so HID is opt-in. That is a choice,
+	// not an oversight, and the cost of a good choice is that the screen has
+	// to explain it at the moment you meet it. Otherwise "HIDScript not
+	// available (mouse and keyboard disabled)" is just a device that
+	// appears broken.
+	hidOn bool
 }
 
 func NewPayloadList() *PayloadList { return &PayloadList{} }
 
 func (p *PayloadList) Title() string { return "Payloads" }
-func (p *PayloadList) Hint() string  { return "KEY1 = run in bg" }
+func (p *PayloadList) Hint() string {
+	if p.loaded && !p.hidOn {
+		return "no keyboard: see Cable"
+	}
+	return "KEY1 = run in bg"
+}
 
 func (p *PayloadList) Refresh(app *App) {
+	// Ask what the cable is presenting BEFORE anyone picks a payload, so the
+	// screen can say "there is nothing to type into" up front rather than
+	// after a run fails.
+	p.hidOn = false
+	if toggles, err := app.Client.USBFunctions(); err == nil {
+		for _, t := range toggles {
+			if t.On && (t.Key == "use_HID_KEYBOARD" || t.Key == "use_HID_MOUSE") {
+				p.hidOn = true
+				break
+			}
+		}
+	}
+
 	names, err := app.Client.List(KindHIDScript)
 	p.loaded = true
 	if err != nil {
@@ -482,6 +510,24 @@ func (p *PayloadList) run(app *App, name string, background bool) {
 	if background {
 		what = "Run (bg)"
 		detail = "Starts it and returns here. Watch it under Jobs."
+	}
+	if !p.hidOn {
+		// Refuse here, with the remedy, rather than letting the service
+		// answer "HIDScript not available (mouse and keyboard disabled)" --
+		// which is true, and tells an operator holding the device nothing
+		// about what to do next.
+		// THE REMEDY FIRST. Six body rows at 21 columns, and the first
+		// version opened with two sentences of explanation -- so "Open
+		// Cable, tick Keyboard" was below the fold on a screen whose whole
+		// job is to say what to do. An operator who has to scroll to find
+		// the instruction will scroll back to the menu instead.
+		app.Push(NewTextView("No keyboard",
+			"Open Cable, tick Keyboard, KEY1 to deploy. "+
+				"Then run this again. "+
+				"Nothing is listening right now: the cable presents no keyboard "+
+				"or mouse. That is the default -- this device does not offer a "+
+				"keyboard to a host until you ask it to."))
+		return
 	}
 	app.Push(NewConfirm(what, "Run "+Truncate(name, 14)+"?", detail, func(a *App) {
 		// Start, never wait. Waiting on a running payload over HTTP is what

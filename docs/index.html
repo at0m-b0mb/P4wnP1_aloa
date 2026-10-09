@@ -193,6 +193,7 @@ footer a{color:var(--muted)}
     <nav>
       <a href="#consoles">Consoles</a>
       <a href="#download">Download</a>
+      <a href="#optin">Defaults</a>
       <a href="#firstboot">First boot</a>
       <a href="#verified">Verified</a>
       <a href="https://github.com/at0m-b0mb/P4wnP1_aloa">GitHub</a>
@@ -329,6 +330,47 @@ sudo cat /root/INITIAL_CREDENTIALS.txt   <span class="c"># console password + Wi
     <p class="lead" style="margin-top:22px">
       Then open <code>http://172.16.0.1:8000</code>.
     </p>
+  </div>
+</section>
+
+<section id="optin">
+  <div class="wrap">
+    <p class="eyebrow">A deliberate default</p>
+    <h2>The cable presents no keyboard until you ask it to</h2>
+    <p class="lead">
+      A freshly flashed device composes <strong>ethernet only</strong> &mdash; enough to reach
+      it, and nothing else. No keyboard, no mouse, no mass storage. Payloads refuse to run until
+      you turn one on.
+    </p>
+    <p class="lead">
+      That is the behaviour to keep. This is a device whose purpose is to be plugged into
+      someone else&rsquo;s computer. A host that enumerates a <em>keyboard</em> the instant the
+      cable goes in has already accepted an input device from you, before you decided to use it
+      that way &mdash; in front of whoever is standing there, and in whatever logs that machine
+      keeps. Composing the keyboard is a decision, so the device makes you make it.
+    </p>
+    <div class="grid two">
+      <div class="card">
+        <h3>Turning it on, either console</h3>
+        <ul class="checks">
+          <li><strong>OLED:</strong> <code>Cable</code> &rarr; tick <strong>Keyboard</strong>
+              &rarr; <strong>KEY1</strong> &rarr; <strong>Yes</strong></li>
+          <li><strong>Web:</strong> <code>Cable</code> &rarr; tick <strong>Keyboard</strong>
+              &rarr; <strong>Deploy</strong></li>
+          <li>The link re-enumerates and is back in about three seconds</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>The device explains it where you meet it</h3>
+        <ul class="checks">
+          <li>Payloads shows <code>no keyboard: see Cable</code> when nothing is listening</li>
+          <li>Choosing one refuses and names the remedy, rather than failing with
+              <code>HIDScript not available</code></li>
+          <li>The remedy is on the <em>first</em> screenful &mdash; six body rows, and an
+              instruction on row seven is one nobody reads</li>
+        </ul>
+      </div>
+    </div>
   </div>
 </section>
 

@@ -384,3 +384,62 @@ func TestStatusKeepsItsScrollPositionAcrossAPoll(t *testing.T) {
 		t.Errorf("the poll changed what was on screen:\nwas:\n%s\nnow:\n%s", before, got)
 	}
 }
+
+// HID is opt-in by design, so the screen has to say so where you meet it.
+//
+// The shipped loadout composes ethernet only: the device does not offer a
+// keyboard to a host until someone asks. That is a deliberate choice, and
+// the price of it is that "HIDScript not available (mouse and keyboard
+// disabled)" -- which is what the service says -- reads as a broken device
+// to anyone holding the panel. So the panel refuses first, and names the
+// remedy.
+func TestPayloadsExplainTheOptInKeyboard(t *testing.T) {
+	c := NewFakeClient()
+	// Ethernet only, exactly what the shipped loadout deploys.
+	c.Toggles = []Toggle{
+		{Key: "use_HID_KEYBOARD", Label: "Keyboard", On: false},
+		{Key: "use_HID_MOUSE", Label: "Mouse", On: false},
+		{Key: "use_RNDIS", Label: "RNDIS net", On: true},
+		{Key: "use_CDC_ECM", Label: "CDC ECM net", On: true},
+	}
+	app := NewApp(c, NewRoot())
+	for _, b := range toPayloads {
+		app.Handle(b)
+	}
+
+	if s := renderText(app); !strings.Contains(s, "no keyboard") {
+		t.Errorf("the payload list does not warn that nothing is listening:\n%s", s)
+	}
+
+	// Choosing one must explain, not attempt.
+	app.Handle(BtnEnter)
+	s := renderText(app)
+	// WITHOUT SCROLLING. The screen has six body rows; an instruction on row
+	// seven is an instruction nobody reads. Checking the whole wrapped text
+	// would pass for a remedy buried below the fold.
+	visible := strings.Join(strings.Split(strings.TrimRight(s, "\n"), "\n")[:7], "\n")
+	for _, want := range []string{"No keyboard", "Cable", "Keyboard", "KEY1"} {
+		if !strings.Contains(visible, want) {
+			t.Errorf("the refusal does not mention %q on the FIRST screenful:\n%s", want, visible)
+		}
+	}
+	if c.Called("StartHID(") {
+		t.Errorf("a payload was started with nothing to type into: %v", c.Calls)
+	}
+
+	// With a keyboard deployed it must behave exactly as before.
+	c2 := NewFakeClient() // the fake's default has the keyboard on
+	app2 := NewApp(c2, NewRoot())
+	for _, b := range toPayloads {
+		app2.Handle(b)
+	}
+	if s := renderText(app2); strings.Contains(s, "no keyboard") {
+		t.Errorf("warned about a missing keyboard when one is deployed:\n%s", s)
+	}
+	app2.Handle(BtnEnter)
+	app2.Handle(BtnRight)
+	app2.Handle(BtnConfirm)
+	if !c2.Called("StartHID(") {
+		t.Errorf("a payload did not start with a keyboard deployed: %v", c2.Calls)
+	}
+}

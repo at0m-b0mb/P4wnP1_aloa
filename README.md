@@ -84,6 +84,41 @@ Earlier images shipped `p4wnp1:p4wnp1`. If you flashed one of those, change that
 forced change at first login did not protect it, because whoever logs in first is the one who
 answers the prompt.
 
+### The cable presents no keyboard until you ask it to
+
+A freshly flashed device composes **ethernet only** — RNDIS and CDC ECM, so you can reach it —
+and **no keyboard, no mouse, no mass storage**. Payloads will refuse to run until you turn one on.
+
+That is deliberate, and it is the behaviour to keep. This is a device whose entire purpose is to
+be plugged into someone else's computer. A host that enumerates a *keyboard* the instant the
+cable goes in is a host that has already accepted an input device from you, before you have
+decided to use it that way — in front of whoever is standing there, and in whatever logs that
+machine keeps. Composing the keyboard is a decision, so the device makes you make it.
+
+Turning it on takes seconds, from either console:
+
+| | |
+|---|---|
+| **OLED panel** | `Cable` → tick **Keyboard** → **KEY1** → **Yes** |
+| **Web console** | `Cable` → tick **Keyboard** → **Deploy** |
+
+The USB link re-enumerates and comes back about three seconds later with the keyboard present.
+
+Because an opt-in default is only a good one if the device explains it at the moment you meet
+it, the panel does:
+
+* the **Payloads** list shows `no keyboard: see Cable` on its hint line whenever nothing is
+  listening;
+* choosing a payload there **refuses and names the remedy** — `Open Cable, tick Keyboard, KEY1
+  to deploy` — instead of letting the service answer `HIDScript not available (mouse and
+  keyboard disabled)`, which is true and tells an operator holding the device nothing;
+* the remedy is the **first thing on the screen**, not below the fold. The panel has six body
+  rows, and an instruction on row seven is an instruction nobody reads. There is a test for
+  exactly that, because the first version got it wrong.
+
+The web console does the same thing in its own idiom: a banner on **Keystrokes** when no HID
+function is deployed, with a button that takes you to Cable.
+
 ### First boot takes a few minutes. Do not pull the power.
 
 On a Pi Zero W the first boot after flashing takes **two to five minutes**, and for most of it
