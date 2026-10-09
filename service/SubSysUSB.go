@@ -216,7 +216,7 @@ func ValidateGadgetSetting(gs *pb.GadgetSettings) error {
 	/* ToDo: validations
 	- Done: check host_addr/dev_addr of RNDIS + CDC ECM to be valid MAC addresses via regex
 	- check host_addr/dev_addr of RNDIS + CDC ECM for duplicates
-	- check EP consumption to be not more than 7 (ECM 2 EP, RNDIS 2 EP, HID Mouse 1 EP, HID Keyboard 1 EP, HID Raw 1 EP, Serial 2 EP ??, UMS 2 EP ?)
+	- Done: check EP consumption to be not more than 7 (below; USB_EP_USAGE_*)
 	- check serial, product, Manufacturer to not be empty
 	- check Pid, Vid with regex (Note: we don't check if Vid+Pid have been used for another composite function setup, yet)
 	- Done: If the gadget is enabled, at least one function has to be enabled
@@ -224,28 +224,56 @@ func ValidateGadgetSetting(gs *pb.GadgetSettings) error {
 
 	log.Println("Validating gadget settings ...")
 
+	// RNDIS and CDC ECM each carry their own settings message, and enabling
+	// the function without supplying one used to be a nil dereference right
+	// here -- gs.RndisSettings.DevAddr on a nil RndisSettings. The panic was
+	// caught by RecoverHandler, so the caller got "internal error; the
+	// service survived and the details are in the journal" and no hint that
+	// a field was missing, for every composition they tried.
+	//
+	// It is easy to hit and hard to diagnose. The web console happens to be
+	// safe because it reads the deployed settings and sends the whole object
+	// back, so the sub-messages ride along; anything that builds a request
+	// from scratch -- a script, a stored template written by hand, the API --
+	// does not. Validation is exactly the wrong place to crash: it runs
+	// before the endpoint-budget check below, so even a request that should
+	// have been cleanly refused for consuming 8 endpoints died here instead.
+	//
+	// Missing settings are a client error, not something to paper over with
+	// defaults: substituting a default MAC would silently change the address
+	// the host has pinned its route to.
 	if gs.Use_RNDIS {
-		_, err := net.ParseMAC(gs.RndisSettings.DevAddr)
-		if err != nil {
-			return errors.New(fmt.Sprintf("Validation Error RNDIS DeviceAddress: %v", err))
+		if gs.RndisSettings == nil {
+			return errors.New("RNDIS is enabled but no rndis_settings were supplied " +
+				"(it needs dev_addr and host_addr MAC addresses)")
 		}
-
-		_, err = net.ParseMAC(gs.RndisSettings.HostAddr)
-		if err != nil {
-			return errors.New(fmt.Sprintf("Validation Error RNDIS HostAddress: %v", err))
+		if _, err := net.ParseMAC(gs.RndisSettings.DevAddr); err != nil {
+			return fmt.Errorf("Validation Error RNDIS DeviceAddress: %v", err)
+		}
+		if _, err := net.ParseMAC(gs.RndisSettings.HostAddr); err != nil {
+			return fmt.Errorf("Validation Error RNDIS HostAddress: %v", err)
 		}
 	}
 
 	if gs.Use_CDC_ECM {
-		_, err := net.ParseMAC(gs.CdcEcmSettings.DevAddr)
-		if err != nil {
-			return errors.New(fmt.Sprintf("Validation Error CDC ECM DeviceAddress: %v", err))
+		if gs.CdcEcmSettings == nil {
+			return errors.New("CDC ECM is enabled but no cdc_ecm_settings were supplied " +
+				"(it needs dev_addr and host_addr MAC addresses)")
 		}
+		if _, err := net.ParseMAC(gs.CdcEcmSettings.DevAddr); err != nil {
+			return fmt.Errorf("Validation Error CDC ECM DeviceAddress: %v", err)
+		}
+		if _, err := net.ParseMAC(gs.CdcEcmSettings.HostAddr); err != nil {
+			return fmt.Errorf("Validation Error CDC ECM HostAddress: %v", err)
+		}
+	}
 
-		_, err = net.ParseMAC(gs.CdcEcmSettings.HostAddr)
-		if err != nil {
-			return errors.New(fmt.Sprintf("Validation Error CDC ECM HostAddress: %v", err))
-		}
+	// Same shape of bug, one function along: UMS needs a backing file, and
+	// reading gs.UmsSettings.File on a nil UmsSettings would panic the same
+	// way. Caught by reading for it rather than by it happening.
+	if gs.Use_UMS && gs.UmsSettings == nil {
+		return errors.New("USB Mass Storage is enabled but no ums_settings were supplied " +
+			"(it needs a backing image file)")
 	}
 
 	//check endpoint consumption
