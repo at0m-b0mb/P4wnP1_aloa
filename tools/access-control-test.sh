@@ -24,9 +24,22 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 BIN="image/out/bin/$ARCH"
-if [ ! -x "$BIN/P4wnP1_service" ]; then
-    echo "==> building binaries for $ARCH"
-    mkdir -p "$BIN"
+# ALWAYS rebuild.
+#
+# This used to be `if [ ! -x "$BIN/P4wnP1_service" ]`, which builds only when
+# the binary is MISSING -- never when it is merely out of date. image/out is
+# gitignored and nothing cleans it, so the binary sat there for days while
+# this suite reported on it as though it were current. It was caught when
+# three freshly added endpoint checks came back 404: the routes existed in the
+# source and in the running device, and simply were not in the two-day-old
+# build being tested.
+#
+# That is the worst way for a test to fail -- it does not. It passes, loudly,
+# about code nobody is shipping. `go build` is incremental and costs a second
+# or two on a warm cache, which is nothing next to a suite that lies.
+echo "==> building binaries for $ARCH (always, so the suite tests THIS source)"
+mkdir -p "$BIN"
+if true; then
     for b in P4wnP1_service P4wnP1_cli p4wnp1-hashpw; do
         if [ "$ARCH" = arm64 ]; then
             CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$BIN/$b" "./cmd/$b"
