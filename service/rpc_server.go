@@ -57,7 +57,7 @@ type server struct {
 
 // listImages lists a UMS image folder, treating an ABSENT folder as empty.
 //
-// WHY ABSENT IS NOT AN ERROR HERE
+// # WHY ABSENT IS NOT AN ERROR HERE
 //
 // These two folders hold disk images the operator supplies. Having none is a
 // completely ordinary state, and so is the folder not existing -- dist/ums
@@ -155,6 +155,46 @@ func (s *server) GetAvailableGpios(context.Context, *pb.Empty) (res *pb.StringMe
 	return
 }
 
+// errSubsystemSkipped marks a subsystem that was not attempted because the
+// hardware is not on this board. Wrapped, so the real reason still prints.
+var errSubsystemSkipped = errors.New("subsystem not present")
+
+// deployOutcome is what one subsystem's deploy meant. Three values, because
+// two were not enough: see PartialDeployError.Succeeded.
+type deployOutcome int
+
+const (
+	outcomeOK deployOutcome = iota
+	outcomeSkipped
+	outcomeFailed
+)
+
+// classifyDeploy turns a subsystem's error into one of the three outcomes.
+func classifyDeploy(err error) deployOutcome {
+	switch {
+	case errors.Is(err, errSubsystemSkipped):
+		return outcomeSkipped
+	case err != nil:
+		return outcomeFailed
+	default:
+		return outcomeOK
+	}
+}
+
+// bluetoothDeployErr maps a Bluetooth deploy result to what it MEANS.
+//
+// Extracted so it can be tested. It was inline, and it returned nil for "no
+// controller on this board" -- which `try` counted as a success, which made
+// NothingDeployed() unreachable on a Pi Zero W, which made the whole
+// fallback inert. A test that pins only the counting type cannot catch that;
+// the defect is in this mapping, so this mapping is what has to be pinned.
+func bluetoothDeployErr(e error) error {
+	if e == bluetooth.ErrBtSvcNotAvailable {
+		return fmt.Errorf("%w: %v", errSubsystemSkipped, e)
+	}
+	return e
+}
+
 // PartialDeployError reports that a master template WAS applied but that some
 // of its subsystems failed. It is a distinct type so that callers can tell it
 // apart from a failure to LOAD the template, which is a different situation
@@ -179,6 +219,10 @@ func (s *server) GetAvailableGpios(context.Context, *pb.Empty) (res *pb.StringMe
 type PartialDeployError struct {
 	// Failures names each subsystem that did not come up, with its error.
 	Failures []string
+	// Skipped counts subsystems that were not attempted because the hardware
+	// is not on this board. A skip is NOT a success, and conflating the two
+	// is how the first version of this fix came to do nothing at all.
+	Skipped int
 	// Succeeded counts the subsystems that DID come up.
 	//
 	// WITHOUT THIS THE TYPE CANNOT ANSWER THE QUESTION IT EXISTS FOR.
@@ -202,14 +246,33 @@ type PartialDeployError struct {
 	// while losing the USB and WiFi settings it names. Every hardware
 	// subsystem then fails, the reflex deploy succeeds because it touches no
 	// hardware, and the old code called that "partially deployed".
+	//
+	// AND THEN IT STILL DID NOT WORK, for a second reason. The Bluetooth
+	// step returns nil to mean "no controller on this board, skip it", and
+	// `try` counted every nil as a success. On a Pi Zero W the controller is
+	// never up this early -- the service starts before sysinit.target -- so
+	// Succeeded was at least 1 on EVERY boot of the shipped image, and
+	// NothingDeployed() could not become true. The fallback this type exists
+	// to trigger was unreachable on the only hardware it ships for.
+	//
+	// The evidence was in the journal the whole time, two lines apart:
+	//
+	//	master template: no Bluetooth on this board, skipping
+	//	master template: bluetooth startup ok
+	//
+	// A skip now goes through errSubsystemSkipped and lands in Skipped.
 	Succeeded int
 	// Attempted counts the subsystems the template named.
 	Attempted int
 }
 
 func (e *PartialDeployError) Error() string {
-	return fmt.Sprintf("master template partially deployed (%d of %d subsystems up) -- %s",
-		e.Succeeded, e.Attempted, strings.Join(e.Failures, "; "))
+	skipped := ""
+	if e.Skipped > 0 {
+		skipped = fmt.Sprintf(", %d skipped", e.Skipped)
+	}
+	return fmt.Sprintf("master template partially deployed (%d of %d subsystems up%s) -- %s",
+		e.Succeeded, e.Attempted, skipped, strings.Join(e.Failures, "; "))
 }
 
 // NothingDeployed reports that every subsystem the template named failed.
@@ -241,16 +304,27 @@ func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate
 	// can and say what it could not -- not stop at the first obstacle and
 	// leave the operator with a brick.
 	var failures []string
-	succeeded, attempted := 0, 0
+	succeeded, skipped, attempted := 0, 0, 0
+	// THREE outcomes, not two. A subsystem whose hardware is absent is
+	// neither a failure nor a success, and counting it as either breaks a
+	// caller: as a failure it would trigger the destructive fallback on
+	// every boot of a board with no Bluetooth, and as a SUCCESS -- which is
+	// what it used to be -- it makes "nothing deployed" unreachable and the
+	// fallback inert. See the note on PartialDeployError.Succeeded.
 	try := func(what string, fn func() error) {
 		attempted++
-		if err := fn(); err != nil {
+		err := fn()
+		switch classifyDeploy(err) {
+		case outcomeSkipped:
+			skipped++
+			log.Printf("master template: %s skipped -- %v", what, errors.Unwrap(err))
+		case outcomeFailed:
 			log.Printf("master template: %s FAILED: %v", what, err)
 			failures = append(failures, fmt.Sprintf("%s: %v", what, err))
-			return
+		default:
+			succeeded++
+			log.Printf("master template: %s ok", what)
 		}
-		succeeded++
-		log.Printf("master template: %s ok", what)
 	}
 
 	if len(mt.TemplateNameUsb) > 0 {
@@ -277,11 +351,9 @@ func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate
 			_, e := s.DeployStoredBluetoothSettings(ctx, &pb.StringMessage{Msg: mt.TemplateNameBluetooth})
 			// No Bluetooth hardware is a fact about the board, not a
 			// failure of the template.
-			if e == bluetooth.ErrBtSvcNotAvailable {
-				log.Printf("master template: no Bluetooth on this board, skipping")
-				return nil
-			}
-			return e
+			// Skipped, NOT deployed. Returning nil here counted it as a
+			// success for two releases and made the fallback inert.
+			return bluetoothDeployErr(e)
 		})
 	}
 	if len(mt.TemplateNameWifi) > 0 {
@@ -291,8 +363,14 @@ func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate
 		})
 	}
 
-	if len(failures) > 0 {
-		err = &PartialDeployError{Failures: failures, Succeeded: succeeded, Attempted: attempted}
+	// A deploy where NOTHING came up is reported even when nothing strictly
+	// "failed" -- every subsystem skipped is still a device with nothing on
+	// it, and the caller needs to hear that so the fallback can run.
+	if len(failures) > 0 || (attempted > 0 && succeeded == 0) {
+		err = &PartialDeployError{
+			Failures: failures, Succeeded: succeeded,
+			Skipped: skipped, Attempted: attempted,
+		}
 		return e, err
 	}
 

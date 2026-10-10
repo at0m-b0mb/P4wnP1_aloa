@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/mame82/P4wnP1_aloa/service/bluetooth"
 )
 
 // THE BUG THIS FILE EXISTS FOR
@@ -156,6 +158,126 @@ func TestPartialDeployErrorNamesWhatFailed(t *testing.T) {
 	for _, want := range []string{"bluetooth", "wifi", "no wlan0", "partially deployed"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error message %q does not mention %q", msg, want)
+		}
+	}
+}
+
+// THE BUG THAT MADE THE FIRST TWO FIXES INERT
+//
+// The Bluetooth step returns "no controller on this board" as a SKIP, and
+// `try` counted every nil return as a success. On a Pi Zero W the controller
+// is never up when the service starts -- it runs before sysinit.target -- so
+// Succeeded was at least 1 on every boot of the shipped image and
+// NothingDeployed() could never become true. The fallback restored in v0.7.3
+// could not fire on the only hardware it ships for.
+//
+// It printed the contradiction in the journal, two lines apart, and nobody
+// read it:
+//
+//	master template: no Bluetooth on this board, skipping
+//	master template: bluetooth startup ok
+func TestASkippedSubsystemIsNotASuccess(t *testing.T) {
+	// Exactly the shipped-device disaster case: the datastore lost the USB,
+	// WiFi and reflex templates, every hardware subsystem failed, and
+	// Bluetooth was skipped because the board has no controller up yet.
+	e := &PartialDeployError{
+		Failures: []string{
+			"USB usbs_startup: ErrGet",
+			"reflexes tas_startup: ErrGet",
+			"wifi ws_startup: ErrGet",
+			"network usbeth_startup: no such interface",
+		},
+		Succeeded: 0, Skipped: 1, Attempted: 5,
+	}
+	if !e.NothingDeployed() {
+		t.Fatal("a skipped subsystem is being counted as deployed")
+	}
+	if !startupNeedsFallback(e) {
+		t.Fatal("NOTHING deployed and the fallback is still suppressed: no USB " +
+			"gadget, no DHCP, no access point, nothing retrying. This is the " +
+			"state the fallback exists for, and it is the state a Pi Zero W " +
+			"reaches, because its Bluetooth is always skipped.")
+	}
+}
+
+// And the message must not claim a skipped subsystem came up.
+func TestPartialDeployErrorDistinguishesSkippedFromUp(t *testing.T) {
+	e := &PartialDeployError{
+		Failures:  []string{"wifi ws_startup: ErrGet"},
+		Succeeded: 4, Skipped: 1, Attempted: 6,
+	}
+	msg := e.Error()
+	if !strings.Contains(msg, "4 of 6") {
+		t.Errorf("message does not state the real count: %q", msg)
+	}
+	if !strings.Contains(msg, "1 skipped") {
+		t.Errorf("message hides the skipped subsystem, so the journal reads as "+
+			"though more came up than did: %q", msg)
+	}
+}
+
+// A skip must still not trigger the fallback on its own -- a board with no
+// Bluetooth and everything else up is a healthy device.
+func TestSkippedBluetoothAloneDoesNotRunTheFallback(t *testing.T) {
+	e := &PartialDeployError{
+		Failures: nil, Succeeded: 5, Skipped: 1, Attempted: 6,
+	}
+	if startupNeedsFallback(e) {
+		t.Error("a healthy board with no Bluetooth would run the destructive " +
+			"fallback and have its working configuration overwritten")
+	}
+}
+
+// THE MAPPING THAT WAS ACTUALLY WRONG.
+//
+// TestASkippedSubsystemIsNotASuccess pins what PartialDeployError does with a
+// skip count. It does NOT pin where the skip comes from -- I reverted the
+// Bluetooth branch to `return nil` and every test stayed green, which is the
+// same "gate that cannot catch its own bug" this suite exists to avoid. The
+// defect lived in the mapping, so the mapping is what gets pinned here.
+func TestBluetoothUnavailableIsSkippedNotSucceeded(t *testing.T) {
+	got := classifyDeploy(bluetoothDeployErr(bluetooth.ErrBtSvcNotAvailable))
+	if got == outcomeOK {
+		t.Fatal("a board with no Bluetooth controller counts as a SUCCESSFUL " +
+			"deploy. Succeeded is then never zero on a Pi Zero W, " +
+			"NothingDeployed() can never be true, and the fallback that keeps " +
+			"an unconfigured device reachable never runs.")
+	}
+	if got != outcomeSkipped {
+		t.Errorf("classified as %v, want outcomeSkipped -- counting it as a "+
+			"FAILURE is the opposite mistake: the destructive fallback would "+
+			"then run on every boot of a board that is working fine", got)
+	}
+}
+
+// A real Bluetooth error is still a failure, not a skip. Swallowing those
+// would hide a genuinely broken controller behind "not on this board".
+func TestARealBluetoothErrorIsStillAFailure(t *testing.T) {
+	if got := classifyDeploy(bluetoothDeployErr(errors.New("Failed"))); got != outcomeFailed {
+		t.Errorf("a bare BlueZ \"Failed\" classified as %v, want outcomeFailed", got)
+	}
+	if got := classifyDeploy(bluetoothDeployErr(nil)); got != outcomeOK {
+		t.Errorf("a successful Bluetooth deploy classified as %v, want outcomeOK", got)
+	}
+}
+
+// The three-way classification itself.
+func TestClassifyDeploy(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		err  error
+		want deployOutcome
+	}{
+		{"nil is success", nil, outcomeOK},
+		{"a plain error is a failure", errors.New("boom"), outcomeFailed},
+		{"the skip sentinel is a skip", errSubsystemSkipped, outcomeSkipped},
+		{"a WRAPPED skip is still a skip",
+			fmt.Errorf("%w: no controller", errSubsystemSkipped), outcomeSkipped},
+		{"a wrapped plain error is still a failure",
+			fmt.Errorf("deploying: %w", errors.New("boom")), outcomeFailed},
+	} {
+		if got := classifyDeploy(c.err); got != c.want {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
 		}
 	}
 }

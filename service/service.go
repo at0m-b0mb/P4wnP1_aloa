@@ -308,8 +308,16 @@ func (s *Service) Start() (context.Context, context.CancelFunc) {
 		case errDeployStartupTemplate == nil:
 			// nothing to report
 		case errors.As(errDeployStartupTemplate, &partial):
-			fmt.Printf("... Startup MasterTemplate '%s': %d of %d subsystems up, %d failed:\n",
-				startupTemplate, partial.Succeeded, partial.Attempted, len(partial.Failures))
+			/* Name the skipped ones too, or the numbers do not add up and the
+			   operator is left wondering which subsystem went unmentioned.
+			   "4 of 7 up, 2 failed" silently loses one. */
+			skipped := ""
+			if partial.Skipped > 0 {
+				skipped = fmt.Sprintf(", %d skipped (hardware not on this board)", partial.Skipped)
+			}
+			fmt.Printf("... Startup MasterTemplate '%s': %d of %d subsystems up, %d failed%s:\n",
+				startupTemplate, partial.Succeeded, partial.Attempted,
+				len(partial.Failures), skipped)
 			for _, f := range partial.Failures {
 				fmt.Printf("      - %s\n", f)
 			}

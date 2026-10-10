@@ -643,6 +643,9 @@ const HID_API = [
   ]},
 ];
 
+/* Set by a save, consumed by the next render of Keystrokes. */
+let pendingSource = null;
+
 const SAMPLE_SCRIPT = `// HIDScript runs ON the device and types into the attached host.
 // Nothing happens until you press Run.
 
@@ -727,7 +730,10 @@ Views.keystrokes = async function () {
     rows: '16', spellcheck: 'false', 'aria-label': 'HIDScript source',
     wrap: 'off',
   });
-  editor.value = SAMPLE_SCRIPT;
+  /* A save re-renders this page; pendingSource carries the operator's work
+     across it so the demo script does not silently replace a payload. */
+  editor.value = pendingSource !== null ? pendingSource : SAMPLE_SCRIPT;
+  pendingSource = null;
 
   const timeoutInput = h('input', { type: 'number', value: '30', min: '0', max: '3600' });
   const runBtn = h('button.btn.btn-primary', { type: 'button' }, 'Run on the host');
@@ -794,7 +800,19 @@ Views.keystrokes = async function () {
               folder: 2 /* HID_SCRIPTS */, filename: name,
               data: b64encode(editor.value), append: false,
             }), 'save the script');
-            if (r !== undefined) { toast('Saved as "' + name + '".'); Views.keystrokes(); }
+            if (r !== undefined) {
+              toast('Saved as "' + name + '".');
+              /* Carry the source across the re-render.
+                 Views.keystrokes() rebuilds the textarea and seeds it with
+                 SAMPLE_SCRIPT, so saving replaced the operator's payload
+                 with the demo script, in place, under a success toast. The
+                 usual next move is "Run on the host" -- which would then have
+                 typed `hello from P4wnP1` into whatever the cable is plugged
+                 into. Keystrokes delivered to a host cannot be withdrawn;
+                 this page's own Cancel-all dialog says so. */
+              pendingSource = editor.value;
+              Views.keystrokes();
+            }
           },
         }, 'Save to device'),
         h('button.btn.btn-danger', {
@@ -1296,6 +1314,37 @@ Views.loadouts = async function () {
           ' ',
           h('button.btn.btn-sm', {
             onclick: async () => {
+              /* CONFIRM FIRST, and say what is being armed.
+                 This is a 28px button a thumb's width from Deploy and
+                 Inspect, and it was the only unconfirmed action on the page
+                 -- yet it is the most permanent one. Deploy changes the
+                 device until the next boot; this changes what the device
+                 comes BACK as, and no screen in the console can unset it.
+                 Arming a loadout whose WiFi template is in station mode, or
+                 whose USB composition has no RNDIS and no CDC ECM, means the
+                 device returns from its next power cycle with no route to
+                 this console at all. */
+              const t = await guard(() => Api.rpc('GetStoredMasterTemplate', { msg: n }),
+                'read loadout "' + n + '"');
+              if (t === undefined || t === null) return;
+              const parts = [
+                ['USB', t.template_name_usb], ['WiFi', t.template_name_wifi],
+                ['Bluetooth', t.template_name_bluetooth],
+                ['Reflexes', t.template_name_trigger_actions],
+                ['Network', (t.template_names_network || []).join(', ')],
+              ].filter(([, v]) => v).map(([k, v]) => k + ': ' + v);
+              const okGo = await confirmAction({
+                title: 'Load "' + n + '" at every boot?',
+                body: 'This is what the device will apply on every power-up from now on'
+                  + (parts.length ? ', and it holds \u2014 ' + parts.join('; ') + '.' : '.'),
+                consequence: 'Nothing in this console can unset it; only arming a different '
+                  + 'loadout replaces it. If its USB composition drops RNDIS and CDC ECM, or '
+                  + 'its WiFi template joins a network instead of spawning the access point, '
+                  + 'the device comes back unreachable and the SD card has to come out.',
+                confirmLabel: 'Load it at boot',
+                danger: true,
+              });
+              if (!okGo) return;
               /* StringMessage's field is `msg`. Sending `templateName` was
                  accepted and silently discarded by the bridge, so this set the
                  boot default to an EMPTY string -- clicking "Use at boot"
