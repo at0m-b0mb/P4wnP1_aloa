@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>P4wnP1 A.L.O.A.</title>
-<link rel="icon" href="favicon.svg?v=24" type="image/svg+xml">
+<link rel="icon" href="favicon.svg?v=25" type="image/svg+xml">
 
 <!-- Everything is served from the device. It is routinely operated with no
      internet route at all, so a CDN reference would mean a broken console
@@ -13,9 +13,9 @@
 <!-- ?v= is bumped whenever these files change: the console is updated in
      place on a device an operator reaches over USB or its own access point,
      and a stale cached bundle talking to a new API is a confusing failure. -->
-<link rel="stylesheet" href="fonts/fonts.css?v=24">
-<link rel="stylesheet" href="css/tokens.css?v=24">
-<link rel="stylesheet" href="css/app.css?v=24">
+<link rel="stylesheet" href="fonts/fonts.css?v=25">
+<link rel="stylesheet" href="css/tokens.css?v=25">
+<link rel="stylesheet" href="css/app.css?v=25">
 
 <!-- Set the theme before first paint so a dark-mode operator does not get a
      white flash. Reads the stored *choice*; 'auto' resolves against the OS. -->
@@ -38,22 +38,22 @@
 </div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
-<script src="js/ui.js?v=24"></script>
-<script src="js/api.js?v=24"></script>
-<script src="js/app.js?v=24"></script>
+<script src="js/ui.js?v=25"></script>
+<script src="js/api.js?v=25"></script>
+<script src="js/app.js?v=25"></script>
 <!-- The pages the original client had and this console was missing. Each
      assigns one property onto Views, which app.js declares as a top-level
      const -- so these MUST come after it or the assignment is a
      ReferenceError. They run before DOMContentLoaded, which is when app.js
      boots and first reads NAV, so every view is registered in time. -->
-<script src="js/view-network.js?v=24"></script>
-<script src="js/view-bluetooth.js?v=24"></script>
-<script src="js/view-storage.js?v=24"></script>
-<script src="js/view-system.js?v=24"></script>
-<script src="js/view-wifi.js?v=24"></script>
-<script src="js/view-templates.js?v=24"></script>
+<script src="js/view-network.js?v=25"></script>
+<script src="js/view-bluetooth.js?v=25"></script>
+<script src="js/view-storage.js?v=25"></script>
+<script src="js/view-system.js?v=25"></script>
+<script src="js/view-wifi.js?v=25"></script>
+<script src="js/view-templates.js?v=25"></script>
 <!-- Not a page. Registers the Ctrl/Cmd-K command palette and must come last,
      because it reads NAV, Views and go() from app.js at load time. -->
-<script src="js/palette.js?v=24"></script>
+<script src="js/palette.js?v=25"></script>
 </body>
 </html>

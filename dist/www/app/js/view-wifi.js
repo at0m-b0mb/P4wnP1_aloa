@@ -4,8 +4,9 @@
  * WHY THIS FILE EXISTS
  *
  * This console could not change WiFi at all. DeployWiFiSettings had no caller
- * anywhere in dist/www, and Views.radio (app.js) renders GetWiFiState as a
- * read-only table. Seven more RPCs had no caller either:
+ * anywhere in dist/www, and the Radio page -- since retired, because every
+ * card it held now has a page that can change what it shows -- rendered
+ * GetWiFiState as a read-only table. Seven more RPCs had no caller either:
  *
  *     DeployWiFiSettings        StoreWifiSettings
  *     GetStoredWifiSettings     ListStoredWifiSettings
