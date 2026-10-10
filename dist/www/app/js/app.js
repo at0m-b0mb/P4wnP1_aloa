@@ -25,6 +25,25 @@
  * raw message rather than being swallowed. */
 const ERROR_GUIDE = [
   {
+    /* THE MOST COMMON ERROR IN NORMAL USE, and the one that used to arrive as
+       a bare fact. api.js throws both of these with status 0: the request was
+       aborted after 20 seconds, or fetch itself failed. On this device that is
+       usually not a fault at all -- it is what a SUCCESSFUL deploy looks like
+       when the thing being reconfigured is the link the request arrived on.
+       Every page that can kill the link says so in its own banner
+       (view-wifi.js, view-templates.js); the toast that appears at the moment
+       it happens said nothing, so the operator either pressed Apply again --
+       re-running a reconfiguration whose result they cannot see -- or
+       rebooted, when the move is to reconnect and reload. */
+    match: /did not answer within|could not reach the device/i,
+    message: 'The device stopped answering.',
+    hint: 'On this device that usually means the change WAS applied and took the link with it. '
+      + 'Reload the console, reconnecting first if the address or the SSID changed -- USB answers '
+      + 'on 172.16.0.1 and the access point on 172.24.0.1 unless they were moved. Send it again '
+      + 'only once you know it did not land: read the setting back from its own page, or check '
+      + 'the Journal.',
+  },
+  {
     match: /HIDScript (not available|engine disabled)|mouse and keyboard disable/i,
     message: 'No keyboard or mouse is being presented to the host.',
     hint: 'A script has nothing to type into. Enable the keyboard or mouse function under Cable and deploy.',
@@ -266,6 +285,89 @@ const USB_ENDPOINT_COST = {
 function endpointsUsed(settings) {
   return USB_FUNCTIONS.reduce(
     (n, f) => n + (settings && settings[f.key] ? (USB_ENDPOINT_COST[f.key] || 0) : 0), 0);
+}
+
+/* --- which interface is this console reached over? ------------------------
+ *
+ * Cable used to answer this with /^172\.16\.0\./.test(location.hostname).
+ * usbeth's address is editable on the Network page -- that is what that page
+ * is for -- and the shipped usbeth is a /30, so the test was both wider than
+ * the network it described and wrong the moment anyone moved it. WiFi,
+ * Network and Templates all answer the question properly, by comparing the
+ * browser's own host against the addresses the device reports.
+ *
+ * consoleLink() returns:
+ *   'exact'   the browser is talking to that interface's own address
+ *   'network' the browser's address is inside that interface's network
+ *   'other'   an exact match on a DIFFERENT managed interface, so this one
+ *             is not the link carrying the page
+ *   'unknown' a hostname, a proxy, a route this console cannot see, or no
+ *             interface list at all
+ * 'unknown' is never treated as safe: the caller takes the stronger warning,
+ * because a wrong reassurance here is how a device is lost. */
+function ip4ToNumber(s) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(s || '').trim());
+  if (!m) return null;
+  let n = 0;
+  for (let i = 1; i <= 4; i++) {
+    const o = Number(m[i]);
+    if (o > 255) return null;
+    n = (n * 256) + o;
+  }
+  return n;
+}
+
+function consoleLink(ifaces, name) {
+  const host = String(location.hostname || '');
+  const list = (ifaces && Array.isArray(ifaces.list)) ? ifaces.list.filter(i => i && typeof i === 'object') : null;
+  if (!host || !list || !list.length) return 'unknown';
+  const self = list.find(i => i.name === name);
+  if (self) {
+    if (self.ipAddress4 && String(self.ipAddress4) === host) return 'exact';
+    const h = ip4ToNumber(host);
+    const a = ip4ToNumber(self.ipAddress4);
+    const m = ip4ToNumber(self.netmask4);
+    if (h !== null && a !== null && m !== null && m !== 0 && (((h ^ a) & m) === 0)) return 'network';
+  }
+  for (const i of list) {
+    if (i.name !== name && i.ipAddress4 && String(i.ipAddress4) === host) return 'other';
+  }
+  return 'unknown';
+}
+
+/* What a re-compose costs, given which link carries this page and what the
+   new composition still presents. An enabled gadget with neither RNDIS nor
+   CDC ECM has no USB ethernet function, so the link does not come back. */
+function cableConsequence(link, draft) {
+  const keepsEthernet = draft.enabled !== false && !!(draft.use_RNDIS || draft.use_CDC_ECM);
+  const host = 'Any host currently attached sees every function disconnect and re-enumerate, '
+    + 'exactly as if the cable had been pulled out and pushed back in.';
+  const back = keepsEthernet
+    ? 'It normally comes back within a few seconds -- reload the page. If it does not, reach the '
+      + 'device over WiFi or the serial console.'
+    : 'This composition presents neither RNDIS nor CDC ECM, so the USB ethernet link does not come '
+      + 'back at all: the way in is WiFi, Bluetooth, or a serial console on ttyGS0.';
+  if (link === 'exact' || link === 'network') {
+    return (link === 'exact'
+      ? 'You are reading this over the USB ethernet link -- ' + location.hostname
+        + ' is usbeth’s own address -- and that link is one of the functions being rebuilt. '
+      : 'Your address (' + location.hostname + ') is inside usbeth’s network, so this page is '
+        + 'almost certainly riding the USB ethernet link, which is one of the functions being rebuilt. ')
+      + 'This console WILL disconnect. ' + back + ' ' + host;
+  }
+  if (link === 'other') {
+    return host + ' This console is not reading over usbeth, so it should survive'
+      + (keepsEthernet ? '.' : ', but the USB ethernet link will not: this composition presents '
+        + 'neither RNDIS nor CDC ECM.');
+  }
+  /* 'unknown' covers two cases -- an address that matched no reported
+     interface, AND an interface list that could not be read at all -- so the
+     sentence has to be true of both. Saying "does not match any interface the
+     device reported" when nothing was reported is a claim about the device
+     that is simply false, which is the defect this function exists to fix. */
+  return 'Which interface carries this page is unknown: ' + (location.hostname || 'this address')
+    + ' could not be matched against any interface this console was able to confirm. Treat it as '
+    + 'if it were the USB link -- if it is, this console WILL disconnect. ' + back + ' ' + host;
 }
 
 function renderCable() {
@@ -511,8 +613,16 @@ function renderPrimer() {
 /* --- Cable: USB gadget composition ------------------------------------- */
 
 Views.cable = async function () {
-  State.usb = await guard(() => Api.rpc('GetDeployedGadgetSetting'), 'read USB settings');
+  const [usb, ifaces] = await Promise.all([
+    guard(() => Api.rpc('GetDeployedGadgetSetting'), 'read USB settings'),
+    /* Only to work out whether this page rides the USB link. Unguarded: a
+       device that cannot answer it is not a reason for a toast, and
+       consoleLink() reports 'unknown' rather than guessing. */
+    Api.rpc('GetAllDeployedEthernetInterfaceSettings').catch(() => null),
+  ]);
+  State.usb = usb;
   const s = State.usb;
+  const link = consoleLink(ifaces, 'usbeth');
   const main = clear($('#view'));
 
   main.append(pageHead('Cable',
@@ -523,6 +633,13 @@ Views.cable = async function () {
 
   const draft = JSON.parse(JSON.stringify(s));
   State.formDirty = false;
+  /* A half-finished edit must not follow the operator off this page.
+     State.formDirty is ONE global: left true, every other view answers the
+     next state-change event with a "The device changed these settings.
+     [Reload]" toast and a stale page, on a page with no form to protect. The
+     other three editors clear it on teardown (view-wifi.js, view-network.js,
+     view-bluetooth.js); Cable was the one that did not. */
+  onViewTeardown(() => { State.formDirty = false; });
   const markDirty = () => { State.formDirty = true; };
   const form = h('div.card',
     h('h2.card-title', 'Composition'),
@@ -572,13 +689,26 @@ Views.cable = async function () {
             });
             return;
           }
-          const overUsb = /^172\.16\.0\./.test(location.hostname);
+          /* The SECOND composition the service refuses, for the same reason
+             the endpoint budget is checked above: an enabled gadget with
+             nothing ticked is rejected by SubSysUSB.go:318 with "if the
+             composite gadget isn't disabled, as least one function has to be
+             enabled" -- typo included -- and the operator would be handed
+             that sentence only after confirming a disconnect warning. */
+          if (draft.enabled !== false && !USB_FUNCTIONS.some(f => draft[f.key])) {
+            await showDetail({
+              title: 'An enabled gadget has to present something',
+              body: 'No function is ticked and the gadget is enabled. The service refuses that '
+                  + 'composition.\n\n'
+                  + 'Tick at least one function, or untick "Gadget enabled" -- that is the '
+                  + 'supported way to present nothing at all to the host.',
+            });
+            return;
+          }
           const yes = await confirmAction({
             title: 'Re-compose the USB gadget?',
             body: 'The device tears down every USB function and rebuilds it with these settings.',
-            consequence: overUsb
-              ? 'You are reading this over the USB ethernet link, and that link is one of the functions being rebuilt. This console WILL disconnect. It normally comes back within a few seconds -- reload the page. If it does not, reach the device over WiFi or the serial console.'
-              : 'Any host currently attached sees every function disconnect and re-enumerate, exactly as if the cable had been pulled out and pushed back in.',
+            consequence: cableConsequence(link, draft),
             confirmLabel: 'Deploy',
           });
           if (!yes) return;
@@ -665,7 +795,11 @@ async function readStoredScript(name) {
     'read script info');
   if (!info) return null;
   const size = Number(info.size) || 0;
-  if (size === 0) { toast('"' + name + '" is empty.', true); return ''; }
+  /* null, not ''. The caller's guard is `if (src !== null)`, so returning an
+     empty string loaded the empty file INTO the editor and blanked whatever
+     the operator had typed, under a toast that talked about the file rather
+     than about their work. */
+  if (size === 0) { toast('"' + name + '" is empty, so the editor was left as it is.', true); return null; }
   if (size > 512 * 1024) { toast('"' + name + '" is too large to open here (' + fmtBytes(size) + ').', true); return null; }
   const res = await guard(
     () => Api.rpc('FSReadFile', { folder: 2 /* HID_SCRIPTS */, filename: name, start: 0, len: size }),
@@ -730,10 +864,32 @@ Views.keystrokes = async function () {
     rows: '16', spellcheck: 'false', 'aria-label': 'HIDScript source',
     wrap: 'off',
   });
+  /* wrap: 'off' keeps a payload's line structure visible, which is right on a
+     wide screen and unusable on a phone: inside a card at 375px the content
+     box is about 42 monospace columns, and HIDScript lines routinely run far
+     longer than that -- an encoded one-liner inside type('...') is hundreds
+     of characters. The operator could see only a 42-column window of it and
+     had to drag the textarea sideways with a thumb while the page scrolled
+     too. So: soft wrap where the screen is narrow, and a toggle either way.
+     The attribute is not reliably re-applied once the element is in the
+     document, so the rendering is pinned from CSS as well. */
+  const narrow = (() => {
+    try { return window.matchMedia('(max-width: 560px)').matches; } catch (_) { return false; }
+  })();
+  const setWrap = (on) => {
+    editor.wrap = on ? 'soft' : 'off';
+    editor.style.whiteSpace = on ? 'pre-wrap' : 'pre';
+  };
+  setWrap(narrow);
   /* A save re-renders this page; pendingSource carries the operator's work
      across it so the demo script does not silently replace a payload. */
   editor.value = pendingSource !== null ? pendingSource : SAMPLE_SCRIPT;
   pendingSource = null;
+  /* What the editor holds that the device also holds: the demo script on a
+     fresh render, or the source that was just saved. Anything else in the
+     textarea exists nowhere but this tab -- nothing in the console persists a
+     draft -- so anything that would overwrite it asks first. */
+  let baseline = editor.value;
 
   const timeoutInput = h('input', { type: 'number', value: '30', min: '0', max: '3600' });
   const runBtn = h('button.btn.btn-primary', { type: 'button' }, 'Run on the host');
@@ -742,10 +898,27 @@ Views.keystrokes = async function () {
     'aria-label': 'Load a stored script',
     onchange: async e => {
       const n = e.target.value;
-      if (!n) return;
-      const src = await readStoredScript(n);
-      if (src !== null) { editor.value = src; toast('Loaded "' + n + '".'); }
+      /* Reset the select first, so bailing out below does not leave it
+         showing a script that was never loaded. */
       e.target.value = '';
+      if (!n) return;
+      /* On a phone this select is a full-screen list one tap from the editor,
+         and loading used to assign straight over the textarea. A stray tap
+         discarded a payload that existed nowhere else, with a toast reading
+         'Loaded "x".' */
+      if (editor.value.trim() && editor.value !== baseline) {
+        const yes = await confirmAction({
+          title: 'Discard what is in the editor?',
+          body: 'The source in the editor has not been saved to the device.',
+          consequence: 'Loading "' + n + '" writes over it. The console keeps no draft and no '
+            + 'undo, so unsaved HIDScript exists only in this textarea.',
+          confirmLabel: 'Discard and load',
+          danger: true,
+        });
+        if (!yes) return;
+      }
+      const src = await readStoredScript(n);
+      if (src !== null) { editor.value = src; baseline = src; toast('Loaded "' + n + '".'); }
     },
   }, h('option', { value: '' }, names.length ? 'Load a stored script...' : 'No stored scripts'),
      ...names.map(n => h('option', { value: n }, n)));
@@ -772,6 +945,15 @@ Views.keystrokes = async function () {
       h('span.field-label', 'HIDScript source'),
       editor,
       h('span.field-hint', 'Plain JavaScript, plus the functions in the reference below.')),
+    /* Outside the label above, because a label inside a label is not valid
+       HTML and a click would land on the wrong control. */
+    h('div.btn-row', { style: 'margin:-8px 0 6px' },
+      h('label.check', { style: 'margin-bottom:0' },
+        h('input', {
+          type: 'checkbox', checked: narrow,
+          onchange: e => setWrap(e.target.checked),
+        }),
+        h('span', 'Wrap long lines'))),
     h('div.row',
       h('label.field', { style: 'max-width:170px' },
         h('span.field-label', 'Timeout (seconds)'),
@@ -782,20 +964,67 @@ Views.keystrokes = async function () {
         h('button.btn', {
           type: 'button',
           onclick: async () => {
+            /* The list could not be read at all -- distinct from "the list is
+               empty", because only one of those two means the name is free. */
+            const namesKnown = !!(stored && Array.isArray(stored.msgArray));
             const name = await promptValue({
               title: 'Save to the device',
+              /* Prefilling the likeliest collision is how the destructive
+                 case used to be the default one: FSWriteFile opens with
+                 O_TRUNC and there is no file-delete or file-restore RPC, so
+                 the old payload.js was simply gone. */
+              value: names.includes('payload.js') ? '' : 'payload.js',
               label: 'File name',
-              value: 'payload.js',
-              hint: 'Stored in /usr/local/P4wnP1/HIDScripts and listed above.',
+              hint: 'Stored in /usr/local/P4wnP1/HIDScripts and listed above. A name already in '
+                + 'that list is replaced, and only after a confirmation -- saving over a stored '
+                + 'script keeps no copy.',
               validate: v => {
                 if (!v) return 'Give the file a name.';
                 if (!/^[A-Za-z0-9._-]+$/.test(v)) return 'Letters, digits, dot, dash and underscore only.';
                 if (!v.endsWith('.js')) return 'Use a .js extension.';
                 if (v.startsWith('.')) return 'The name cannot start with a dot.';
+                /* A collision is NOT refused here, it is confirmed below.
+                   Refusing it looks safer and is worse: the picker above
+                   loads a stored script INTO this editor, so editing one and
+                   saving it back is the normal use of this page, and there is
+                   no FS delete RPC -- a refusal makes HIDScripts append-only
+                   from the console, so the operator either reaches for SSH or
+                   leaves payload2.js, payload3.js behind forever with no way
+                   to clean them up. Every other store path in this console
+                   confirms rather than refuses for exactly that reason
+                   (view-templates.js nameIsFree, view-system.js's backup,
+                   which says "There is no way to recover it from here" and
+                   still offers the button). What was actually broken was the
+                   silence, and a dialog fixes that. */
                 return null;
               },
             });
             if (!name) return;
+            if (!namesKnown) {
+              const ok = await confirmAction({
+                title: 'Save as "' + name + '"?',
+                body: 'The list of stored scripts could not be read, so whether that name is '
+                  + 'already in use is unknown.',
+                consequence: 'If it is, the device writes over the existing script without asking '
+                  + 'and without keeping a copy. There is no file-restore in this console.',
+                confirmLabel: 'Save it anyway',
+                danger: true,
+              });
+              if (!ok) return;
+            } else if (names.includes(name)) {
+              const ok = await confirmAction({
+                title: 'Replace the stored script "' + name + '"?',
+                body: 'A script is already stored under that name. This is also how a script '
+                  + 'loaded from the picker above is saved back after an edit.',
+                consequence: 'FSWriteFile opens the file with O_TRUNC, so what is on the device '
+                  + 'is replaced and no copy is kept. This console has no file-restore and no '
+                  + 'file-delete, so the only way back to the old contents is a copy you hold '
+                  + 'outside this tab.',
+                confirmLabel: 'Replace it',
+                danger: true,
+              });
+              if (!ok) return;
+            }
             const r = await guard(() => Api.rpc('FSWriteFile', {
               folder: 2 /* HID_SCRIPTS */, filename: name,
               data: b64encode(editor.value), append: false,
@@ -935,6 +1164,21 @@ async function refreshJobs() {
         h('button.btn.btn-sm.btn-danger', {
           type: 'button',
           onclick: async () => {
+            /* 28px tall, a thumb's width from "Result" -- which is now safe
+               by design -- and this one stops a payload part-way through
+               typing into someone else's machine. "Cancel all" on this page
+               has always confirmed and said what it costs; the per-job
+               button, which is the one a mis-tap reaches, did not. */
+            const yes = await confirmAction({
+              title: 'Cancel job ' + id + '?',
+              body: 'The script stops wherever it has got to.',
+              consequence: 'Anything already typed into the host stays typed -- cancelling does '
+                + 'not undo keystrokes. A half-finished command is left in whatever had focus on '
+                + 'the target machine.',
+              confirmLabel: 'Cancel job ' + id,
+              danger: true,
+            });
+            if (!yes) return;
             const r = await guard(() => Api.rpc('HIDCancelScriptJob', { id }), 'cancel the job');
             if (r !== undefined) { toast('Cancelled job ' + id + '.'); refreshJobs(); }
           },
@@ -1026,23 +1270,59 @@ const ACTIONS = [
   // the list made the Deployed table describe them as "unrecognised" -- an
   // operator could see that something was armed but not what it would do.
   { key: 'deploySettingsTemplate', label: 'Deploy a stored template',
-    hint: 'Applies a saved USB, network, WiFi, Bluetooth or trigger template.',
+    hint: 'Applies a saved USB, network, WiFi, Bluetooth or reflex template. Choose the kind '
+        + 'first: the name is looked up in that kind’s store and nowhere else.',
     fields: [
-      { name: 'templateName', label: 'Template', required: true },
       { name: 'type', label: 'Kind', value: 'NETWORK',
         // FULL_SETTINGS deploys a whole loadout (SubSysTriggerAction.go:344
         // -> DeployStoredMasterTemplate). It is the enum's ZERO value, so
         // omitting it from this list did not merely hide it -- it made the
         // default-selected 'NETWORK' the only way to express anything, and a
         // reflex could not deploy a loadout at all.
-        choices: ['FULL_SETTINGS', 'USB', 'NETWORK', 'WIFI', 'BLUETOOTH', 'TRIGGER_ACTIONS'] },
+        choices: ['FULL_SETTINGS', 'USB', 'NETWORK', 'WIFI', 'BLUETOOTH', 'TRIGGER_ACTIONS'],
+        hint: 'Which store the name below is resolved in.' },
+      /* A PICKER, keyed off Kind -- not free text.
+         This was the last reflex field that took a name as a string: a typo,
+         or a name that exists under a DIFFERENT kind, armed a rule pointing
+         at nothing. Nothing said so, because the name is not resolved at save
+         time and at fire time SubSysTriggerAction logs the failure and carries
+         on. ui.js records the same failure as already fixed for the script
+         fields: "a typo armed a rule that pointed at nothing, and nothing
+         said so". A list of what exists in the chosen store cannot be
+         mistyped and cannot be the wrong store. */
+      { name: 'templateName', label: 'Template', required: true,
+        optionsBy: 'type',
+        optionsFor: {
+          FULL_SETTINGS: 'tplMaster', USB: 'tplUsb', NETWORK: 'tplNet',
+          WIFI: 'tplWifi', BLUETOOTH: 'tplBt', TRIGGER_ACTIONS: 'tplTas',
+        },
+        chooseLabel: 'Choose a template…',
+        emptyLabel: 'Nothing of that kind is stored',
+        hint: 'Stored templates of the chosen kind, read from the device.' },
     ] },
 ];
 
 const byKey = (list, k) => list.find(x => x.key === k);
 
+/* The label of whichever oneof member is set, WITH the member's own values.
+ *
+ * The label alone made every rule of the same shape read identically -- "A USB
+ * host attaches -> Run a HIDScript" whatever script, pin, group or template it
+ * named. Two such rules were indistinguishable in the only table that lists
+ * them, so disarming or deleting the right one was guesswork from the Id
+ * column, and the Delete dialog repeated the same ambiguous sentence back.
+ * The specs already enumerate the fields, so the values cost nothing to show.
+ * EmitUnpopulated means a zero value arrives as an empty string, which is
+ * dropped here rather than printed as a blank parameter. */
 function describeOneOf(obj, list) {
-  for (const item of list) if (obj && obj[item.key] !== undefined && obj[item.key] !== null) return item.label;
+  for (const item of list) {
+    const v = obj && obj[item.key];
+    if (v === undefined || v === null) continue;
+    const vals = (item.fields || [])
+      .map(f => (v[f.name] === undefined || v[f.name] === null) ? '' : String(v[f.name]))
+      .filter(s => s !== '');
+    return vals.length ? item.label + ' (' + vals.join(', ') + ')' : item.label;
+  }
   return 'unrecognised';
 }
 
@@ -1051,7 +1331,8 @@ Views.reflexes = async function () {
   main.append(pageHead('Reflexes',
     'Rules the device acts on by itself: when something happens, run something. This is what lets it work with nobody at the keyboard.'));
 
-  const [set, hidScripts, bashScripts, gpios] = await Promise.all([
+  const [set, hidScripts, bashScripts, gpios,
+         tasStored, masterT, usbT, wifiT, btT, netT] = await Promise.all([
     guard(() => Api.rpc('GetDeployedTriggerActionSet'), 'read the reflexes'),
     Api.rpc('ListStoredHIDScripts').catch(() => null),
     Api.rpc('ListStoredBashScripts').catch(() => null),
@@ -1062,16 +1343,135 @@ Views.reflexes = async function () {
        an empty list and the fields say so, which is the honest version of
        the same caution. */
     Api.rpc('GetAvailableGpios').catch(() => null),
+    /* The six template stores, because "Deploy a stored template" resolves a
+       name in exactly one of them and the builder has to offer the right
+       list. The reflex-set list is also what the store-under-a-name step
+       below checks against. Unguarded: an empty store, a device with no
+       Bluetooth controller and a device with no WiFi all answer some of these
+       with an error, and a toast per empty list on every visit is noise
+       rather than information. */
+    Api.rpc('ListStoredTriggerActionSets').catch(() => null),
+    Api.rpc('ListStoredMasterTemplate').catch(() => null),
+    Api.rpc('ListStoredUSBSettings').catch(() => null),
+    Api.rpc('ListStoredWifiSettings').catch(() => null),
+    Api.rpc('ListStoredBluetoothSettings').catch(() => null),
+    Api.rpc('ListStoredEthernetInterfaceSettings').catch(() => null),
   ]);
   State.triggers = set;
   const items = (set && set.TriggerActions) || [];
-  const scriptOptions = {
-    hid: (hidScripts && hidScripts.msgArray) || [],
-    bash: (bashScripts && bashScripts.msgArray) || [],
-    gpio: (gpios && gpios.msgArray) || [],
+  /* null = that list could NOT BE READ, which is a different fact from an
+     empty store: only one of the two means "there is nothing to pick", and
+     only one means a name's availability is unknown. The pickers and the
+     store-under-a-name step below both say which they are looking at rather
+     than showing the plausible default. */
+  const stringList = r => (r === null || r === undefined) ? null
+    : (Array.isArray(r.msgArray) ? r.msgArray.filter(n => typeof n === 'string' && n.length) : []);
+  const storedTas = stringList(tasStored);
+  const optionLists = {
+    hid: stringList(hidScripts),
+    bash: stringList(bashScripts),
+    gpio: stringList(gpios),
+    tplMaster: stringList(masterT),
+    tplUsb: stringList(usbT),
+    tplWifi: stringList(wifiT),
+    tplBt: stringList(btT),
+    tplNet: stringList(netT),
+    tplTas: stringList(tasStored),
   };
 
-  main.append(renderReflexBuilder(scriptOptions));
+  main.append(renderReflexBuilder(optionLists));
+
+  /* STORING WHAT IS RUNNING.
+   *
+   * Reflexes built on this page are runtime only, and until this button
+   * existed nothing on the page said so and nothing pointed at a store: the
+   * only control that could keep them was on Templates, under "Store the
+   * running reflexes", a page this one never named. So an operator could
+   * build six rules, pull the cable -- which view-system.js calls "the normal
+   * way this device is switched off" -- and lose all six with no screen
+   * having mentioned it. The Overview primer's advice to "Store a Loadout
+   * when you have something worth keeping" did not help either: a loadout can
+   * only name an already-stored reflex SET, which this page could not create.
+   *
+   * There is no StoreDeployedTriggerActionSet, so unlike USB, WiFi and
+   * Bluetooth the set is read and sent back whole. The actions go back exactly
+   * as the device produced them -- ids included -- so no field name inside a
+   * TriggerAction is ever typed here; only the two top-level keys are, and
+   * tools/check-rpc-shapes.py covers those.
+   *
+   * Immutable rules are dropped. DeployTriggerActionSetAdd refuses to add one
+   * ("we don't allow adding immutable settings via RPC call"), so storing them
+   * would put rules in the set that can never be deployed from it and the
+   * count would overstate what the set does. */
+  const mutable = items.filter(t => t && !t.immutable);
+  const lockedItems = items.filter(t => t && t.immutable);
+  async function storeRunningReflexes() {
+    if (set === undefined) {
+      toast('The running reflexes could not be read, so there is nothing to store under a name.', true);
+      return;
+    }
+    if (!mutable.length) {
+      await showDetail({
+        title: 'Nothing to store',
+        body: lockedItems.length
+          ? 'Every reflex running on this device is one of the service’s own locked rules. '
+            + 'Those cannot be added back from a stored set, so a set made of them would deploy '
+            + 'nothing. Build a rule above first.'
+          : 'No reflexes are running. Build one above first.',
+      });
+      return;
+    }
+    const armed = mutable.filter(t => t.isActive).length;
+    const name = await promptValue({
+      title: 'Store the running reflexes',
+      label: 'Name',
+      placeholder: 'engagement-a',
+      hint: mutable.length + ' reflex' + (mutable.length === 1 ? '' : 'es') + ' will be stored'
+        + (armed === mutable.length ? '' : ' (' + armed + ' armed, ' + (mutable.length - armed)
+          + ' switched off, kept as they are)')
+        + (lockedItems.length ? '; the ' + lockedItems.length + ' locked one'
+          + (lockedItems.length === 1 ? '' : 's') + ' the service owns cannot be' : '')
+        + '. Letters, digits, dot, dash and underscore.',
+      validate: v => {
+        if (!v) return 'Give it a name.';
+        if (!/^[A-Za-z0-9._-]+$/.test(v)) return 'Letters, digits, dot, dash and underscore only.';
+        return null;
+      },
+    });
+    if (!name) return;
+    /* A store writes over the key and reports success, so the name is checked
+       first -- the same step Templates takes before every store. */
+    if (storedTas === null) {
+      const ok = await confirmAction({
+        title: 'Store as "' + name + '"?',
+        body: 'The list of stored reflex sets could not be read, so whether that name is already '
+          + 'in use is unknown.',
+        consequence: 'If it is, the device replaces the existing set without asking and without '
+          + 'keeping a copy. There is no undo.',
+        confirmLabel: 'Store it anyway',
+        danger: true,
+      });
+      if (!ok) return;
+    } else if (storedTas.includes(name)) {
+      const ok = await confirmAction({
+        title: 'Replace "' + name + '"?',
+        body: 'A reflex set is already stored under that name.',
+        consequence: 'It is overwritten and no copy is kept. Any loadout that names it deploys '
+          + 'these rules instead from now on.',
+        confirmLabel: 'Replace it',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    const r = await guard(
+      () => Api.rpc('StoreTriggerActionSet', { TriggerActions: mutable, Name: name }),
+      'store the reflexes');
+    if (r !== undefined) {
+      toast('Stored ' + mutable.length + ' reflex' + (mutable.length === 1 ? '' : 'es')
+        + ' as "' + name + '".');
+      Views.reflexes();
+    }
+  }
 
   main.append(h('div.card',
     h('div.card-head',
@@ -1079,9 +1479,20 @@ Views.reflexes = async function () {
       // string "DeployedTriggerActions" -- so printing it just shouted a
       // Go type name at the operator.
       h('h2.card-title', { style: 'margin:0' }, 'Deployed'),
-      h('span.field-hint', items.length
-        ? items.filter(t => t.isActive).length + ' of ' + items.length + ' armed'
-        : '')),
+      h('div.btn-row',
+        h('span.field-hint', items.length
+          ? items.filter(t => t.isActive).length + ' of ' + items.length + ' armed'
+          : ''),
+        h('button.btn.btn-sm.btn-quiet', {
+          type: 'button', onclick: () => storeRunningReflexes(),
+        }, 'Store these reflexes'))),
+    h('p.field-hint', { style: 'margin:-8px 0 14px' },
+      'These rules are running, not stored. They live in memory, so a reboot -- or pulling the '
+      + 'cable, which is how this device is normally switched off -- loses them: the device comes '
+      + 'back with the service’s own locked rules and whatever reflex set the boot loadout '
+      + 'names, if it names one. Store them under a name to keep them, and because a loadout can '
+      + 'only name an already-stored set, that is also what lets a loadout bring them back. '
+      + 'Stored sets are listed on Templates.'),
     items.length ? dataTable(
       h('thead', h('tr',
         h('th', 'Id'), h('th', 'When'), h('th', 'Then'),
@@ -1154,7 +1565,7 @@ Views.reflexes = async function () {
 
 /* The builder. Inline rather than a modal: it has two dependent selects and a
    variable set of fields, which is more than a dialog should carry. */
-function renderReflexBuilder(scriptOptions) {
+function renderReflexBuilder(optionLists) {
   const triggerSel = h('select', { 'aria-label': 'Trigger' },
     ...TRIGGERS.map(t => h('option', { value: t.key }, t.label)));
   const actionSel = h('select', { 'aria-label': 'Action' },
@@ -1166,6 +1577,23 @@ function renderReflexBuilder(scriptOptions) {
   const triggerHint = h('p.field-hint');
   const actionHint = h('p.field-hint');
 
+  /* Fill a picker in place, keeping the current selection when the new list
+     still holds it.
+     `opts` of null means the device did not answer, which is not the same as
+     an empty store: saying "nothing is stored" to someone whose list failed
+     to read is a claim about their device that may well be false. */
+  function fillOptions(select, opts, f) {
+    const had = select.value;
+    const list = Array.isArray(opts) ? opts : [];
+    clear(select);
+    select.append(h('option', { value: '' },
+      list.length ? (f.chooseLabel || 'Choose a script...')
+        : Array.isArray(opts) ? (f.emptyLabel || 'No scripts stored')
+          : 'Unknown -- the device did not answer'));
+    for (const n of list) select.append(h('option', { value: n }, n));
+    if (had && list.indexOf(had) !== -1) select.value = had;
+  }
+
   /* Build inputs for whichever member is selected, and keep the DOM nodes so
      collect() can read them back without a second lookup table. */
   function renderFields(spec, host, hintEl, store) {
@@ -1174,12 +1602,16 @@ function renderReflexBuilder(scriptOptions) {
     store.inputs = {};
     for (const f of spec.fields) {
       let input;
-      if (f.options) {
-        const opts = scriptOptions[f.options] || [];
-        const empty = f.emptyLabel || 'No scripts stored';
-        input = h('select', {},
-          h('option', { value: '' }, opts.length ? (f.chooseLabel || 'Choose a script...') : empty),
-          ...opts.map(n => h('option', { value: n }, n)));
+      if (f.options || f.optionsBy) {
+        /* `options` names a fixed list; `optionsBy` names another field in
+           this same form whose value chooses the list, and is filled in the
+           second pass below. */
+        input = h('select', {});
+        /* Filled unconditionally, so a dependent picker whose controlling
+           field is missing from the spec still carries a placeholder rather
+           than rendering as an empty box with nothing in it at all. The
+           second pass overwrites this for the dependent case. */
+        fillOptions(input, f.options ? optionLists[f.options] : undefined, f);
       } else if (f.choices) {
         // A fixed set of values the API will accept. Typing these by hand
         // into a text box only produces rejections the operator cannot
@@ -1200,6 +1632,20 @@ function renderReflexBuilder(scriptOptions) {
         h('span.field-label', f.label),
         input,
         f.hint ? h('span.field-hint', f.hint) : null));
+    }
+    /* Second pass: fields whose list depends on another field here. Done
+       after the loop so the controlling field may be declared anywhere in the
+       spec, and re-run on every change so the list shown is always the store
+       the chosen kind resolves against -- a WiFi template name is not a
+       loadout name, and the service looks a name up in one store only. */
+    for (const f of spec.fields) {
+      if (!f.optionsBy) continue;
+      const dep = store.inputs[f.name];
+      const ctl = store.inputs[f.optionsBy];
+      if (!dep || !ctl) continue;
+      const refill = () => fillOptions(dep.el, optionLists[(f.optionsFor || {})[ctl.el.value]], f);
+      refill();
+      ctl.el.addEventListener('change', refill);
     }
   }
 
@@ -1300,11 +1746,60 @@ Views.loadouts = async function () {
         h('td',
           h('button.btn.btn-sm.btn-primary', {
             onclick: async () => {
+              /* READ THE LOADOUT BEFORE ASKING.
+                 A loadout that names a reflex set runs
+                 DeployStoredTriggerActionSetReplace, which clears every
+                 non-immutable reflex on the running device before adding the
+                 stored ones -- and reflexes built on the Reflexes page are
+                 runtime-only, so they are simply gone. The old confirmation
+                 enumerated four subsystems and read as a complete list, so
+                 nothing warned anyone. Templates treats the identical call as
+                 the most destructive thing on its page: counts what will be
+                 lost, names the locked survivors, marks itself danger. Two
+                 pages, one RPC path, so they say the same thing now. */
+              const t = await guard(() => Api.rpc('GetStoredMasterTemplate', { msg: n }),
+                'read loadout "' + n + '"');
+              if (t === undefined || t === null) return;
+              const named = [
+                ['USB', t.template_name_usb], ['WiFi', t.template_name_wifi],
+                ['Bluetooth', t.template_name_bluetooth],
+                ['Reflexes', t.template_name_trigger_actions],
+                ['Network', (t.template_names_network || []).join(', ')],
+              ].filter(([, v]) => v).map(([k, v]) => k + ': ' + v);
+              const tas = typeof t.template_name_trigger_actions === 'string'
+                ? t.template_name_trigger_actions : '';
+              let reflexes;
+              if (tas) {
+                const live = await Api.rpc('GetDeployedTriggerActionSet').catch(() => null);
+                const all = (live && Array.isArray(live.TriggerActions)) ? live.TriggerActions : null;
+                const losing = all ? all.filter(x => x && !x.immutable).length : null;
+                const keeping = all ? all.filter(x => x && x.immutable).length : null;
+                reflexes = ' It names the reflex set "' + tas + '", so every reflex running on the '
+                  + 'device is thrown away first and then that set is applied. '
+                  + (losing === null
+                    ? 'How many are running now could not be read, so how many you are about to '
+                      + 'lose is unknown. '
+                    : losing + ' reflex' + (losing === 1 ? '' : 'es') + ' will be discarded'
+                      + (keeping ? ' (the ' + keeping + ' locked one' + (keeping === 1 ? '' : 's')
+                        + ' the service owns survive)' : '') + '. ')
+                  + 'Rules built on the Reflexes page are not written to disk, so they are not '
+                  + 'recoverable unless you stored them first.';
+              } else {
+                reflexes = ' It names no reflex set, so the reflexes running now are left alone.';
+              }
               const yes = await confirmAction({
                 title: 'Deploy "' + n + '"?',
-                body: 'A loadout reconfigures USB, WiFi, Bluetooth and networking together, all at once.',
-                consequence: 'Whichever link you are reading this over -- USB, WiFi or Bluetooth -- is almost certainly reconfigured by this. Expect the console to disconnect. Reload after a few seconds; if the network details changed you may need to reconnect to a different SSID or address.',
+                body: 'A loadout reconfigures USB, WiFi, Bluetooth, networking and reflexes '
+                  + 'together, all at once.'
+                  + (named.length
+                    ? ' "' + n + '" holds — ' + named.join('; ') + '.'
+                    : ' "' + n + '" names no template at all, so deploying it would change nothing.'),
+                consequence: 'Whichever link you are reading this over -- USB, WiFi or Bluetooth -- is '
+                  + 'almost certainly reconfigured by this. Expect the console to disconnect. Reload '
+                  + 'after a few seconds; if the network details changed you may need to reconnect to '
+                  + 'a different SSID or address.' + reflexes,
                 confirmLabel: 'Deploy loadout',
+                danger: !!tas,
               });
               if (!yes) return;
               const r = await guard(() => Api.rpc('DeployStoredMasterTemplate', { msg: n }), 'deploy loadout');
@@ -1451,31 +1946,46 @@ Views.loadouts = async function () {
           if (res !== undefined) { toast('Stored loadout "' + r.name + '".'); Views.loadouts(); }
         },
       }, 'New loadout'))
+      /* Radio was retired and its cards split across WiFi, Bluetooth and
+         Network, so this empty state -- the whole screen, for an operator
+         with nothing to compose from -- was naming a page that is not in the
+         nav and not in the command palette. */
       : h('div.empty',
         'Nothing to compose from yet. Store a USB, WiFi, Bluetooth, network or reflex '
-        + 'template first -- the Cable and Radio screens have a "Store as template" button.')));
+        + 'template first: Cable, Bluetooth and Network each have a "Store as template" '
+        /* WiFi deliberately does NOT say "Store as template": it has two store
+           paths and view-wifi.js relabels both, because one snapshots what is
+           running and the other stores the form including edits that were
+           never applied. Naming a button that is not on the page is the same
+           class of error as the "Radio screen" this empty state used to send
+           people to. */
+        + 'button; WiFi has "Store what is running" and "Store the form as a template"; '
+        + 'and Reflexes has "Store these reflexes".')));
 
   main.append(h('div.card',
     h('h2.card-title', 'Device'),
+    /* THE BACKUP BUTTON IS GONE FROM HERE, deliberately.
+     *
+     * It called DBBackup with only a character check on the name. The System
+     * page wraps the same RPC in two guards it documents as necessary: it
+     * refuses the name "init", because init.db is the factory template set
+     * this image shipped with and the file datastore.Open restores on a first
+     * boot -- DBBackup opens the target with O_TRUNC, so "init" truncated the
+     * only copy on the device, with no RPC to restore or list it back -- and
+     * it confirms before replacing an existing backup, which this one
+     * overwrote without a word. The hint here also understated what a backup
+     * holds, omitting loadouts and the boot default.
+     *
+     * Duplicating the guards is how they drift apart again, and System
+     * already has the list of existing backups (ListStoredDBBackups, which
+     * this page does not fetch) and the matching restore beside it. So: one
+     * entry point, with the guards, and a pointer to it. */
+    h('p.field-hint', { style: 'margin:-8px 0 14px' },
+      'Backing up and restoring the template database is on System, beside the list of backups '
+      + 'already on the device. A backup holds every stored template -- USB, WiFi, Bluetooth and '
+      + 'network settings, reflex sets and loadouts -- and the boot default.'),
     h('div.btn-row',
-      h('button.btn', {
-        onclick: async () => {
-          const name = await promptValue({
-            title: 'Back up the template database',
-            label: 'Backup name',
-            placeholder: 'before-engagement',
-            hint: 'Captures every stored template: USB, WiFi, Bluetooth, network and reflexes.',
-            validate: v => {
-              if (!v) return 'Give the backup a name.';
-              if (!/^[A-Za-z0-9._-]+$/.test(v)) return 'Letters, digits, dot, dash and underscore only.';
-              return null;
-            },
-          });
-          if (!name) return;
-          const r = await guard(() => Api.rpc('DBBackup', { msg: name }), 'back up the database');
-          if (r !== undefined) toast('Backed up as "' + name + '".');
-        },
-      }, 'Back up database'),
+      h('button.btn', { onclick: () => go('system') }, 'Open System'),
       h('button.btn.btn-danger', {
         onclick: async () => {
           const yes = await confirmAction({
@@ -1696,18 +2206,46 @@ Views.journal = function () {
   paintStreamPill();
 };
 
+function logLine(e) {
+  return h('div', { class: 'log-line' + (e.lv === 2 ? ' lv-warn' : e.lv === 3 ? ' lv-err' : '') },
+    h('span.log-t', fmtTime(e.t)),
+    h('span.log-src', e.src),
+    h('span.log-msg', e.msg));
+}
+
+/* Is the operator reading the newest line, or have they scrolled back?
+ *
+ * This is the whole question. The Journal used to rebuild all 600 rows and
+ * then set scrollTop = scrollHeight on EVERY arriving event -- which is to
+ * say, exactly when the device is producing the output someone is trying to
+ * read. Scrolling back to an earlier line was impossible and the text
+ * selection was destroyed before it could be copied. So: only follow the tail
+ * if that is where they already were. */
+function logAtBottom(box) {
+  return (box.scrollHeight - box.scrollTop - box.clientHeight) < 24;
+}
+
 function paintLog() {
   const box = $('#log');
   if (!box) return;
+  const follow = logAtBottom(box);
   clear(box);
   if (!State.log.length) { box.append(h('div.empty', 'No events yet.')); return; }
-  for (const e of State.log) {
-    box.append(h('div', { class: 'log-line' + (e.lv === 2 ? ' lv-warn' : e.lv === 3 ? ' lv-err' : '') },
-      h('span.log-t', fmtTime(e.t)),
-      h('span.log-src', e.src),
-      h('span.log-msg', e.msg)));
-  }
-  box.scrollTop = box.scrollHeight;
+  for (const e of State.log) box.append(logLine(e));
+  if (follow) box.scrollTop = box.scrollHeight;
+}
+
+/* One arriving event appends one row. Rebuilding the list would throw away
+   the selection even when the view is pinned to the bottom. */
+function appendLogLine(entry, dropped) {
+  const box = $('#log');
+  if (!box) return;
+  const follow = logAtBottom(box);
+  const empty = box.querySelector('.empty');
+  if (empty) empty.remove();
+  for (let i = 0; i < dropped && box.firstChild; i++) box.removeChild(box.firstChild);
+  box.append(logLine(entry));
+  if (follow) box.scrollTop = box.scrollHeight;
 }
 
 function paintStreamPill() {
@@ -1767,8 +2305,12 @@ function handleEvent(ev) {
 
 function push(entry) {
   State.log.push(entry);
-  if (State.log.length > LOG_CAP) State.log.splice(0, State.log.length - LOG_CAP);
-  if (State.view === 'journal') paintLog();
+  let dropped = 0;
+  if (State.log.length > LOG_CAP) {
+    dropped = State.log.length - LOG_CAP;
+    State.log.splice(0, dropped);
+  }
+  if (State.view === 'journal') appendLogLine(entry, dropped);
   const c = $('#journal-count');
   if (c) c.textContent = String(State.log.length);
 }
@@ -1913,7 +2455,20 @@ function go(view) {
     b.setAttribute('aria-current', b.dataset.view === view ? 'page' : 'false');
   }
   revealCurrentNavItem();
+  /* SAY THE PAGE CHANGED.
+     go() replaced the whole of #view and moved nothing: focus stayed on the
+     nav button that was pressed, the title stayed "P4wnP1 A.L.O.A." forever,
+     and #view has no live region of its own. A VoiceOver operator tapped a
+     nav item, the entire main content was replaced, and nothing said so --
+     with thirteen pages in a horizontally scrolling strip, that is the main
+     way around this console. The title is set before the render because the
+     render is async; the focus target already carries tabindex="-1" and
+     #view:focus { outline: none } (app.css), so both halves were in place. */
+  const navEntry = NAV.find(e => e[0] === view);
+  try { document.title = (navEntry ? navEntry[1] : view) + ' - P4wnP1 A.L.O.A.'; } catch (_) {}
   Views[view]();
+  const main = $('#view');
+  if (main && main.focus) { try { main.focus(); } catch (_) {} }
 }
 
 function renderConsole() {
@@ -1941,7 +2496,31 @@ function renderConsole() {
             onclick: () => changePasswordFlow(),
           }, 'Change password'),
           h('button.btn.btn-sm.btn-quiet', {
-            onclick: async () => { if (State.stopStream) State.stopStream(); await Api.logout(); renderSignIn(); },
+            onclick: async () => {
+              /* ASK FIRST. This is 30px tall with a transparent border and
+                 sits 12px from "Change password"; under 820px the rail-foot
+                 is part of the header of every page, so it is in the top
+                 chrome of the whole console on a phone. A mis-tap used to
+                 sign the operator out instantly -- renderSignIn() clears
+                 #root and nothing here persists a draft, so an unsaved
+                 HIDScript or a half-filled network form went with it. The
+                 command palette's Sign out entry already asks for exactly
+                 this reason; the rail button it duplicates did not. */
+              const yes = await confirmAction({
+                title: 'Sign out of the console?',
+                body: 'Only this browser session ends. The device carries on exactly as it is: '
+                  + 'the USB gadget stays attached, running scripts keep running, and armed '
+                  + 'reflexes keep firing.',
+                consequence: 'Anything you have typed and not saved is lost -- the console keeps '
+                  + 'no drafts -- and getting back in needs the console password, which is in '
+                  + '/root/INITIAL_CREDENTIALS.txt on the device unless it has been changed.',
+                confirmLabel: 'Sign out',
+              });
+              if (!yes) return;
+              if (State.stopStream) State.stopStream();
+              await Api.logout();
+              renderSignIn();
+            },
           }, 'Sign out'))),
       h('main.main', { id: 'main' }, h('div#view', { tabindex: '-1' }))));
   renderThemeSwitch();
@@ -2061,6 +2640,9 @@ async function changePasswordFlow() {
 
 function renderSignIn(message) {
   if (State.stopStream) { State.stopStream(); State.stopStream = null; }
+  /* go() keeps document.title on the current page, so without this the title
+     still names whatever page was open before the session ended. */
+  try { document.title = 'Sign in - P4wnP1 A.L.O.A.'; } catch (_) {}
   const root = clear($('#root'));
   const user = h('input', { type: 'text', autocomplete: 'username', value: 'admin' });
   const pass = h('input', { type: 'password', autocomplete: 'current-password' });

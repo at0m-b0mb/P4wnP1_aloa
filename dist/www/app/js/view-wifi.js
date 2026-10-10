@@ -156,6 +156,10 @@
     'changeme',
   ];
   const GENERATED_PSK_PATH = '/etc/p4wnp1/generated-ap.psk';
+  /* generatePSK (service/wifi_psk_guard.go) returns exactly 20 characters, from
+     the base64 alphabet with / + and = removed -- so none of it needs escaping
+     in a WIFI: URI and 20 characters is 20 bytes. */
+  const GENERATED_PSK_LEN = 20;
   function isPublishedPSK(psk) {
     const p = String(psk === null || psk === undefined ? '' : psk).trim().toLowerCase();
     if (!p) return false;
@@ -173,19 +177,28 @@
    * the operator seeing "the WiFi does not work" with nothing pointing at the
    * name they chose.
    *
-   * 15 bytes is this device's OLED panel. The first-boot credentials card
+   * 53 bytes is this device's OLED panel. The first-boot credentials card
    * builds a scan-to-join QR, and a panel-sized symbol -- version 3 at error
    * correction level L, the largest that fits 64 pixels at two pixels per
    * module -- holds 53 bytes (oled/qr.go). A join URI is
    *
    *     WIFI:T:WPA;S:<ssid>;P:<key>;;
    *
-   * which is 18 bytes of structure plus the whole SSID plus the whole key, so
-   * with the 20-character generated key there are 15 bytes left for the name.
-   * Over budget the card drops the join code and prints the key to be typed
-   * with a thumb instead. service/shipped_db_ssid_test.go pins the shipped
-   * SSID to this same 15 and firstboot-secure-defaults.sh tells the operator
-   * the same number.
+   * which is 18 bytes of structure plus the whole SSID plus the whole key.
+   * Over that the card drops the join code and prints the key to be typed with
+   * a thumb instead.
+   *
+   * 53 IS THE LIMIT, 15 IS NOT. The name and the key share the 35 bytes left
+   * after the structure, so a name alone cannot be "over budget" -- which the
+   * page used to claim, warning about an 18-byte name beside an 8-character key
+   * in a banner whose own second paragraph printed the 44-of-53 that proved it
+   * fitted. FirstRunView.cards() (oled/firstrun.go) builds the URI from the key
+   * actually in force and only falls back when NewQRMax refuses it, so the
+   * check here is on the whole URI too. 15 is the REMAINDER for a name once the
+   * 20-character generated key has taken its share, which is the figure
+   * service/shipped_db_ssid_test.go pins the shipped SSID to and the figure
+   * firstboot-secure-defaults.sh quotes -- so it is still worth quoting, as a
+   * remainder and not as a trigger.
    *
    * Emoji cost 3-4 bytes EACH, and the SSID this image ships starts with one,
    * so counting characters instead of bytes would be wrong by four on the very
@@ -346,6 +359,13 @@
     ]);
     State.wifi = state;
 
+    /* Whether the list could be READ is a different question from whether it
+       is empty: ListStoredWifiSettings is unguarded above and returns null on
+       failure, and protojson omits msgArray entirely for a device with no
+       templates. storeForm() needs the difference, because "that name is free"
+       and "it is not known whether that name is free" are different things to
+       tell someone whose only undo is a database backup. */
+    const templatesRead = stored !== null && stored !== undefined;
     const templates = (stored && Array.isArray(stored.msgArray) ? stored.msgArray : [])
       .filter(n => typeof n === 'string' && n.length)
       .slice()
@@ -367,9 +387,20 @@
           + 'expect a timeout even when the change was made.'),
         h('p', 'The way back in: rejoin with the NEW name and the NEW key, and return to '
           + link.addr + '. Failing that, the USB cable answers on 172.16.0.1 when a RNDIS or '
-          + 'CDC ECM composition is deployed, the Serial USB function gives a console over '
-          + 'ttyGS0, and an OLED panel can show the access point’s current name and key with '
-          + 'no network at all.')));
+          + 'CDC ECM composition is deployed, and the Serial USB function gives a console over '
+          + 'ttyGS0.'),
+        /* The panel is NOT a way to recover the key. FirstRunView is the only
+           screen that prints it, it is built from /var/lib/p4wnp1/firstboot-creds,
+           and KEY1 erases that file -- after which the System menu's "First-boot
+           creds" entry answers "nothing pending". The Status screen carries
+           mode + SSID only (oled/client.go:619). Offering the panel as a route
+           back to the key is the worst possible place to be wrong, because this
+           sentence is read while the operator decides whether to press Apply. */
+        h('p', 'A fitted OLED panel shows the access point’s current name on its Status '
+          + 'screen, but not the key: the panel prints the key only on the first-boot '
+          + 'credentials card, which exists once and is erased when it is confirmed. If the '
+          + 'device substituted the key itself, read it on the device with "sudo cat '
+          + GENERATED_PSK_PATH + '".')));
     }
 
     /* --- the subsystem may not be there ---------------------------------- */
@@ -380,7 +411,16 @@
           + 'the service could not bring it up: no wlan0 on this board, or hostapd or '
           + 'wpa_supplicant missing. On a cold boot it can also mean brcmfmac had not finished '
           + 'loading its firmware when the service started -- the service waits 15 seconds for '
-          + 'wlan0 and then carries on without it. The Journal has the reason.'),
+          + 'wlan0 and then carries on without it.'),
+        /* Not "the Journal has the reason". EventListen registers a fresh
+           droppable receiver and replays nothing, so the Journal page holds
+           only what arrived after this page loaded -- and a boot-time WiFi
+           failure is by definition older than that. Sending the operator to a
+           page that will say "No events yet" teaches them the device reported
+           nothing. */
+        h('p', 'The reason was logged when the service started, which is before this page '
+          + 'connected -- the event stream replays nothing, so the Journal here will not have '
+          + 'it. Read it on the device: "journalctl -u P4wnP1 -b".'),
         h('p', 'No editor is shown, deliberately. Building a form out of defaults while the '
           + 'device’s real configuration is unknown is how an operator applies a blank access '
           + 'point over a working one.')));
@@ -838,21 +878,53 @@
             h('p.banner-title', 'Too long for 802.11'),
             h('p', 'The service refuses an SSID over ' + SSID_MAX_BYTES + ' bytes, so this will '
               + 'not deploy at all.')));
-        } else if (bytes > QR_SSID_BUDGET) {
-          const uri = joinUriBytes(draft.apSsid,
-            draft.authMode === 'OPEN' ? '' : String(draft.apPsk || ''));
-          out.push(h('div.banner', { style: 'margin:10px 0 0' },
-            h('p.banner-title', 'Over the OLED join-code budget: ' + bytes + ' bytes, '
-              + QR_SSID_BUDGET + ' fit'),
-            h('p', 'The panel’s first-boot credentials card builds a scan-to-join QR out of '
-              + 'this name and the access point key. A panel-sized symbol holds ' + QR_CAPACITY
-              + ' bytes; the WIFI: structure takes ' + QR_URI_OVERHEAD + ' and the '
-              + '20-character generated key takes the rest, which leaves ' + QR_SSID_BUDGET
-              + ' bytes for the name. Over budget the card drops the join code and prints the '
-              + 'key on screen to be typed with a thumb instead.'),
-            h('p', 'With the key currently in the form the join code would be ' + uri
-              + ' bytes of ' + QR_CAPACITY + '. Nothing else breaks -- the access point works '
-              + 'normally, you just lose the scan-to-join shortcut.')));
+        } else if (draft.authMode !== 'OPEN') {
+          /* The panel does NOT hold a fixed byte budget for the name.
+             FirstRunView.cards() (oled/firstrun.go:351-371) builds the join URI
+             from the key actually in force and calls NewQRMax; it falls back to
+             "key only" only when that genuinely does not fit. So the test is
+             whether THIS name and THIS key together exceed the 53 bytes -- 15
+             is only what is left over for a name once a 20-character generated
+             key has taken its share, and warning about an 18-byte name beside
+             an 8-character key told the operator to shorten something that fits
+             while the banner's own second paragraph printed the figure that
+             proved it fitted.
+
+             OPEN gets no banner at all: v.psk() is empty, so cards() builds no
+             WiFi card -- there is no join code to lose and no key to print. */
+          const swapped = isPublishedPSK(draft.apPsk);
+          /* A published key never reaches the air: the guard substitutes a
+             20-character one (service/wifi_psk_guard.go generatePSK), and that
+             is the key the panel would encode. Its alphabet is base64 minus
+             / + =, so none of it needs escaping and 20 bytes is exact. */
+          const key = swapped ? 'x'.repeat(GENERATED_PSK_LEN) : String(draft.apPsk || '');
+          const uri = joinUriBytes(draft.apSsid, key);
+          if (uri > QR_CAPACITY) {
+            out.push(h('div.banner', { style: 'margin:10px 0 0' },
+              h('p.banner-title', 'Too long for the OLED join code: ' + uri + ' bytes, '
+                + QR_CAPACITY + ' fit'),
+              /* The two figures are the ESCAPED costs, so 18 + name + key is
+                 exactly the number in the title. WiFiURI backslash-escapes
+                 \ ; , : and ", and quoting the unescaped byte count here made
+                 the arithmetic fail to add up on any name containing one. */
+              h('p', 'The panel’s first-boot credentials card builds a scan-to-join QR out of '
+                + 'this name and the access point key together. A panel-sized symbol holds '
+                + QR_CAPACITY + ' bytes: the WIFI: structure takes ' + QR_URI_OVERHEAD
+                + ', and the name and the key share what is left. In the join code this name '
+                + 'costs ' + qrFieldBytes(draft.apSsid) + ' bytes and the key '
+                + qrFieldBytes(key) + ', which is over. The card then '
+                + 'drops the join code and prints the key on screen to be typed with a thumb '
+                + 'instead.'
+                + (swapped
+                  ? ' (Counted against the 20-character key the device will substitute for '
+                    + 'the published one in the form, since that is the key the panel would '
+                    + 'encode.)'
+                  : '')),
+              h('p', 'Nothing else breaks -- the access point works normally, you just lose '
+                + 'the scan-to-join shortcut. Shortening either the name or the key brings it '
+                + 'back; with the 20-character key the device generates for itself, that '
+                + 'leaves ' + QR_SSID_BUDGET + ' bytes for the name.')));
+          }
         }
         clear(sizeSlot).append(...out);
       }
@@ -969,7 +1041,15 @@
             + 'name in beacons. This does not hide the network: a client configured for it '
             + 'broadcasts the name itself in every probe request, so anyone watching the air '
             + 'learns it from your own devices. It does reliably break auto-join on some phones '
-            + 'and laptops, and it makes the OLED join code the only convenient way on.')));
+            + 'and laptops, '
+            /* Only promise the join code on a network the panel will actually
+               build a card for: cards() skips the WiFi card entirely when
+               psk() is empty, so on an OPEN access point there is no join code
+               to fall back to. */
+            + (draft.authMode === 'OPEN'
+              ? 'and on an open access point there is no OLED join code to fall back to -- '
+                + 'the panel builds that card only for a network with a key.'
+              : 'which leaves the OLED join code as the most convenient way on.'))));
 
       paintSize();
       paintPskWarning();
@@ -1128,11 +1208,11 @@
         title: 'Store these WiFi settings',
         label: 'Template name',
         placeholder: 'ap-engagement',
-        hint: 'Saves what is in the form above, INCLUDING changes you have not applied. An '
-            + 'existing name is overwritten without a further warning. A stored template can be '
-            + 'deployed again in one step and is what a Loadout names under WiFi -- which is '
-            + 'the only way to make a configuration survive a reboot. The keys go into the '
-            + 'device database as typed.',
+        hint: 'Saves what is in the form above, INCLUDING changes you have not applied. A '
+            + 'name that is already in use is checked and confirmed before anything is '
+            + 'written. A stored template can be deployed again in one step and is what a '
+            + 'Loadout names under WiFi -- which is the only way to make a configuration '
+            + 'survive a reboot. The keys go into the device database as typed.',
         validate: v => {
           if (!v) return 'Give the template a name.';
           if (!/^[A-Za-z0-9._-]+$/.test(v)) {
@@ -1142,6 +1222,41 @@
         },
       });
       if (!name) return;
+
+      /* datastore.Store.Put is called with allowOverwrite=true
+         (service/rpc_server.go), so StoreWifiSettings replaces a template of
+         the same name in silence and keeps no copy. The list is already in
+         scope, so the collision is knowable before anything is sent -- and
+         the name an operator retypes is, by definition, the one they already
+         use. This is the same check view-templates.js nameIsFree() makes. */
+      if (templatesRead && templates.indexOf(name) !== -1) {
+        const replace = await confirmAction({
+          title: 'Replace the stored template "' + name + '"?',
+          body: 'A WiFi template is already stored under that name.',
+          consequence: 'It is overwritten by what is in the form above. The device does this '
+            + 'without keeping a copy, and there is no undo short of a database backup made '
+            + 'earlier. Any Loadout that names "' + name + '" under WiFi -- including the '
+            + 'boot default, if it does -- gets this configuration from its next deploy '
+            + 'onwards, so the next reboot brings up what you are about to store rather than '
+            + 'what is stored now.',
+          confirmLabel: 'Replace it',
+          danger: true,
+        });
+        if (!replace) return;
+      } else if (!templatesRead) {
+        const anyway = await confirmAction({
+          title: 'Store as "' + name + '"?',
+          body: 'The list of stored WiFi templates could not be read, so it is not known '
+            + 'whether that name is already in use.',
+          consequence: 'If it is, the device overwrites the existing template without asking '
+            + 'and without keeping a copy, and any Loadout that names it gets this '
+            + 'configuration instead.',
+          confirmLabel: 'Store it anyway',
+          danger: true,
+        });
+        if (!anyway) return;
+      }
+
       const settings = buildSettings();
       const res = await guard(() => Api.rpc('StoreWifiSettings', {
         TemplateName: name,
@@ -1180,6 +1295,14 @@
     const hasAp = usesAP(mode);
     const hasSta = usesSTA(mode);
     const apSsidBytes = utf8len(ap.SSID);
+    /* Same arithmetic as paintSize(): the panel's join code has to hold the
+       name AND the key, so a name alone cannot be "over budget". QR_SSID_BUDGET
+       is only the remainder once a 20-character generated key has taken its
+       share. For OPEN there is no card at all -- cards() skips it when psk() is
+       empty -- so there is nothing to say. */
+    const apJoinKey = (auth === 'OPEN') ? ''
+      : (isPublishedPSK(ap.PSK) ? 'x'.repeat(GENERATED_PSK_LEN) : String(ap.PSK || ''));
+    const apJoinBytes = joinUriBytes(ap.SSID, apJoinKey);
 
     /* The key is behind a button rather than on screen. GetWiFiState hands it
        over in full, so this is not protection -- it is simply not putting a key
@@ -1241,9 +1364,10 @@
           hasAp ? kvRow('Access point name', ap.SSID || 'unset',
             !ap.SSID ? 'hostapd will not start without one.'
               : apSsidBytes + ' bytes'
-                + (apSsidBytes > QR_SSID_BUDGET
-                  ? ' -- over the ' + QR_SSID_BUDGET + '-byte budget for the OLED panel’s '
-                    + 'scan-to-join code, so that card prints the key to be typed instead.'
+                + ((auth !== 'OPEN' && apJoinBytes > QR_CAPACITY)
+                  ? ' -- this name and this key together make a ' + apJoinBytes + '-byte join '
+                    + 'code and the OLED panel holds ' + QR_CAPACITY + ', so that card prints '
+                    + 'the key to be typed instead of a scan-to-join code.'
                   : '.')) : null,
           hasAp ? kvRow('Authentication', auth ? AUTH_BY_KEY[auth].label : 'unknown',
             auth === 'OPEN'
@@ -1314,8 +1438,9 @@
       + 'is no partial deploy -- so read it before you press Deploy, and especially so if this '
       + 'page is riding on the access point.'
       + (subsystemDown
-        ? ' The WiFi subsystem did not answer, so a deploy will be refused outright; reading '
-          + 'and deleting still work.'
+        ? ' The WiFi subsystem did not answer, so a deploy will be refused outright and there '
+          + 'is no form to load into -- the editor is withheld while the device’s real '
+          + 'configuration is unknown. Reading and deleting still work.'
         : '')));
 
     card.append(dataTable(
@@ -1331,9 +1456,23 @@
              difference matters here more than anywhere else in the console:
              this is how a template is read and edited without being put on the
              air first -- which for WiFi is the difference between checking a
-             configuration and losing the link while you check it. */
+             configuration and losing the link while you check it.
+
+             Disabled when the subsystem is down, because Views.wifi() returns
+             before building the editor in that case. Live, it read the
+             template, set pendingDraft, said "Loaded X into the form" and then
+             re-rendered a page with no form, no Apply and the draft discarded
+             on the next entry -- the one control promising an editor was the
+             one left working on the page whose own banner says the editor is
+             withheld on purpose. */
           h('button.btn.btn-sm', {
-            type: 'button', onclick: () => loadTemplate(name),
+            type: 'button',
+            disabled: !!subsystemDown,
+            title: subsystemDown
+              ? 'No editor is shown while the device’s real WiFi configuration is unknown, '
+                + 'so there is nothing to load into.'
+              : null,
+            onclick: () => loadTemplate(name),
           }, 'Load into form'),
           ' ',
           h('button.btn.btn-sm.btn-danger', {
@@ -1440,9 +1579,11 @@
       body: 'The stored configuration is removed from the device database.',
       consequence: 'Nothing on the radio changes -- what is deployed now stays deployed. Any '
         + 'Loadout that names this template under WiFi will fail to set up WiFi the next time '
-        + 'it is deployed, and will say so only in the journal. If that Loadout is the boot '
-        + 'default, the device comes up next time with whatever servicestart.sh gives it '
-        + 'instead.',
+        + 'it is deployed, and will say so only in the device’s own journal -- '
+        + '"journalctl -u P4wnP1 -b" over SSH, not this console’s Journal page, which starts '
+        + 'empty on every page load and has nothing from before it connected. If that Loadout '
+        + 'is the boot default, the device comes up next time with whatever servicestart.sh '
+        + 'gives it instead.',
       confirmLabel: 'Delete',
       danger: true,
     });

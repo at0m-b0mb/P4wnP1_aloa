@@ -392,7 +392,7 @@
               + 'tears the bridge down. A client only gets a working connection if DHCP '
               + 'is running on ' + BRIDGE_NAME + ' and hands out a router and a DNS '
               + 'server -- an Android phone pairs, takes the lease and then goes quiet '
-              + 'without them. Check the Interfaces table on Radio for ' + BRIDGE_NAME
+              + 'without them. Check the Deployed-now table on Network for ' + BRIDGE_NAME
               + '; its default address is ' + BRIDGE_NET + '0.1.'),
             ...SERVICES.map(s => toggleRow({
               label: s.label + ' -- ' + s.title,
@@ -588,6 +588,18 @@
     /* --- the pairing PIN -------------------------------------------------- */
 
     const pinCard = h('div.card', h('h2.card-title', 'Pairing PIN'));
+    /* Which SSP branch this device is actually in, read back rather than
+       assumed. GetDefaultBluetoothSettings (service/defaults.go) ships
+       SecureSimplePairing: false -- "we start with PIN based auth" -- and
+       HighSpeed: false with it, because High Speed needs SSP on. The explainer
+       below had that backwards and told the operator the PIN was never asked
+       for on a device where it is the only thing asked for. `cur` is scoped to
+       the controller card above, so the flag is re-read here; a controller that
+       could not be read gives "unknown", not a guess. */
+    const sspSettings = (ci && ci.current_settings && typeof ci.current_settings === 'object')
+      ? ci.current_settings : null;
+    const sspKnown = haveCi && !!sspSettings;
+    const sspOn = sspKnown ? !!sspSettings.secure_simple_pairing : false;
     /* An absent `pin` key is NOT an empty PIN. The bridge marshals with
        EmitUnpopulated, so a working agent always sends the field even when it
        is "" -- which makes a missing key a failed read, and saying "no PIN is
@@ -619,7 +631,15 @@
       pinCard.append(h('p.field-hint', { style: 'margin:-4px 0 14px' },
         'Demanded of a remote device when it pairs -- but only while Secure Simple '
         + 'Pairing is off. With SSP on there is no PIN prompt at all, because this device '
-        + 'has no way to show or confirm one, and pairing is "just works".'));
+        + 'has no way to show or confirm one, and pairing is "just works". '
+        + (sspKnown
+          ? (sspOn
+            ? 'SSP is currently ON for this controller, so nothing is asking for this '
+              + 'PIN.'
+            : 'SSP is currently OFF for this controller -- which is how the image ships '
+              + '-- so this PIN is what a remote device has to produce.')
+          : 'The controller could not be read, so which of the two applies here is '
+            + 'unknown.')));
       if (isDefault) {
         pinCard.append(h('div.banner.banner-danger', { style: 'margin-bottom:14px' },
           h('p.banner-title', 'This is the published default'),
@@ -664,18 +684,32 @@
           type: 'button',
           onclick: () => showDetail({
             title: 'What the PIN does and does not protect',
-            body: 'A PIN is only asked for when Secure Simple Pairing is OFF. With SSP on '
-                + '-- which is the default, because the controller needs it for High '
-                + 'Speed -- this device pairs in "just works" mode: no PIN, no prompt, no '
-                + 'confirmation, so anything in range that is allowed to pair can.\n\n'
-                + 'That is not a bug in this console; it is the shape of the problem. SSP '
-                + 'cannot request a predefined PIN, and a headless device cannot display '
-                + 'a passkey or confirm one. The project chose a static PIN as the less '
-                + 'bad of two bad options and wrote the reasoning down in '
-                + 'service/bluetooth.go.\n\n'
-                + 'What that leaves you: keep Discoverable and Bondable off except while '
-                + 'you are actually pairing. That is the control that works. The PIN is '
-                + 'the one that only works with SSP off.',
+            body: 'A PIN is only asked for when Secure Simple Pairing is OFF -- and SSP is '
+                + 'OFF on a device as shipped. service/defaults.go starts the controller '
+                + 'with PIN-based authentication, and with High Speed off as a consequence, '
+                + 'because High Speed is the thing that needs SSP on. So on a shipped '
+                + 'device the PIN IS demanded of anything that pairs, and it is '
+                + SHIPPED_PIN + ' until someone changes it.\n\n'
+                + 'This device right now: '
+                + (sspKnown
+                  ? (sspOn
+                    ? 'SSP is ON, so this device is in the "just works" branch below and '
+                      + 'the PIN is not being asked for.'
+                    : 'SSP is OFF, so the PIN below is what a remote device has to produce. '
+                      + 'It is the control that is doing the work here.')
+                  : 'the controller could not be read, so which branch this device is in is '
+                    + 'unknown. Do not assume either one.')
+                + '\n\n'
+                + 'The other branch: turn SSP on and this device pairs in "just works" mode '
+                + '-- no PIN, no prompt, no confirmation, so anything in range that is '
+                + 'allowed to pair can. That is not a bug in this console; it is the shape '
+                + 'of the problem. SSP cannot request a predefined PIN, and a headless '
+                + 'device cannot display a passkey or confirm one. The project chose a '
+                + 'static PIN as the less bad of two bad options and wrote the reasoning '
+                + 'down in service/bluetooth.go.\n\n'
+                + 'Either way, keep Discoverable and Bondable off except while you are '
+                + 'actually pairing. That control works in both branches. The PIN only '
+                + 'works in the SSP-off one.',
             mono: false,
           }),
         }, 'Why a PIN may not be asked for')));

@@ -17,7 +17,7 @@
  *   Loadouts   DeployMasterTemplate  DeleteStoredMasterTemplate
  *
  * The practical effect: an operator could store a USB composition from the
- * Cable page and a WiFi configuration from the Radio page, and then could
+ * Cable page and a WiFi configuration from the WiFi page, and then could
  * never look at one, deploy one, copy one or delete one again. The reflex
  * editor could arm rules on the running device and had no way to save the set.
  * Nothing in the product could remove a stored template of any kind, so the
@@ -121,11 +121,11 @@
 
   /* --- what the WiFi subsystem will actually accept ------------------------
    *
-   * Three limits a stored configuration can violate, all of which this page
+   * Four limits a stored configuration can violate, all of which this page
    * exists to name BEFORE a deploy rather than leave the operator to discover
    * after. Without them the "Before you deploy this" list is quiet about the
-   * two ways a stored WiFi configuration fails to come up at all, and about
-   * the one way it comes up on a key the operator does not have.
+   * ways a stored WiFi configuration fails to come up at all, and about the
+   * one way it comes up on a key the operator does not have.
    *
    * 1. PSKs this device REFUSES to broadcast. Read off compromisedPSKs in
    *    service/wifi_psk_guard.go. The comparison there is strings.EqualFold
@@ -137,7 +137,12 @@
    *    The guard does not refuse the deploy: it rewrites the key in place to
    *    this device's own generated one and brings the access point up on
    *    THAT. So the deploy reports success, the SSID is the one on screen,
-   *    and the key is not. Nothing in this console can read the replacement.
+   *    and the key is not. The replacement IS readable: DeploySettings sets
+   *    State.CurrentSettings to the message the guard mutated, so the reply
+   *    to the deploy carries it, and deployWifi below puts it on screen. It
+   *    is in that reply and nowhere else a browser can reach -- a deploy that
+   *    takes the link with it before the reply arrives loses it, and then the
+   *    WiFi page's "Deployed now" card is where to read it from.
    *
    *    This is not hypothetical here. dist/db/init.db ships the first of
    *    these inside a stored WiFi template, so on a freshly flashed device
@@ -148,10 +153,24 @@
    *    (service/wifi.go) refuses a longer one outright with the byte count --
    *    so this fails the deploy rather than degrading.
    *
-   * 3. A WPA2 passphrase is 8..63 bytes. Below 8 wpa_passphrase refuses; at
-   *    64 hostapd reads the value as a raw hex key rather than a passphrase.
-   *    Nothing on the AP path checks either bound, so hostapd is what says
-   *    no, in the journal, after the radio has already been taken down. */
+   * 3. A WPA2 passphrase is 8..63 bytes. wifiCreateHostapdConfString writes
+   *    the value as hostapd's `wpa_passphrase` and nothing else, and hostapd
+   *    refuses that directive outside 8..63 and exits -- it does NOT fall
+   *    back to reading a 64-character value as a raw hex key. That form is
+   *    `wpa_psk`, a separate directive which appears nowhere in this
+   *    repository. Nothing on the AP path checks either bound, so hostapd is
+   *    what says no, in the journal, after the radio has already been taken
+   *    down.
+   *
+   * 4. The channel is not checked anywhere either. hw_mode=g is written
+   *    unconditionally and `channel=%d` with no validation, so hostapd is
+   *    again the only thing that says no -- with the radio already stopped.
+   *    The WiFi page refuses anything outside 1..14 in its own form, and so
+   *    does the CLI (createWifiAPSettings, cli_client/cmd_wifi.go) -- but
+   *    StoreWifiSettings itself checks nothing, so a template written over
+   *    the JSON/gRPC API directly, restored from an older database, or stored
+   *    before either check existed can carry any uint32. The CLI's station
+   *    constructor sets no channel at all, which is the 0/ACS case below. */
   const PUBLISHED_PSKS = [
     'MaMe82-P4wnP1',      // upstream default, in dist/db and years of docs
     'HackProKP-changeme', // this fork's placeholder in service/defaults.go
@@ -163,6 +182,10 @@
   const SSID_MAX_BYTES = 32;
   const PSK_MIN_BYTES = 8;
   const PSK_MAX_BYTES = 63;
+  /* 2.4GHz only, because hw_mode=g is written unconditionally. Same bounds as
+     the WiFi page's own form and the CLI's. */
+  const CHANNEL_MIN = 1;
+  const CHANNEL_MAX = 14;
 
   /* BYTES, because every limit above is a byte limit -- Go's len() on a
      string, which is what the service checks with. A JavaScript string's
@@ -181,10 +204,117 @@
     return n;
   }
 
+  /* A channel for display. uint32's zero value is not a channel: hostapd
+     reads channel=0 as "choose one yourself", so printing "channel 0" next to
+     a warning that says no channel is recorded is the page contradicting
+     itself in one dialog. */
+  function channelShown(w) {
+    const v = str(w && w.channel).trim();
+    return (!v || v === '0') ? '' : v;
+  }
+
   function isPublishedPSK(psk) {
     const p = str(psk).trim().toLowerCase();
     if (!p) return false;
     return PUBLISHED_PSKS.some(bad => bad.toLowerCase() === p);
+  }
+
+  /* What the channel in a stored configuration does to an access point.
+   *
+   * Nothing in the service looks at it: wifiCreateHostapdConfString writes
+   * `hw_mode=g` unconditionally and `channel=%d` straight through
+   * (service/wifi.go), and runAPMode then starts hostapd against that file.
+   * So hostapd is the only thing that refuses a channel, and by then
+   * StopHostapd and StopWpaSupplicant have already run -- there is no access
+   * point afterwards and nothing puts the old one back.
+   *
+   * Returns null when there is nothing to say. Otherwise `text` is the
+   * sentence for the "Before you deploy this" list, `why` is the clause
+   * deployWifi splices into its consequence, and `wontStart` is true ONLY
+   * where the outcome is knowable. A channel of 0 is the case where it is
+   * not: hostapd reads 0 as "choose one yourself", which needs ACS in the
+   * build and in the driver, and nothing a browser can reach says whether
+   * either is there. Guessing in that case would be inventing a failure.
+   *
+   * `regulatory` empty is not "no domain": wifiSetReg substitutes US and logs
+   * that it did, so US is the domain in force and its channel list is the one
+   * hostapd is held to. */
+  function channelProblem(w) {
+    const raw = str(w.channel).trim();
+    const ch = Number(raw);
+    const domain = str(w.regulatory).trim().toUpperCase();
+    const inForce = domain || 'US';
+    const named = domain ? 'the domain in force, ' + domain + ','
+      : 'US, which the service substitutes for the empty domain recorded here,';
+
+    if (raw !== '' && !Number.isInteger(ch)) {
+      return {
+        text: 'The channel recorded is "' + raw + '", which is not a whole channel number. '
+          + 'What hostapd is handed, and whether it starts on it, cannot be worked out from '
+          + 'here.',
+        why: 'the channel recorded is not a whole number',
+        wontStart: false,
+      };
+    }
+    if (raw === '' || ch === 0) {
+      return {
+        text: 'No channel is recorded, so hostapd is handed channel=0, which it reads as a '
+          + 'request to pick one itself. That needs ACS support in both the hostapd build '
+          + 'and the driver, and nothing in this console can tell you whether this device '
+          + 'has it: the access point either comes up on a channel nobody chose or hostapd '
+          + 'exits with the radio already stopped. Set a channel on the WiFi page and store '
+          + 'the template again.',
+        why: 'no channel is recorded, so hostapd is asked to choose one and may refuse',
+        wontStart: false,
+      };
+    }
+    if (ch === CHANNEL_MAX) {
+      return {
+        text: 'Channel 14 exists only in Japan and only for 802.11b, and this device always '
+          + 'configures hostapd hw_mode=g, so hostapd will not bring an access point up on '
+          + 'it. The radio is stopped before hostapd is started, so there is no access point '
+          + 'afterwards and nothing puts the old one back.',
+        why: 'hostapd will refuse channel 14 (802.11b-only, and this device always configures '
+          + 'hw_mode=g) and the radio is stopped before hostapd is started',
+        wontStart: true,
+      };
+    }
+    if (ch < CHANNEL_MIN || ch > CHANNEL_MAX) {
+      return {
+        text: 'Channel ' + ch + ' is not a 2.4GHz channel, and this device always configures '
+          + 'hostapd hw_mode=g, so hostapd will refuse it. The radio is stopped before '
+          + 'hostapd is started, so there is no access point afterwards and nothing puts the '
+          + 'old one back.',
+        why: 'channel ' + ch + ' is not a 2.4GHz channel and this device always configures '
+          + 'hw_mode=g, so hostapd will refuse it and the radio is stopped before hostapd '
+          + 'is started',
+        wontStart: true,
+      };
+    }
+    if (ch >= 12 && inForce === 'US') {
+      return {
+        text: 'Channel ' + ch + ' is not permitted under ' + named + ' so hostapd will not '
+          + 'bring an access point up on it. The radio is stopped before hostapd is started, '
+          + 'so there is no access point afterwards and nothing puts the old one back. Set a '
+          + 'domain that permits it, or pick a channel of 11 or lower.',
+        why: 'channel ' + ch + ' is not permitted under ' + named + ' so hostapd will refuse '
+          + 'to come up on it and the radio is stopped before hostapd is started',
+        wontStart: true,
+      };
+    }
+    if (ch >= 12) {
+      return {
+        text: 'Channel ' + ch + ' is permitted in some regulatory domains and not others. '
+          + 'Whether ' + domain + ' is one of them is decided by the kernel\'s regulatory '
+          + 'database on the device, not by this console. Where it is not, hostapd will not '
+          + 'start, and the radio has already been stopped by then.',
+        why: 'channel ' + ch + ' is not permitted in every regulatory domain and this console '
+          + 'cannot tell whether ' + domain + ' allows it; where it does not, hostapd will '
+          + 'not start',
+        wontStart: false,
+      };
+    }
+    return null;
   }
 
   /* Which interface is this console reached over?
@@ -545,9 +675,11 @@
         + 'radio -- check the Journal.'));
     } else if (!wifiNames.length) {
       wifiCard.append(h('div.empty',
-        'No WiFi configurations stored. Set the radio up on the Radio page and press "Store '
-        + 'as template" there to keep it. The device\'s own first-boot notes end with "save '
-        + 'as template -> set as default", which needs one of these to exist.'));
+        'No WiFi configurations stored. Set the radio up on the WiFi page and keep it with '
+        + '"Store what is running" (what the service holds now) or "Store the form as a '
+        + 'template" (what is in the editor, applied or not). The device\'s own first-boot '
+        + 'notes end with "save as template -> set as default", which needs one of these '
+        + 'to exist.'));
     } else {
       wifiCard.append(dataTable(
         h('thead', h('tr', h('th', 'Name'), h('th', 'Named by'), h('th', 'Actions'))),
@@ -948,14 +1080,62 @@
       const joinList = Array.isArray(w.client_BSS_list) ? w.client_BSS_list : [];
       const spawnsAp = mode === 'AP' || mode === 'STA_FAILOVER_AP';
       const pskPublished = auth === 'WPA2_PSK' && isPublishedPSK(ap.PSK);
+      /* An SSID the config builder rejects means hostapd is started against
+         the PREVIOUS /tmp/hostapd_<iface>.conf, so the channel in THIS
+         template never reaches hostapd -- naming it as the reason the access
+         point will not come up would contradict the SSID entry three
+         sentences later. Hence: no channel verdict when the SSID is the
+         thing that fails.
+         Computed here, before the regulatory entry, which used to end "The
+         access point still comes up" unconditionally -- true of the domain
+         substitution on its own, and flatly contradicted further down when
+         the channel is one the substituted domain forbids. */
+      const ssidBad = spawnsAp && (!str(ap.SSID) || byteLength(ap.SSID) > SSID_MAX_BYTES);
+      const chp = (spawnsAp && !ssidBad) ? channelProblem(w) : null;
+      /* EVERY way this configuration ends without an access point of its own,
+         not just the channel -- because the regulatory entry below promises
+         one comes up, and an entry further down that says it does not makes
+         this list argue with itself. The channel alone was gated here, so a
+         template with an empty domain and a key outside 8..63 read "The
+         access point still comes up." two sentences above "there is no access
+         point afterwards".
+         The key window is checked directly rather than reused from below: a
+         PUBLISHED key is replaced with a valid generated one before hostapd
+         sees anything, so only a key hostapd actually reads can be out of
+         bounds. Same reasoning, and the same condition, as deployWifi's
+         keyWontStart. */
+      const keyWontStart = spawnsAp && auth === 'WPA2_PSK' && !pskPublished
+        && (byteLength(ap.PSK) < PSK_MIN_BYTES || byteLength(ap.PSK) > PSK_MAX_BYTES);
+      const apComesUp = !(ssidBad || keyWontStart || (chp && chp.wontStart));
 
       if (w.disabled) {
         out.push('The radio is marked disabled, so deploying this stops both hostapd and '
           + 'wpa_supplicant: no access point and no joining anything.');
       }
+      /* Not "nothing happens". DeploySettings stops wpa_supplicant and
+         hostapd before it reaches the working-mode switch, and the default
+         branch of that switch returns "Unknown working mode" -- so the radio
+         is taken down and nothing is started on it, and the deploy reports
+         the error afterwards. UNKNOWN is the proto's zero value, so anything
+         that stored a template without setting the field lands here. */
       if (!mode || mode === 'UNKNOWN') {
-        out.push('No working mode is recorded, so the subsystem cannot tell whether to '
-          + 'spawn an access point or join one.');
+        out.push('No usable working mode is recorded, so the subsystem cannot tell whether '
+          + 'to spawn an access point or join one'
+          /* The working-mode switch is INSIDE `if !newWifiSettings.Disabled`
+             (service/wifi.go), so a disabled radio never reaches the default
+             branch and never produces "Unknown working mode": err is still
+             the nil from StopHostapd, the deploy reports success and sets
+             CurrentSettings. Claiming a refusal here contradicted the deploy
+             dialog, which gets this right -- noApWhy checks w.disabled first
+             and says nothing about the mode. */
+          + (w.disabled
+            ? '. The radio is marked disabled, so the subsystem stops at that and never '
+              + 'reaches the working mode: this deploy reports SUCCESS with nothing running. '
+              + 'The missing mode only fails a deploy once the radio is switched back on.'
+            : ' and refuses the deploy with "Unknown working mode". It refuses it AFTER '
+              + 'stopping hostapd and wpa_supplicant: the radio ends up carrying nothing, '
+              + 'whatever it was carrying before, and nothing puts the old access point '
+              + 'back.'));
       }
       /* NOT a failure, and the previous wording here said it was.
          wifiCreateHostapdConfString writes no country_code line at all, and
@@ -966,10 +1146,11 @@
          deploy that works, which is the fastest way to teach an operator to
          click past every other warning on this page. */
       if (spawnsAp && !str(w.regulatory)) {
-        out.push('No regulatory domain is recorded, so the device silently uses "US". The '
-          + 'access point still comes up. If this device is not in the US that is the wrong '
-          + 'domain: channels 12 and 13 are unavailable and the permitted transmit power may '
-          + 'not be the local one. Set it on the Radio page and store the template again.');
+        out.push('No regulatory domain is recorded, so the device silently uses "US". '
+          + (apComesUp ? 'The access point still comes up. ' : '')
+          + 'If this device is not in the US that is the wrong domain: channels 12 and 13 '
+          + 'are unavailable and the permitted transmit power may not be the local one. Set '
+          + 'it on the WiFi page and store the template again.');
       }
       /* An SSID the config builder rejects does NOT mean "refused, nothing
          happened", and saying so would be the reassuring version of a worse
@@ -984,7 +1165,7 @@
          ends up on the air. Byte count because the service checks Go's
          len(), which is bytes. */
       const ssidBytes = byteLength(ap.SSID);
-      if (spawnsAp && (!str(ap.SSID) || ssidBytes > SSID_MAX_BYTES)) {
+      if (ssidBad) {
         out.push((!str(ap.SSID)
           ? 'The access point has no SSID, and the service will not build a configuration '
             + 'without one.'
@@ -1000,6 +1181,10 @@
           + 'back to and the deploy fails with no access point at all. Neither outcome is '
           + 'the configuration named here.');
       }
+      /* The channel, which nothing in the service validates. Under spawnsAp
+         only: in plain station mode the channel comes from whatever network
+         the device joins and the stored value is never used. */
+      if (chp) out.push(chp.text);
       if ((mode === 'STA' || mode === 'STA_FAILOVER_AP') && !joinList.length) {
         out.push('Station mode is set with no network to join; the service refuses this '
           + 'with "no BSS configurations provided".');
@@ -1025,9 +1210,11 @@
             + 'this project\'s own source, so it is not a secret, and the service refuses to '
             + 'put an access point on it (service/wifi_psk_guard.go). It does not refuse the '
             + 'deploy: before anything else happens it swaps in a key generated for this '
-            + 'device, brings the access point up on that and reports success. Nothing in '
-            + 'this console can show you the replacement -- read it on the device with '
-            + '"sudo cat ' + GENERATED_PSK_PATH + '". Anything holding the stored key cannot '
+            + 'device, brings the access point up on that and reports success. The reply to '
+            + 'that deploy carries the replacement, and this page shows it the moment it '
+            + 'arrives -- but only then: if the deploy takes the link with it first, read the '
+            + 'key off the WiFi page\'s "Deployed now" card over any other link, or on the '
+            + 'device at ' + GENERATED_PSK_PATH + '. Anything holding the stored key cannot '
             + 'join. The stored template is not rewritten, so this happens again on every '
             + 'deploy, with the same generated key.');
         }
@@ -1046,15 +1233,27 @@
           out.push('The key is ' + n + ' byte' + (n === 1 ? '' : 's') + ' and a WPA2 '
             + 'passphrase must be at least ' + PSK_MIN_BYTES + '.' + tail);
         } else if (n > PSK_MAX_BYTES) {
+          /* No "at 64 it is read as a raw hex key": that is hostapd's wpa_psk
+             directive, and wifiCreateHostapdConfString only ever writes
+             wpa_passphrase. There is nothing for a 64-byte value to be read
+             as, which is what the WiFi page says too. */
           out.push('The key is ' + n + ' bytes and a WPA2 passphrase stops at '
-            + PSK_MAX_BYTES + ' (at 64 hostapd reads the value as a raw hex key instead of a '
-            + 'passphrase).' + tail);
+            + PSK_MAX_BYTES + '. The device writes it as hostapd\'s wpa_passphrase, which '
+            + 'accepts nothing outside ' + PSK_MIN_BYTES + '..' + PSK_MAX_BYTES + ' -- the '
+            + 'raw-hex form a 64-character value looks like is the separate wpa_psk '
+            + 'directive, which this device never writes.' + tail);
         }
       }
-      if (w.nexmon) {
-        out.push('Nexmon features are switched on. They need a Nexmon-patched firmware blob '
-          + 'installed on the device; without it the deploy fails.');
-      }
+      /* The nexmon flag used to be listed here as "the deploy fails without a
+         patched firmware blob". It does not. DeploySettings carries a
+         "ToDo: Dis/Enable nexmon if needed" comment where the firmware swap
+         would go and never reads the field again -- its only other appearance
+         in the service is the %v in describeWifiSettings's log line, and the
+         CLI's DisableNexmon default is inside a commented-out block. So the
+         flag changes what this console and your templates SAY about the
+         device and nothing about the radio: it is not a reason not to deploy,
+         and it must not set `danger`. Inspect reports it in the summary
+         instead, which is where a stored-but-inert field belongs. */
       return out;
     }
 
@@ -1068,7 +1267,7 @@
       return [
         row('Mode', mode ? WORKING_LABEL[mode] : 'not recorded'),
         row('Radio', w.disabled ? 'disabled' : 'enabled'),
-        row('Channel', str(w.channel) || 'not set'),
+        row('Channel', channelShown(w) || 'not recorded'),
         row('Regulatory domain', str(w.regulatory) || 'unset'),
         row('Authentication', auth === 'OPEN' ? 'open -- no key'
           : auth === 'WPA2_PSK' ? 'WPA2 pre-shared key' : 'not recorded'),
@@ -1083,7 +1282,11 @@
             + (isPublishedPSK(psk) ? ' -- AND NOT WHAT WILL BE BROADCAST, see below' : '')
           : 'none stored'),
         row('Networks to join', joinList.length ? joinList.join(', ') : 'none'),
-        row('Nexmon features', w.nexmon ? 'on' : 'off'),
+        /* Reported, not warned about: this build never loads or unloads the
+           patched firmware, whatever the flag says. */
+        row('Nexmon features', w.nexmon
+          ? 'on -- recorded only; this build never loads the patched firmware'
+          : 'off'),
         row('Name inside it', str(w.name) || 'unset'),
         '',
         'The key is not printed. It is not needed to decide whether to deploy this, and',
@@ -1117,24 +1320,60 @@
          is not a caveat about the configuration -- it is the end of the
          session, with no SSID change to hint at why. */
       const pskSwapped = spawnsAp && wpa2 && isPublishedPSK(ap.PSK);
+      /* A working mode the subsystem does not accept leaves the radio
+         carrying NOTHING, and this is the one path that used to miss it.
+         DeploySettings stops wpa_supplicant and hostapd before it reaches
+         `switch newWifiSettings.WorkingMode`, whose default branch returns
+         "Unknown working mode" (service/wifi.go) -- so an unrecorded or
+         unknown mode is not "nothing happens", it is the access point gone
+         and the deploy reporting an error. UNKNOWN is also the proto's zero
+         value, so a template stored by anything that did not set the field
+         lands here. */
+      const modeUnusable = !mode || mode === 'UNKNOWN';
       /* hostapd will refuse the configuration at startup and the radio is
          already stopped by then, so there is no access point afterwards --
          the same end state as `disabled` or plain station mode, which is why
          it feeds the same flag rather than getting wording of its own. Only
          for a key hostapd actually sees: a published one is replaced with a
          valid generated key before any of this. */
-      const apWontStart = spawnsAp && wpa2 && !pskSwapped
+      const keyWontStart = spawnsAp && wpa2 && !pskSwapped
         && (pskBytes < PSK_MIN_BYTES || pskBytes > PSK_MAX_BYTES);
+      /* The channel is the other way hostapd exits on a configuration this
+         console was previously quiet about. Only the cases where the outcome
+         is knowable feed the flag -- channelProblem() says which -- and not
+         at all when the SSID is what fails, because then hostapd is started
+         against the previous configuration file and never sees this channel.
+         Same condition as wifiProblems, so the two cannot disagree. */
+      const ssidBad = spawnsAp
+        && (!str(ap.SSID) || byteLength(ap.SSID) > SSID_MAX_BYTES);
+      const chp = (spawnsAp && !ssidBad) ? channelProblem(w) : null;
+      const apWontStart = keyWontStart || !!(chp && chp.wontStart);
       const problems = wifiProblems(w, pskSwapped);
       const onWifi = linkName === 'wlan0';
-      const stopsAp = w.disabled || mode === 'STA' || apWontStart;
+      const stopsAp = w.disabled || mode === 'STA' || modeUnusable || apWontStart;
+      /* WHY there will be no access point, in the service's own order: the
+         mode is decided before the AP path runs at all, and a key hostapd
+         refuses is decided before it ever reads the channel. Empty when the
+         radio is simply switched off or the configuration is plain station
+         mode, where "no access point" is the point rather than a failure. */
+      const noApWhy = w.disabled ? ''
+        : modeUnusable
+          ? 'the working mode recorded is not one the subsystem accepts, so the deploy fails '
+            + 'with "Unknown working mode" AFTER hostapd and wpa_supplicant have already '
+            + 'been stopped'
+          : keyWontStart
+            ? 'hostapd will refuse the key it carries and the radio is stopped before '
+              + 'hostapd is started'
+            : (chp && chp.wontStart) ? chp.why : '';
+      const noApTail = noApWhy
+        ? ' -- ' + noApWhy + '. Nothing puts the old access point back' : '';
       const liveSsid = liveWifi ? str(liveWifi.ssid) : '';
       const ssidChanges = !!(liveSsid && str(ap.SSID) && liveSsid !== str(ap.SSID));
       const yes = await confirmAction({
         title: 'Deploy "' + n + '"?',
         body: (mode ? WORKING_LABEL[mode] : 'working mode not recorded')
           + (str(ap.SSID) ? ', SSID "' + str(ap.SSID) + '"' : '')
-          + (str(w.channel) ? ', channel ' + str(w.channel) : '')
+          + (channelShown(w) ? ', channel ' + channelShown(w) : '')
           + (str(w.regulatory) ? ', domain ' + str(w.regulatory) : ''),
         consequence: (pskSwapped
           ? (onWifi && !stopsAp ? 'THIS ENDS THIS SESSION, AND NOT FOR THE REASON IT LOOKS '
@@ -1145,31 +1384,31 @@
             + '(service/wifi_psk_guard.go). The SSID will be the one named above and the key '
             + 'will not, so every client holding the stored key -- including whatever you '
             + 'are reading this on, if it is on this radio -- is locked out until it is given '
-            + 'the new one. This console cannot show you the new one; read it on the device '
-            + 'with "sudo cat ' + GENERATED_PSK_PATH + '", which needs a link that is not '
-            + 'this radio. '
+            + 'the new one. The reply to this deploy carries the replacement, and this page '
+            + 'puts it on screen as soon as it arrives -- so if you are NOT on this radio you '
+            + 'will be shown the key. If you are, the reply may never reach this browser: '
+            + 'read it afterwards from the WiFi page over USB or Bluetooth, or on the device '
+            + 'at ' + GENERATED_PSK_PATH + '. '
           : '')
           + (onWifi
           ? (stopsAp
             ? 'THIS ENDS THIS SESSION. You are reading this over wlan0 and this '
               + 'configuration leaves no access point running'
-              + (apWontStart ? ' -- hostapd will refuse the key it carries, and the radio is '
-                + 'stopped before hostapd is started, so nothing replaces what is there now'
-                : '')
+              + noApTail
               + '. There will be no network to be on. '
               + 'Reach the device over the USB cable (172.16.0.1 by default) afterwards. '
             : ssidChanges
               ? 'You are reading this over wlan0 and the SSID changes from "' + liveSsid
                 + '" to "' + str(ap.SSID) + '", so this session ends and you have to join the '
-                + 'new network. If the key is also different you need that too -- and it is '
-                + 'not shown anywhere in this console. '
+                + 'new network. If the key is also different you need that too: this page '
+                + 'does not print a stored key, and the WiFi page shows the one in force only '
+                + 'over a link that survives. '
               : 'You are reading this over wlan0. The radio restarts, so expect this page to '
                 + 'stall and your client to re-associate; if the key in this configuration '
                 + 'differs from the one you joined with, you will not get back on. ')
           : 'Anything joined to this device over WiFi is disconnected. '
             + (stopsAp ? 'The access point stops existing entirely'
-              + (apWontStart ? ' -- hostapd refuses the key this carries, and nothing puts '
-                + 'the old access point back' : '') + '. '
+              + noApTail + '. '
               : pskSwapped ? 'It has to re-associate, and cannot, because the key it has is '
                 + 'not the key the access point comes back on. '
                 : 'It has to re-associate, with whatever key this configuration carries. '))
@@ -1179,7 +1418,40 @@
       });
       if (!yes) return;
       const r = await guard(() => WIFI.deploy(n), 'deploy the WiFi configuration "' + n + '"');
-      if (r !== undefined) { toast('Deployed "' + n + '".'); Views.templates(); }
+      if (r === undefined) return;
+
+      /* THE REPLACEMENT KEY IS IN THIS REPLY AND NOWHERE ELSE A BROWSER CAN
+         REACH IT.
+         DeployStoredWifiSettings hands the stored message to
+         DeployWiFiSettings, guardAccessPointPSK mutates Ap_BSS.PSK in place
+         at the top of DeploySettings, and on success DeploySettings sets
+         State.CurrentSettings to that same mutated message -- so the key the
+         access point is actually broadcasting comes back here. Dropping it
+         while telling the operator to go and read it over SSH is how a deploy
+         from this page leaves an access point nobody can join. The WiFi page
+         has done this since it was written; this is the same five lines.
+         The stored template is NOT rewritten, so a comparison against the
+         stored key is what detects the substitution. */
+      const sent = str(ap.PSK);
+      const back = (r && r.currentSettings && r.currentSettings.ap_BSS
+        && typeof r.currentSettings.ap_BSS.PSK === 'string')
+        ? r.currentSettings.ap_BSS.PSK : '';
+      if (sent && back && back !== sent) {
+        await showDetail({
+          title: 'The device replaced the access point key',
+          body: 'The key stored in "' + n + '" is published in this project’s source, so '
+            + 'the device generated its own and brought the access point up on that instead. '
+            + 'Write it down now -- this is the only place a browser is shown it:\n\n'
+            + back
+            + '\n\nIt is kept at ' + GENERATED_PSK_PATH + ' (mode 0600) and reused from then '
+            + 'on, so it will not change on the next boot. The template still holds the old '
+            + 'key, so every deploy of "' + n + '" lands on this same generated one.',
+          mono: true,
+        });
+      }
+
+      toast('Deployed "' + n + '".');
+      Views.templates();
     }
 
     /* -------------------------------------------------------- reflex  flows */
@@ -1544,15 +1816,15 @@
     /* Copy, for USB and WiFi.
      *
      * The point is to keep a known-good configuration before overwriting it:
-     * the Cable and Radio pages' "Store as template" buttons write whatever
-     * name you type straight over an existing one, and before this there was
-     * no way to take a copy first.
+     * the Cable and WiFi pages' store buttons write whatever name you type
+     * straight over an existing one, and before this there was no way to take
+     * a copy first.
      *
      * The settings object goes back exactly as the device produced it, so
      * none of its field names are typed here. The one exception is
      * WiFiSettings.name, which is the template name recorded INSIDE the
      * message -- leave it alone and the copy reports the original's name on
-     * the Radio page after it is deployed, which is a quiet lie about which
+     * the WiFi page after it is deployed, which is a quiet lie about which
      * template is running. */
     async function copyStored(kind, n, existing) {
       const src = kind === USB ? await readUsb(n) : await readWifi(n);

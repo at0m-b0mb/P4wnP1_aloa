@@ -738,8 +738,28 @@
     if (e.key === 'ArrowUp') { e.preventDefault(); setActive(cur.active - 1, true); return; }
 
     if (e.key === 'Enter') {
-      /* Always prevented, even with no match: Enter in a text box inside a
-         page that has a form must not submit anything. */
+      /* FROM THE SEARCH BOX ONLY.
+       *
+       * focusables() yields exactly [input, Close], so one Tab from the box
+       * lands on Close -- and a keydown there bubbles up to this panel
+       * handler. Taking Enter unconditionally cancelled the browser's
+       * activation of that button and ran the highlighted row instead, so
+       * Tab-then-Enter -- the keyboard way to dismiss a dialog -- dismissed
+       * nothing and fired a command. With an empty query row 0 is the current
+       * page, so on Keystrokes that is go() tearing the view down and
+       * re-reading it from the device with the unsaved HIDScript payload in
+       * it; with a query typed it could be "Change the console password" or a
+       * jump somewhere else. Space on the same button closed it correctly,
+       * because Space is not bound here -- two keys on one button disagreeing.
+       *
+       * Leaving Enter alone on anything else in the panel costs nothing (the
+       * rows are tabindex="-1" and never hold focus; the highlight is carried
+       * by aria-activedescendant on the box) and makes Close behave like a
+       * button.
+       *
+       * Inside the box it is still always prevented, even with no match: Enter
+       * in a text box inside a page that has a form must not submit anything. */
+      if (e.target !== cur.input) return;
       e.preventDefault();
       if (cur.active >= 0 && cur.shown[cur.active]) run(cur.shown[cur.active]);
       return;

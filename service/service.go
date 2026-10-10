@@ -23,17 +23,41 @@ import (
 const AuthFilePath = "/etc/p4wnp1/auth.json"
 
 // startupNeedsFallback reports whether a startup-template outcome leaves the
-// device with NOTHING deployed -- the only case in which the hardcoded
-// fallback script should run.
+// device with NO WAY IN -- the only case in which the hardcoded fallback
+// script should run.
 //
 // servicestart.sh re-deploys USB, networking and the access point from values
 // written into the script. For a device whose datastore cannot be read that is
 // the only route back to reachable. For a device whose template deployed with
 // one subsystem failing it is destructive: it overwrites the subsystems that
-// SUCCEEDED. A Pi Zero W reaches that state on an ordinary boot, because the
-// service starts before sysinit.target and BlueZ answers a bare "Failed" that
-// early, so the old "fall back on any error" rule fired every single time and
-// replaced a correctly-deployed access point with the script's hardcoded SSID.
+// SUCCEEDED, including the operator's access point name and key. A Pi Zero W
+// reaches that state on an ordinary boot, because the service starts before
+// sysinit.target and BlueZ answers a bare "Failed" that early, so the old
+// "fall back on any error" rule fired every single time and replaced a
+// correctly-deployed access point with the script's hardcoded SSID.
+//
+// THE CRITERION IS REACHABILITY, NOT A SUCCESS COUNT.
+//
+// "Fall back when Succeeded is zero" was the previous rule and it is not the
+// same question. Succeeded counts any of seven unrelated things, so a reflex
+// set that loaded or a DHCP server that came up on an interface with no radio
+// behind it was enough to veto the fallback on a boot where nothing an
+// operator can connect to existed. A USB template with a use_UMS image that
+// is no longer on disk plus a WiFi template that cannot find wlan0 is exactly
+// that boot: Succeeded is 2 or 3, the fallback is suppressed, and the device
+// presents nothing to the cable and broadcasts nothing. So the fallback also
+// runs when the template named link-bearing subsystems and none of them came
+// up.
+//
+// AND NOT THE OTHER WAY ROUND: a link that FAILED while another link came up
+// does not justify it. The script is not a USB repair -- it rewrites the
+// access point's SSID and PSK as well -- so running it because the USB gadget
+// failed would drop the one link that works, change credentials the panel and
+// /root/INITIAL_CREDENTIALS.txt have already handed the operator, and bring
+// back the hardcoded SSID this fallback has already been narrowed twice to
+// stop broadcasting. A device with a working access point is reachable at
+// 172.24.0.1:8000. Repairing a failed USB gadget WITHOUT touching the radio
+// is a separate job and needs its own, narrower mechanism.
 func startupNeedsFallback(deployErr error) bool {
 	if deployErr == nil {
 		return false
@@ -45,7 +69,10 @@ func startupNeedsFallback(deployErr error) bool {
 		// not partial, whatever the type says: that is precisely the state
 		// the fallback exists for, and the first version of this function
 		// suppressed it because it decided by error type alone.
-		return partial.NothingDeployed()
+		//
+		// NoLinkDeployed() is the second half of the same point: something
+		// being up is only worth protecting if an operator can get to it.
+		return partial.NothingDeployed() || partial.NoLinkDeployed()
 	}
 	return true
 }
@@ -289,8 +316,9 @@ func (s *Service) Start() (context.Context, context.CancelFunc) {
 	// by the SSID written into the script, and the panel then could not build a
 	// scan-to-join QR because that SSID is 32 bytes of emoji.
 	//
-	// So: fall back only when NOTHING was deployed. A partial failure is
-	// reported and left alone.
+	// So: fall back only when the device has no way in -- nothing deployed
+	// at all, or no link-bearing subsystem up. A partial failure that still
+	// leaves a cable or an access point is reported and left alone.
 	scriptFallback := false
 	//retrieve Startup MasterTemplate name from store
 	msgTemplateName := &pb.StringMessage{}
@@ -315,16 +343,29 @@ func (s *Service) Start() (context.Context, context.CancelFunc) {
 			if partial.Skipped > 0 {
 				skipped = fmt.Sprintf(", %d skipped (hardware not on this board)", partial.Skipped)
 			}
-			fmt.Printf("... Startup MasterTemplate '%s': %d of %d subsystems up, %d failed%s:\n",
-				startupTemplate, partial.Succeeded, partial.Attempted,
-				len(partial.Failures), skipped)
-			for _, f := range partial.Failures {
-				fmt.Printf("      - %s\n", f)
-			}
-			if partial.NothingDeployed() {
-				fmt.Println("... NOTHING deployed -- falling back to the startup script to make the device reachable")
+			if partial.Attempted == 0 {
+				fmt.Printf("... Startup MasterTemplate '%s' names no templates, so nothing was deployed\n",
+					startupTemplate)
 			} else {
+				fmt.Printf("... Startup MasterTemplate '%s': %d of %d subsystems up, %d failed%s:\n",
+					startupTemplate, partial.Succeeded, partial.Attempted,
+					len(partial.Failures), skipped)
+				for _, f := range partial.Failures {
+					fmt.Printf("      - %s\n", f)
+				}
+			}
+			/* Printed from the SAME value that drove the decision, so the
+			   journal cannot say one thing while the service does another.
+			   It reported "NOTHING deployed" and ran the fallback off
+			   separate expressions before, which is how an operator would
+			   have come to read a line that was true of neither. */
+			switch {
+			case !scriptFallback:
 				fmt.Println("... keeping what deployed; NOT running the hardcoded fallback script")
+			case partial.NothingDeployed():
+				fmt.Println("... NOTHING deployed -- falling back to the startup script to make the device reachable")
+			default:
+				fmt.Println("... no link came up: no USB gadget and no access point -- falling back to the startup script to make the device reachable")
 			}
 		default:
 			fmt.Printf("... error deploying Startup MasterTemplate '%s': %v\n", startupTemplate, errDeployStartupTemplate)

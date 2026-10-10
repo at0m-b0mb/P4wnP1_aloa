@@ -428,9 +428,18 @@ func (wSvc *WiFiService) DeploySettings(newWifiSettings *pb.WiFiSettings) (wstat
 	}
 
 	// Set proper regulatory domain
+	//
+	// The reason is LOGGED, not swallowed. This line printed `err`, not
+	// `errReg` -- and `err` is nil here, it holds the result of the
+	// StopHostapd above -- so every rejected domain read "Error setting
+	// WiFi regulatory domain 'XX': <nil>" in the journal the WiFi page
+	// sends the operator to. They learned that something failed and
+	// nothing about what, and could not tell a code this kernel's regdb
+	// does not carry from no regdb at all.
 	errReg := wifiSetReg(newWifiSettings.Regulatory)
 	if errReg != nil {
-		log.Printf("Error setting WiFi regulatory domain '%s': %v\n", newWifiSettings.Regulatory, err) //we don't abort on error here
+		//we don't abort on error here: the AP still comes up, under whatever domain was already in force
+		log.Printf("Error setting WiFi regulatory domain '%s': %v\n", newWifiSettings.Regulatory, errReg)
 	}
 
 	var triggerEvent *pb.Event = nil
@@ -1075,10 +1084,19 @@ func wifiSetReg(reg string) (err error) {
 
 	reg = strings.ToUpper(reg)
 
+	// CombinedOutput, not Run. `iw` says WHY on stderr -- "Invalid
+	// regulatory domain" for a code it does not accept, a different
+	// complaint when the kernel carries no regdb at all -- and Run threw
+	// that away, so the caller could only log "exit status 234". The WiFi
+	// page sends the operator to the journal for the reason, so the reason
+	// has to be in it.
 	proc := exec.Command("/sbin/iw", "reg", "set", reg)
-	err = proc.Run()
-	if err != nil {
-		return err
+	out, rerr := proc.CombinedOutput()
+	if rerr != nil {
+		if msg := strings.TrimSpace(string(out)); msg != "" {
+			return fmt.Errorf("iw reg set %s: %v -- %s", reg, rerr, msg)
+		}
+		return fmt.Errorf("iw reg set %s: %v (no output)", reg, rerr)
 	}
 
 	log.Printf("Notified kernel to use ISO/IEC 3166-1 alpha2 regulatory domain '%s'\n", reg)

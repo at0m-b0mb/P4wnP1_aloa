@@ -274,12 +274,22 @@ table.data td.mono { font-family: var(--font-mono); }
 
 /* --- toast -------------------------------------------------------------- */
 
-.toasts { position: fixed; right: var(--s5); bottom: var(--s5); display: flex; flex-direction: column; gap: var(--s2); z-index: 50; }
+/* The container is a transparent overlay: it must never intercept a tap. An
+   error toast lives 12 to 20 seconds, it sits where a thumb rests, and on a
+   phone it now spans the full width -- so a default `pointer-events: auto`
+   here would swallow everything underneath for the whole of that. Only the
+   toasts themselves are hit-testable. */
+.toasts {
+  position: fixed; right: var(--s5); bottom: var(--s5);
+  display: flex; flex-direction: column; gap: var(--s2); z-index: 50;
+  pointer-events: none;
+}
 .toast {
   background: var(--surface); border: 1px solid var(--border);
   border-left: 3px solid var(--ok);
   box-shadow: var(--shadow-overlay); border-radius: var(--radius);
   padding: var(--s3) var(--s4); max-width: 380px; font-size: var(--t-small);
+  pointer-events: auto;
 }
 .toast-err { border-left-color: var(--danger); }
 
@@ -305,22 +315,40 @@ table.data td.mono { font-family: var(--font-mono); }
   .brand { padding: 0 var(--s4) var(--s3); }
   .brand-mark { font-size: var(--t-lead); }
   .nav {
-    flex-direction: row; padding: 0 var(--s4);
+    flex-direction: row;
+    /* VERTICAL ROOM FOR THE FOCUS RING. This scroller's height used to equal
+       its items' height exactly, and `overflow-y: hidden` clipped the ring --
+       which paints 4px outside the item on all four sides -- down to its two
+       vertical segments: a focused item rendered as two detached gold
+       brackets around the word, with no top or bottom edge. The negative
+       margin hands the 8px straight back to the brand block's bottom padding
+       and the footer's top margin, so the items do not move and the bar does
+       not grow; first-screen height on a phone is already scarce. */
+    padding: var(--s2) var(--s4);
+    margin-block: calc(-1 * var(--s2));
     overflow-x: auto; overflow-y: hidden;
     scrollbar-width: none;            /* a bar would crowd a one-line strip */
     -webkit-overflow-scrolling: touch;
-    /* THE ROW IS NO LONGER SHORT. It was eight items when the scrollbar was
-       hidden; it is twelve now, and on a phone four of them sit off the right
-       edge with nothing to say they exist -- a hidden scrollbar on a strip
-       that visibly ends at the viewport reads as "that is all there is".
-       Fading the last few millimetres is the smallest honest signal: content
-       continuing under a fade is legible as continuing, and it costs no
-       layout and no script. The fade only applies while the row actually
-       overflows, because mask-image follows the padding box either way and a
-       short row simply has nothing under the fade. */
+    scroll-padding-inline: var(--s4);
+  }
+  /* THE ROW IS NO LONGER SHORT. It was eight items when the scrollbar was
+     hidden; it is twelve now, and on a phone four of them sit off the right
+     edge with nothing to say they exist -- a hidden scrollbar on a strip
+     that visibly ends at the viewport reads as "that is all there is".
+     Fading the last few millimetres is the smallest honest signal: content
+     continuing under a fade is legible as continuing, and it costs no
+     layout and no script. The fade only applies while the row actually
+     overflows, because mask-image follows the padding box either way and a
+     short row simply has nothing under the fade.
+
+     It lifts while the strip holds focus. A mask applies to everything the
+     element paints, descendants included, so the fade would otherwise eat
+     the right-hand side of the focus ring of whichever item happens to sit
+     under those last millimetres -- re-breaking, horizontally, exactly what
+     the padding above fixes vertically. */
+  .nav:not(:focus-within) {
     -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
     mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
-    scroll-padding-inline: var(--s4);
   }
   .nav::-webkit-scrollbar { display: none; }
   .nav-item { white-space: nowrap; flex: none; }
@@ -337,6 +365,47 @@ table.data td.mono { font-family: var(--font-mono); }
   .page-head { flex-direction: column; align-items: flex-start; }
   .cable-strip { flex-wrap: wrap; }
   .fn { flex-basis: calc(50% - var(--s1)); }
+}
+
+/* On a 375x620 phone the stacked header measured 272px -- 44% of the viewport,
+   gone before the page title, on every page -- and three of those rows were
+   this footer wrapping: the theme switch, "Find a control", "Signed in as
+   admin", and three account buttons laid out over three lines. The nav strip
+   the operator actually touches was 39px of it.
+ *
+ * No control is taken away. The strip scrolls sideways like the nav directly
+ * above it -- one row instead of three, same fade, same vertical room for a
+ * focus ring -- which returns about 80px of every first screen. `display:none`
+ * on these buttons was the other option and it is the wrong one twice over: it
+ * takes "Sign out" off a device that is routinely left plugged in unattended,
+ * it takes it out of the accessibility tree as well as off the screen, and
+ * `.rail-foot > .btn-quiet` would have caught "Find a control" too -- which is
+ * the palette button palette.js injects here, and the only remaining route to
+ * the three commands being hidden. It is the second child, so it stays in
+ * view; the account controls are one swipe away and the fade says so. */
+@media (max-width: 560px) {
+  .rail-foot {
+    flex-wrap: nowrap;
+    overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-padding-inline: var(--s4);
+    /* Room under the row for a focus ring, given straight back to the rail's
+       own bottom padding so the bar does not grow. */
+    padding-bottom: var(--s2);
+    margin-bottom: calc(-1 * var(--s2));
+  }
+  .rail-foot::-webkit-scrollbar { display: none; }
+  .rail-foot > * { flex: none; }
+  .rail-foot:not(:focus-within) {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+  }
+  /* The one item in this strip that is not a control. Every operator of this
+     device shares the one account, so "Signed in as admin" answers a question
+     nobody can ask differently; "Who is signed in" is the tool for the
+     question that does have an answer, and it stays. */
+  .rail-foot > .field-hint { display: none; }
 }
 
 /* --- modal -------------------------------------------------------------- */
@@ -473,7 +542,17 @@ details.ref > summary:hover { color: var(--text); }
   font-optical-sizing: none; font-variation-settings: 'opsz' 20;
   font-size: var(--t-lead); font-weight: 600; line-height: 1.15;
   font-variant-numeric: tabular-nums;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* These are data, not labels -- the WiFi tile's value is the raw SSID -- and
+     a tile is not a link, a button or a hover target, so there is nothing
+     behind an ellipsis to open. `nowrap` + `text-overflow` made the value
+     unrecoverable from the page that exists to answer "which network is this
+     device on?": two columns resolve at every phone width from 393px up,
+     leaving 114px of inner width for 20px display serif, so `BTHub6-K9QF`
+     rendered as nine characters of eleven and `FRITZ!Box 7590 Gastzugang` as
+     ten of twenty-five. Let it wrap; the tile grows and the row grows with it.
+     `anywhere` rather than `break-word` so the wrap also lowers the tile's
+     min-content width -- an SSID with no spaces must not push the grid. */
+  overflow-wrap: anywhere;
 }
 .tile-label {
   display: block; margin-top: var(--s1);
@@ -521,12 +600,39 @@ details.ref > summary:hover { color: var(--text); }
   color: var(--text-muted); line-height: 1.5;
 }
 .toast-close {
-  position: absolute; top: var(--s2); right: var(--s2);
+  /* 4px, not 8px: at 8px a 27px-wide button reaches 35px in from the toast's
+     right edge, three past the 32px of padding reserved for it, so it took
+     clicks off the end of the longest line of the hint. */
+  position: absolute; top: var(--s1); right: var(--s1);
   appearance: none; border: 0; background: none; cursor: pointer;
   font-size: 18px; line-height: 1; color: var(--text-faint);
-  padding: 2px 6px; border-radius: var(--radius);
+  /* 2px/6px made this 23x22, under the 24x24 floor WCAG 2.5.8 puts on a
+     pointer target. The phone rule below takes it the rest of the way. */
+  padding: var(--s1) var(--s2); border-radius: var(--radius);
 }
 .toast-close:hover { color: var(--text); background: var(--surface-sunk); }
+
+/* A toast on a phone is a full-width overlay pinned over the bottom of the
+   page, not a corner card. With `right` set and no `left`, a 380px cap against
+   a 24px right offset put it flush against the left viewport edge with a
+   gutter on one side only, which reads as a misalignment rather than something
+   deliberate. Pin both sides.
+ *
+ * And the only way to clear an error early was a 23x22px glyph. That is the
+ * control an operator reaches for precisely when a 146px-tall toast is sitting
+ * over the bottom quarter of the screen, so it gets a real 44px target; the
+ * toast's right padding grows to clear it, and `min-height` keeps a one-line
+ * toast from being shorter than its own dismiss button. */
+@media (max-width: 560px) {
+  .toasts { left: var(--s4); right: var(--s4); bottom: var(--s4); }
+  .toast { max-width: none; padding-right: var(--s7); min-height: 44px; }
+  .toast-close {
+    top: 0; right: 0; padding: 0;
+    min-width: 44px; min-height: 44px;
+    display: grid; place-items: center;
+    border-radius: 0 var(--radius) var(--radius) 0;
+  }
+}
 
 /* --- Cable: each USB function, explained -------------------------------- */
 .fn-choice { margin-bottom: var(--s4); }
@@ -571,12 +677,92 @@ details.builder > summary:hover { color: var(--text); }
   /* Focusable so the scroll region is reachable by keyboard, per WCAG 2.1.1;
      the outline would otherwise sit on a region with no visible boundary. */
   border-radius: var(--radius);
+  /* So that tabbing to a clipped button scrolls it clear of the right edge
+     and the fade below, rather than flush against them. */
+  scroll-padding-inline-end: var(--s5);
 }
 .table-wrap:focus-visible { box-shadow: var(--ring); }
 .table-wrap table.data { min-width: 100%; }
 @media (max-width: 820px) {
-  /* Stop long cells from collapsing into one character per line. */
+  /* Stop long cells from collapsing into one character per line. Above about
+     520px of viewport this floor is narrower than the scroller holding it, so
+     it costs no sideways scroll; below that, see the next block. */
   .table-wrap table.data { min-width: 440px; }
+  /* A hidden scrollbar on a table that visibly ends at the card edge reads as
+     "that is all there is" -- the same thing the nav strip got a fade for, and
+     the stakes here are higher: the Actions column is always last, so what is
+     off the edge is Disarm, Delete, Configure and Use at boot. Same signal,
+     same reasoning, 20px instead of 28px because what sits at this edge is a
+     button rather than a word.
+   *
+   * Lifted whenever anything in the region holds focus. A mask applies to
+   * everything the element paints, descendants included, so it would otherwise
+   * fade both this region's own focus ring and the ring of any row button
+   * sitting under it. */
+  .table-wrap:not(:focus-within) {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent 100%);
+  }
+}
+@media (max-width: 560px) {
+  /* Below about 520px the 440px floor above is wider than the scroller itself
+     -- 311px of usable width on a 393px phone, 293px on a 375px -- so the last
+     column was pushed outside the visible area on every list view that has
+     one. Measured at 393x660: 0px of Disarm and Delete on Reflexes, which are
+     the only controls that page has; 0px of Configure on Network; 0px of
+     Delete on WiFi; 0px of Use at boot on Loadouts. Let the table shrink into
+     the scroller instead. */
+  .table-wrap table.data { min-width: 100%; }
+  /* And stop the actions being a horizontal row, so the column they need is
+     one button wide instead of three. Templates showed 34px of
+     Inspect/Deploy/Delete at 393px and 16px at 375px -- three unlabelled
+     colour stripes. Stacked and stretched, each one is a full-width target
+     with its label on it. Only where there is more than one: a lone "Show it"
+     or "Configure" is already as narrow as it gets. */
+  .table-wrap td .btn-row:has(.btn + .btn) {
+    flex-direction: column; align-items: stretch; gap: var(--s2);
+  }
+  /* Gold Deploy 12px above red Delete is a mis-tap waiting for a thumb. */
+  .table-wrap td .btn-row > .btn-danger:not(:first-child) { margin-top: var(--s3); }
+
+  /* AND THE ACTIONS COLUMN STAYS PUT. Dropping the floor and stacking the
+     buttons is not enough on the wider tables: measured at 375x620 the
+     Reflexes table still wants 389px of a 293px scroller and Network 606px,
+     so Disarm and Configure were still 0px visible and a fade only told the
+     operator that something they could not see existed. Pin the last column
+     to the right edge and let the data columns scroll underneath it. The row
+     actions are then reachable at any scroll offset -- which on Reflexes is
+     the difference between being able to disarm a rule from a phone and not.
+   *
+   * Only where the table has a header row AND an action group in its last
+   * cell. Every list view's table is built with a thead and every key/value
+   * table is built without one, so this cannot pin the value column of a
+   * kv table -- including the WiFi one whose last cell holds a lone
+   * "Show it" button.
+   *
+   * These tables all sit on a card, hence --surface: a pinned cell has to be
+   * opaque or the rows show through it.
+   *
+   * border-collapse drops the borders of a sticky cell, so they are re-drawn
+   * as inset shadows. --border-strong on the leading edge, not --border:
+   * content slides under that edge, which makes it a real boundary, and
+   * WCAG 1.4.11 asks 3:1 of one. */
+  .table-wrap table.data:has(thead):has(td:last-child > .btn-row) :is(th, td):last-child {
+    position: sticky; right: 0; z-index: 1;
+    background: var(--surface);
+    box-shadow: inset 1px 0 0 var(--border-strong), inset 0 -1px 0 var(--border);
+  }
+  .table-wrap table.data:has(thead):has(td:last-child > .btn-row) tr:last-child td:last-child {
+    box-shadow: inset 1px 0 0 var(--border-strong);
+  }
+  /* The pinned column IS the affordance -- rows visibly disappearing under a
+     3:1 edge say "there is more here" better than a fade does -- and a fade
+     over a pinned column would sit permanently on top of a control instead of
+     over the content that is actually hidden. So drop it for these, and keep
+     it for the tables that have no pinned column. */
+  .table-wrap:has(thead):has(td:last-child > .btn-row) {
+    -webkit-mask-image: none; mask-image: none;
+  }
 }
 
 /* --- skip link ---------------------------------------------------------- */

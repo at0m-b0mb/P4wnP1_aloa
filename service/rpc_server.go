@@ -264,19 +264,65 @@ type PartialDeployError struct {
 	Succeeded int
 	// Attempted counts the subsystems the template named.
 	Attempted int
+	// LinksAttempted and LinksUp count only the subsystems that can carry a
+	// LINK to the device: the USB gadget and the WiFi radio.
+	//
+	// SUCCEEDED CANNOT ANSWER "CAN AN OPERATOR STILL REACH THIS DEVICE".
+	//
+	// It counts any of seven unrelated things, so "a DHCP server came up on
+	// wlan0" or "the reflex set loaded" is enough to make Succeeded nonzero
+	// on a boot where nothing an operator can connect to came up at all.
+	// Concretely: a startup USB template with use_UMS whose backing image
+	// is no longer on disk -- routine, see umsBackingPath and the empty
+	// disk-image library -- fails, and if the WiFi template fails too
+	// (no wlan0, a radio still rfkill'd at sysinit) the device boots with
+	// Succeeded in the single digits, the fallback suppressed, nothing
+	// presented to the attached host and no access point. Recovery means
+	// pulling the SD card.
+	//
+	// A skipped link does not exist: only Bluetooth can skip, and Bluetooth
+	// is not a link.
+	LinksAttempted int
+	LinksUp        int
 }
 
 func (e *PartialDeployError) Error() string {
+	if e.Attempted == 0 {
+		return "master template named no subsystems, so nothing was deployed"
+	}
 	skipped := ""
 	if e.Skipped > 0 {
 		skipped = fmt.Sprintf(", %d skipped", e.Skipped)
 	}
-	return fmt.Sprintf("master template partially deployed (%d of %d subsystems up%s) -- %s",
-		e.Succeeded, e.Attempted, skipped, strings.Join(e.Failures, "; "))
+	link := ""
+	if e.NoLinkDeployed() {
+		link = ", NO LINK -- neither the USB gadget nor the WiFi radio came up"
+	}
+	why := strings.Join(e.Failures, "; ")
+	if why == "" {
+		why = "nothing reported a failure and nothing came up"
+	}
+	return fmt.Sprintf("master template partially deployed (%d of %d subsystems up%s%s) -- %s",
+		e.Succeeded, e.Attempted, skipped, link, why)
 }
 
 // NothingDeployed reports that every subsystem the template named failed.
 func (e *PartialDeployError) NothingDeployed() bool { return e.Succeeded == 0 }
+
+// NoLinkDeployed reports that the template named at least one subsystem that
+// can carry a link -- the USB gadget or the WiFi radio -- and that none of
+// them came up.
+//
+// This is the question the boot fallback actually has to answer, and
+// NothingDeployed() cannot: see the note on LinksAttempted. It is guarded on
+// LinksAttempted > 0 so that an error carrying no link counts at all -- a
+// hand-built value in a test, or one from a future caller -- reports false
+// and leaves the decision to NothingDeployed() rather than inventing an
+// answer. Both counters are set in one place, DeployMasterTemplate's try(),
+// so a real deploy cannot omit them.
+func (e *PartialDeployError) NoLinkDeployed() bool {
+	return e.LinksAttempted > 0 && e.LinksUp == 0
+}
 
 func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate) (e *pb.Empty, err error) {
 	e = &pb.Empty{}
@@ -305,14 +351,25 @@ func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate
 	// leave the operator with a brick.
 	var failures []string
 	succeeded, skipped, attempted := 0, 0, 0
+	// Counted separately, because "how many subsystems came up" and "can an
+	// operator still reach this device" are different questions and the boot
+	// fallback needs the second one. See PartialDeployError.LinksAttempted.
+	linksAttempted, linksUp := 0, 0
 	// THREE outcomes, not two. A subsystem whose hardware is absent is
 	// neither a failure nor a success, and counting it as either breaks a
 	// caller: as a failure it would trigger the destructive fallback on
 	// every boot of a board with no Bluetooth, and as a SUCCESS -- which is
 	// what it used to be -- it makes "nothing deployed" unreachable and the
 	// fallback inert. See the note on PartialDeployError.Succeeded.
-	try := func(what string, fn func() error) {
+	//
+	// link says this subsystem can carry a link to the device -- the USB
+	// gadget or the WiFi radio. Named at the call site rather than guessed
+	// from `what`, which carries the operator's template name.
+	try := func(what string, link bool, fn func() error) {
 		attempted++
+		if link {
+			linksAttempted++
+		}
 		err := fn()
 		switch classifyDeploy(err) {
 		case outcomeSkipped:
@@ -323,31 +380,34 @@ func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate
 			failures = append(failures, fmt.Sprintf("%s: %v", what, err))
 		default:
 			succeeded++
+			if link {
+				linksUp++
+			}
 			log.Printf("master template: %s ok", what)
 		}
 	}
 
 	if len(mt.TemplateNameUsb) > 0 {
-		try("USB "+mt.TemplateNameUsb, func() error {
+		try("USB "+mt.TemplateNameUsb, true, func() error {
 			_, e := s.DeployStoredUSBSettings(ctx, &pb.StringMessage{Msg: mt.TemplateNameUsb})
 			return e
 		})
 	}
 	if len(mt.TemplateNameTriggerActions) > 0 {
-		try("reflexes "+mt.TemplateNameTriggerActions, func() error {
+		try("reflexes "+mt.TemplateNameTriggerActions, false, func() error {
 			_, e := s.DeployStoredTriggerActionSetReplace(ctx, &pb.StringMessage{Msg: mt.TemplateNameTriggerActions})
 			return e
 		})
 	}
 	for _, nnw := range mt.TemplateNamesNetwork {
 		name := nnw
-		try("network "+name, func() error {
+		try("network "+name, false, func() error {
 			_, e := s.DeployStoredEthernetInterfaceSettings(ctx, &pb.StringMessage{Msg: name})
 			return e
 		})
 	}
 	if len(mt.TemplateNameBluetooth) > 0 {
-		try("bluetooth "+mt.TemplateNameBluetooth, func() error {
+		try("bluetooth "+mt.TemplateNameBluetooth, false, func() error {
 			_, e := s.DeployStoredBluetoothSettings(ctx, &pb.StringMessage{Msg: mt.TemplateNameBluetooth})
 			// No Bluetooth hardware is a fact about the board, not a
 			// failure of the template.
@@ -357,7 +417,7 @@ func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate
 		})
 	}
 	if len(mt.TemplateNameWifi) > 0 {
-		try("wifi "+mt.TemplateNameWifi, func() error {
+		try("wifi "+mt.TemplateNameWifi, true, func() error {
 			_, e := s.DeployStoredWifiSettings(ctx, &pb.StringMessage{Msg: mt.TemplateNameWifi})
 			return e
 		})
@@ -366,10 +426,22 @@ func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate
 	// A deploy where NOTHING came up is reported even when nothing strictly
 	// "failed" -- every subsystem skipped is still a device with nothing on
 	// it, and the caller needs to hear that so the fallback can run.
-	if len(failures) > 0 || (attempted > 0 && succeeded == 0) {
+	//
+	// INCLUDING A TEMPLATE THAT NAMES NOTHING. With every name empty no
+	// `try` runs, attempted and succeeded are both 0, nothing fails -- and
+	// this used to return nil, so the journal read "master template
+	// deployed successfully" for a device that booted with no USB gadget,
+	// no DHCP and no access point, with the fallback suppressed because a
+	// nil error needs no fallback. The guard was `attempted > 0 &&
+	// succeeded == 0`, which is the one state the counting could not
+	// express. The console refuses to store such a loadout and so does
+	// StoreMasterTemplate now, but the service accepts a deploy from any
+	// authenticated caller, so it is reported here as what it is.
+	if len(failures) > 0 || succeeded == 0 {
 		err = &PartialDeployError{
 			Failures: failures, Succeeded: succeeded,
 			Skipped: skipped, Attempted: attempted,
+			LinksAttempted: linksAttempted, LinksUp: linksUp,
 		}
 		return e, err
 	}
@@ -378,8 +450,36 @@ func (s *server) DeployMasterTemplate(ctx context.Context, mt *pb.MasterTemplate
 	return
 }
 
+// masterTemplateNamesNothing reports that a loadout names no stored template
+// for any subsystem -- counting only non-empty names, because an empty string
+// in the network list is a name of nothing too.
+func masterTemplateNamesNothing(mt *pb.MasterTemplate) bool {
+	if mt == nil {
+		return true
+	}
+	for _, n := range mt.TemplateNamesNetwork {
+		if len(n) > 0 {
+			return false
+		}
+	}
+	return len(mt.TemplateNameUsb) == 0 &&
+		len(mt.TemplateNameWifi) == 0 &&
+		len(mt.TemplateNameBluetooth) == 0 &&
+		len(mt.TemplateNameTriggerActions) == 0
+}
+
 func (s *server) StoreMasterTemplate(ctx context.Context, r *pb.RequestMasterTemplateStorage) (e *pb.Empty, err error) {
 	e = &pb.Empty{}
+
+	// REFUSED, rather than stored as a configuration that configures
+	// nothing. Such a loadout sits in the list looking like one, and set as
+	// the boot loadout it brings up no USB gadget, no DHCP and no access
+	// point. The console's own editor refuses it client-side; this is the
+	// same rule on the side that cannot be bypassed.
+	if masterTemplateNamesNothing(r.Template) {
+		return e, errors.New("this loadout names no templates, so deploying it would " +
+			"configure nothing -- name at least one subsystem")
+	}
 
 	defer s.rootSvc.SubSysEvent.Emit(ConstructEventNotifyStateChange(common_web.STATE_CHANGE_EVT_TYPE_STORED_GLOBAL_SETTINGS_LIST))
 	err = s.rootSvc.SubSysDataStore.Put(cSTORE_PREFIX_MASTER_TEMPLATE+r.TemplateName, r.Template, true)

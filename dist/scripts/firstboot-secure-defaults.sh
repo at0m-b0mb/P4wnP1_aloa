@@ -499,8 +499,10 @@ ${SSH_FPS}
   Password:             ${NEW_ADMIN_PW}
   Bootstrap status:     $([ "${ADMIN_BOOTSTRAP_OK}" = "1" ] && echo "OK" || echo "FAILED -- log in via SSH and run p4wnp1-hashpw manually")
 
-  This password is bcrypt-hashed in /etc/p4wnp1/auth.json. Change it from
-  the web client (Settings -> Change Password) on first login.
+  This password is bcrypt-hashed in /etc/p4wnp1/auth.json. Change it on first
+  login: the "Change password" button at the bottom of the console's left-hand
+  rail (on a phone the rail folds into the header of every page). There is no
+  Settings page.
 
   Until you log in, EVERY gRPC and HTTP request to the P4wnP1 service is
   rejected with HTTP 401 / gRPC Unauthenticated. There is no anonymous
@@ -521,19 +523,25 @@ ${SSH_FPS}
   reboots, so it is safe to write down.
 
   To see what is actually on air, rather than what any file claims: the web
-  console's Radio -> WiFi page, or the OLED panel if a HAT is fitted. The CLI
-  has no WiFi read command -- wifiGetCmd is commented out in
-  cli_client/cmd_wifi.go -- so it can only set, never report.
+  console's WiFi page, or the OLED panel if a HAT is fitted. The CLI has no
+  WiFi read command -- wifiGetCmd is commented out in cli_client/cmd_wifi.go
+  -- so it can only set, never report.
 
-  To choose your own name and key:
+  To choose your own name and key, from a browser:
+      web console -> WiFi -> "Change the WiFi" -> "Access point name" and
+                             "Access point key" -> "Apply to the device"
+  That restarts the radio, so it ends the page you are reading it on if you
+  came in over the access point; rejoin with the new name and key. Or, over
+  SSH:
       P4wnP1_cli wifi set ap --ssid '<SSID>' --psk '<PSK>'
-  There is no field for this in the web console. Keep the SSID to 15 BYTES or
-  fewer if you want the OLED panel to be able to show a scan-to-join QR code;
-  emoji cost 3-4 bytes each, and over budget the card falls back to printing
-  the key for you to type.
 
-  Then, to keep that configuration and have it load on every boot:
-      web console -> Radio -> WiFi -> "Store as template"
+  Keep the SSID to 15 BYTES or fewer if you want the OLED panel to be able to
+  show a scan-to-join QR code; emoji cost 3-4 bytes each, and over budget the
+  card falls back to printing the key for you to type.
+
+  Either route configures the radio NOW and is forgotten at the next boot,
+  which deploys the boot loadout instead. To keep that configuration:
+      web console -> WiFi -> "Store the form as a template"
       web console -> Loadouts -> "Compose a loadout" -> name the WiFi template
                              -> "Use at boot"
 
@@ -542,7 +550,7 @@ ${SSH_FPS}
 ------------------------------------------------------------------------------
 
   Bluetooth PIN:        1337
-                          -> web console -> Radio -> "Bluetooth pairing"
+                          -> web console -> Bluetooth -> "Pairing PIN"
                           -> or: systemctl disable --now bluetooth if unused
 
   Transport:            NO TLS. The API authenticates every request with a

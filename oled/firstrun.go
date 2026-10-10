@@ -349,7 +349,11 @@ func (v *FirstRunView) cards() []credCard {
 		})
 	}
 	if key := v.psk(); key != "" {
-		card := credCard{head: "WiFi join", user: "key:", pass: key}
+		// The note starts at the fallback and is upgraded only if the join
+		// URI really fits, so the card can never claim a scan it is not
+		// offering. renderQRCard draws it; it used to be computed here and
+		// never drawn at all.
+		card := credCard{head: "WiFi join", user: "key:", pass: key, note: "code: key only"}
 		// Encode a JOIN URI rather than the bare key when the SSID is known
 		// and the result still fits. A phone then offers "join this
 		// network" instead of handing over a string to retype -- and the AP
@@ -357,16 +361,21 @@ func (v *FirstRunView) cards() []credCard {
 		// phone, with a thumb, standing up.
 		//
 		// It does not always fit: a join URI is the key plus ~18 bytes of
-		// structure plus the entire SSID, and a long or emoji-heavy SSID
-		// blows past what 31 modules hold. Then the card falls back to the
-		// key alone and SAYS so, because a QR that quietly means something
-		// other than what the operator expects is worse than no QR.
+		// structure plus the entire SSID, and either a long SSID or a long
+		// key blows past what 31 modules hold. Then the card falls back to
+		// the key alone and SAYS so, because a QR that quietly means
+		// something other than what the operator expects is worse than no
+		// QR.
+		//
+		// The note says what the symbol CONTAINS, not what pushed it over.
+		// It used to read "key only: SSID long", which names a cause this
+		// code cannot know: the URI is structure plus SSID plus key, and a
+		// 50-character passphrase with a 7-byte SSID overflows it just as
+		// well as the old 32-byte emoji name did.
 		if ssid := v.ssid(); ssid != "" {
 			uri := WiFiURI(ssid, key)
 			if _, err := NewQRMax([]byte(uri), qrMaxModules); err == nil {
 				card.qr, card.note = uri, "scan to join"
-			} else {
-				card.note = "key only: SSID long"
 			}
 		}
 		out = append(out, card)
@@ -492,6 +501,9 @@ func (v *FirstRunView) renderQRCard(fb *Framebuffer, c credCard, total int) {
 		passRows = 1
 	}
 
+	// Why no symbol was drawn, when none was: the note below has to say so,
+	// and the two routes here (dropped so the key could use the full width,
+	// or too much data for 31 modules) are both length.
 	textX, dim := 0, 0
 	if q, err := NewQRMax([]byte(payload), qrMaxModules); err == nil {
 		// Quiet zone of 2 modules where there is room, 1 where there is not.
@@ -516,6 +528,12 @@ func (v *FirstRunView) renderQRCard(fb *Framebuffer, c credCard, total int) {
 			// silently clipped key has no way to know why it is rejected.
 			// Only a key over 40 characters reaches this -- the generated
 			// one is 20.
+			//
+			// Pinned by TestLongAPKeyNeverOverprintsTheFooter, which
+			// demands the WHOLE key on the panel. It used to accept a
+			// clipped key as long as the clip was marked, which the clamp
+			// below supplies unconditionally -- so these three lines could
+			// be deleted with the suite still green.
 			if len(c.pass) > ((Width-(d+gap))/CharW)*passRows {
 				break
 			}
@@ -568,6 +586,48 @@ func (v *FirstRunView) renderQRCard(fb *Framebuffer, c credCard, total int) {
 	for _, part := range chunks {
 		line(part, true)
 	}
+
+	// WHAT THIS CARD IS SHOWING, IN WORDS.
+	//
+	// cards() computes a note for exactly this -- "scan to join" when the
+	// join URI fits, "code: key only" when the symbol carries the bare key
+	// -- and this function never drew it, so the note was dead on every
+	// card that has a secret, which is every card that has a code.
+	//
+	// It matters most when there is no code at all. An operator who has
+	// seen the panel offer a scannable code for the 20-character generated
+	// key, and sees none after setting a longer passphrase, has nothing to
+	// go on but "the panel is broken". The card now says which of the three
+	// outcomes it is in.
+	note := c.note
+	if textX == 0 {
+		note = "no code: too long"
+	}
+	// Only into rows the footer does not own, and ALL OF IT OR NONE OF IT.
+	//
+	// The footer is drawn at a fixed y and Framebuffer.Text ORs pixels
+	// rather than replacing them, so a note that ran on would overprint
+	// "KEY1 erase" exactly as the long key once did. Stopping at the
+	// footer row is not enough on its own: drawing line by line until the
+	// space runs out printed "code: key only" as "code: key" and
+	// "scan to join" as "scan to" for every key of 21 to 32 characters,
+	// which is where an operator-chosen passphrase actually lands. A note
+	// cut mid-phrase is a DIFFERENT claim, not a shorter one, and nothing
+	// here can mark the cut the way Truncate and the key clamp do -- the
+	// next thing drawn is the footer. So a note that does not fit whole is
+	// not drawn at all, which is the state this card was in before the
+	// note was drawn at all.
+	//
+	// The one note that must never be dropped cannot be: with no symbol
+	// the column is the full 21 glyphs, and "no code: too long" is one
+	// line above a key that takes at most three.
+	if nlines := wrap(note, cols); len(nlines) > 0 &&
+		y+(len(nlines)-1)*LineH+GlyphH <= footerY {
+		for _, nl := range nlines {
+			line(nl, false)
+		}
+	}
+
 	// The page counter and the erase key, which the hint line would normally
 	// carry. Pushed to the bottom of the column so they do not crowd the
 	// password.

@@ -216,6 +216,32 @@ const tick = () => new Promise(r => setTimeout(r, 0));
   key(w, doc.getElementById('p4-cmd-input'), 'Escape');
   is('focus went back to the editor', doc.activeElement === ta, 'true');
 
+  // ---- Enter on the Close button closes; it must not run the highlighted row ----
+  /* focusables() is [input, Close], so one Tab from the search box lands on
+     Close. The panel's keydown handler used to take Enter whatever the target
+     was and preventDefault() it, which cancels a button's own activation -- so
+     Tab-then-Enter did not close the dialog, it ran the highlighted row. On
+     this page, with an empty query, that row is "you are on this page", whose
+     run() is go('keystrokes'): the view is torn down and re-read from the
+     device, taking the unsaved payload with it. jsdom does not implement a
+     button's Enter activation, so what is pinned here is the half this file
+     controls -- the event is left unprevented and no command fires. */
+  ta.value = 'type("unsaved payload")';
+  key(w, doc.body, '/');
+  const closeBtn = [...doc.querySelectorAll('[role="dialog"] .modal-actions button')]
+    .find(b => b.textContent === 'Close');
+  closeBtn ? ok('the palette has a Close button') : bad('the palette has a Close button', 'none in .modal-actions');
+  closeBtn.focus();
+  e = key(w, closeBtn, 'Enter');
+  await tick();
+  is('Enter on Close is left to the button', e.defaultPrevented, 'false');
+  /* run() closes the palette before it acts, so a palette still open is proof
+     that no command fired. */
+  is('and no command fired', doc.querySelector('[role="dialog"][aria-modal="true"]') !== null, 'true');
+  is('the unsaved payload is still in the editor', doc.querySelector('#view textarea').value, 'type("unsaved payload")');
+  closeBtn.click();
+  is('clicking Close still closes', doc.querySelector('[role="dialog"][aria-modal="true"]'), 'null');
+
   // ---- a text input is protected too ----
   const ti = doc.querySelector('#view input[type=text]') || doc.querySelector('input[type=text]');
   if (ti) {
