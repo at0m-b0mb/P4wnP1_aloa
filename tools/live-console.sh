@@ -69,8 +69,13 @@ mkdir -p /usr/local/P4wnP1 /etc/p4wnp1
 install -m 0755 /repo/image/out/bin/"$ARCH"/P4wnP1_service /usr/local/bin/
 install -m 0755 /repo/image/out/bin/"$ARCH"/P4wnP1_cli /usr/local/bin/
 install -m 0755 /repo/image/out/bin/"$ARCH"/p4wnp1-hashpw /usr/local/bin/
+# The same set install.sh lays down. `ums` was missing, so the Storage page
+# answered with a 500 here while working on a real device -- a preview that
+# disagrees with the device is worse than no preview, because it sends you
+# looking for a bug that is not there.
 cp -R /repo/dist/keymaps /repo/dist/scripts /repo/dist/HIDScripts \
-      /repo/dist/www /repo/dist/db /usr/local/P4wnP1/ 2>/dev/null || true
+      /repo/dist/www /repo/dist/db /repo/dist/ums /repo/dist/helper \
+      /usr/local/P4wnP1/ 2>/dev/null || true
 printf '%s' "$PASSWORD" | /usr/local/bin/p4wnp1-hashpw --username admin >/dev/null
 exec /usr/local/bin/P4wnP1_service
 IN_CONTAINER

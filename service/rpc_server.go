@@ -55,9 +55,40 @@ type server struct {
 	listenAddrWeb  string
 }
 
+// listImages lists a UMS image folder, treating an ABSENT folder as empty.
+//
+// WHY ABSENT IS NOT AN ERROR HERE
+//
+// These two folders hold disk images the operator supplies. Having none is a
+// completely ordinary state, and so is the folder not existing -- dist/ums
+// ships with content and install.sh copies it, but a hand-installed device, a
+// restored backup, or an operator who tidied up can all leave it gone.
+//
+// It used to return the raw ioutil.ReadDir error, which the bridge classifies
+// as an internal server error. So the console's Storage page answered a
+// perfectly normal "you have no disk images" with HTTP 500 and the text
+// "open /usr/local/P4wnP1/ums/flashdrive: no such file or directory". Found
+// by browsing every page of the console against the real service binary; the
+// smoke test already asserts missing hardware reports 503 rather than 500,
+// and this is the same principle one layer down.
+//
+// Logged rather than silent, so a genuinely broken install is still
+// discoverable in the journal instead of looking like an empty library.
+func listImages(dir string, exts ...string) ([]string, error) {
+	names, err := ListFilesOfFolder(dir, exts...)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("UMS: image folder %s does not exist; reporting no images", dir)
+			return []string{}, nil
+		}
+		return nil, err
+	}
+	return names, nil
+}
+
 func (s *server) ListUmsImageFlashdrive(ctx context.Context, e *pb.Empty) (sa *pb.StringMessageArray, err error) {
 	sa = &pb.StringMessageArray{}
-	scripts, err := ListFilesOfFolder(common.PATH_IMAGE_FLASHDRIVE, ".img", ".bin")
+	scripts, err := listImages(common.PATH_IMAGE_FLASHDRIVE, ".img", ".bin")
 	if err != nil {
 		return sa, err
 	}
@@ -67,7 +98,7 @@ func (s *server) ListUmsImageFlashdrive(ctx context.Context, e *pb.Empty) (sa *p
 
 func (s *server) ListUmsImageCdrom(ctx context.Context, e *pb.Empty) (sa *pb.StringMessageArray, err error) {
 	sa = &pb.StringMessageArray{}
-	scripts, err := ListFilesOfFolder(common.PATH_IMAGE_CDROM, ".iso")
+	scripts, err := listImages(common.PATH_IMAGE_CDROM, ".iso")
 	if err != nil {
 		return sa, err
 	}
