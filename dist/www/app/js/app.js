@@ -49,8 +49,16 @@ const ERROR_GUIDE = [
   {
     match: /Hostapd failed|Error starting hostapd/i,
     message: 'The access point did not start.',
-    hint: 'Most often the WiFi regulatory domain is unset -- hostapd refuses to run without a country code -- or wlan0 is rfkill-blocked. Check the regulatory domain under Radio.',
-    action: { label: 'Open Radio', view: 'radio' },
+    /* NOT the regulatory domain. The generated hostapd.conf contains no
+       country_code line at all -- grep the service, nothing writes one -- and
+       wifiSetReg substitutes "US" when the field is empty and logs that it
+       did (service/wifi.go). So an unset domain cannot be why hostapd failed,
+       and sending operators to go and set one wasted their time. The domain
+       still matters indirectly: hostapd will not bring an AP up on a channel
+       the domain in force forbids. */
+    hint: 'Usually wlan0 is rfkill-blocked, already in use by wpa_supplicant, or the '
+      + 'configured channel is not permitted by the regulatory domain currently in force.',
+    action: { label: 'Open WiFi', view: 'wifi' },
   },
   {
     match: /WiFi subsystem is unavailable/i,
@@ -592,154 +600,18 @@ Views.cable = async function () {
 
 /* --- Radio: WiFi + Bluetooth ------------------------------------------- */
 
-const WIFI_MODE = ['unknown', 'access point', 'station', 'disabled'];
 
-Views.radio = async function () {
-  const main = clear($('#view'));
-  main.append(pageHead('Radio',
-    'The wireless side: the access point this device spawns or the network it joins, and the Bluetooth controller.'));
+/* Views.radio is gone.
+   Every card it held now has a page of its own that can actually CHANGE the
+   thing it describes: WiFi (view-wifi.js), Bluetooth and its pairing agent
+   (view-bluetooth.js), and the interface addresses (view-network.js). Keeping
+   a read-only copy beside them meant two screens disagreeing about the same
+   device -- and the copy was wrong twice over, which is how this was noticed:
+   WIFI_MODE was indexed with an enum NAME so it printed nothing it defined,
+   and it told operators hostapd refuses to start without a regulatory domain,
+   which is not true (see the note in the error guide above).
+   #radio still resolves, to WiFi -- see go(). */
 
-  const [wifi, bt, btAgent] = await Promise.all([
-    guard(() => Api.rpc('GetWiFiState'), 'read WiFi state'),
-    guard(() => Api.rpc('GetBluetoothControllerInformation'), 'read Bluetooth controller'),
-    /* Not guarded: a device with no Bluetooth answers with an error and
-       that is fine -- the pairing card simply does not appear. guard()
-       would raise a toast about it on every visit to this page. */
-    Api.rpc('GetBluetoothAgentSettings').catch(() => null),
-  ]);
-  State.wifi = wifi; State.bt = bt;
-
-  if (wifi) {
-    const cs = wifi.currentSettings || {};
-    main.append(h('div.card',
-      h('h2.card-title', 'WiFi'),
-      h('div.figures',
-        figure(wifi.ssid || '--', 'ssid'),
-        figure(String(wifi.channel || '--'), 'channel'),
-        figure(WIFI_MODE[wifi.mode] || String(wifi.mode), 'mode')),
-      dataTable( { style: 'margin-top:24px' },
-        h('tbody',
-          kvRow('Regulatory domain', cs.regulatory || 'unset',
-            cs.regulatory ? null : 'hostapd refuses to start without one; the AP will not appear.'),
-          kvRow('SSID hidden', cs.hide_ssid ? 'yes' : 'no'),
-          kvRow('Nexmon features', cs.nexmon ? 'enabled' : 'off',
-            cs.nexmon ? 'KARMA and multi-SSID need a Nexmon-patched firmware blob installed.' : null),
-          kvRow('Disabled', cs.disabled ? 'yes' : 'no'),
-          kvRow('Template name', cs.name || '--'))),
-      /* First boot prints, for the SSID and PSK it generated:
-             web client -> WiFi -> Settings -> set SSID + PSK
-                                            -> save as template
-                                            -> set as default
-         The saving half of that had no implementation in any client. The
-         setting half is in the CLI (cmd_wifi.go). */
-      h('div.btn-row', { style: 'margin-top:20px' },
-        storeDeployedButton({
-          rpc: 'StoreDeployedWifiSettings',
-          title: 'Store the running WiFi configuration',
-          placeholder: 'ap-engagement',
-          hint: 'Captures what is live now -- mode, SSID, PSK, channel and regulatory domain. '
-              + 'Deployable later from Loadouts, or as part of a whole-device template.',
-        }))));
-  }
-
-  if (bt) {
-    main.append(h('div.card',
-      h('h2.card-title', 'Bluetooth'),
-      bt.is_available === false
-        ? h('div.banner.banner-danger',
-          h('p.banner-title', 'Controller not available'),
-          h('p', 'No usable Bluetooth controller was found. On a Pi this usually means the kernel module or the bluetooth service did not come up.'))
-        : dataTable(
-          h('tbody',
-            kvRow('Name', bt.name || '--'),
-            kvRow('Short name', bt.short_name || '--'),
-            kvRow('Version', String(bt.bluetooth_version ?? '--')),
-            kvRow('NAP server', bt.service_network_server_nap ? 'on' : 'off',
-              bt.service_network_server_nap ? 'The device offers network access over Bluetooth PAN.' : null),
-            kvRow('PANU', bt.service_network_server_panu ? 'on' : 'off'),
-            kvRow('GN', bt.service_network_server_gn ? 'on' : 'off'))),
-      bt.is_available === false ? null : h('div.btn-row', { style: 'margin-top:20px' },
-        storeDeployedButton({
-          rpc: 'StoreDeployedBluetoothSettings',
-          title: 'Store the running Bluetooth configuration',
-          placeholder: 'bt-nap',
-          hint: 'Captures the controller settings and the pairing PIN together.',
-        }))));
-  }
-
-  /* THE PAIRING PIN.
-   *
-   * This screen did not exist, and its absence was not merely a missing
-   * feature: /root/INITIAL_CREDENTIALS.txt, written on every device at
-   * first boot, lists the PIN as a shared default and tells the operator
-   *
-   *     Bluetooth PIN:  1337
-   *                     -> web client -> Bluetooth -> Settings -> new PIN
-   *
-   * There was no such screen in any client -- not here, and there is no
-   * cmd_bluetooth.go in the CLI either. The device flagged its own weakest
-   * credential and pointed at a way to fix it that did not exist. A
-   * security instruction aimed at nothing is worse than none, because the
-   * operator believes it has been dealt with.
-   *
-   * BluetoothAgentSettings is one string field, so this is a small screen
-   * for a real hole. */
-  if (btAgent) {
-    let pin = btAgent.pin || '';
-    main.append(h('div.card',
-      h('h2.card-title', 'Bluetooth pairing'),
-      h('p.field-hint', { style: 'margin-bottom:14px' },
-        'The PIN a device must enter to pair with this one. Every image ships the same '
-        + 'default, so until you change it, anyone who knows the project knows your PIN.'),
-      btAgent.pin === '1337'
-        ? h('div.banner.banner-danger', { style: 'margin-bottom:14px' },
-          h('p.banner-title', 'This is the shipped default'),
-          h('p', 'The PIN is still 1337, which is the same on every P4wnP1 built from this '
-               + 'image. Change it, or turn Bluetooth off entirely with '),
-          h('p.mono', 'systemctl disable --now bluetooth'))
-        : null,
-      textField('Pairing PIN', pin, v => { pin = v; }, '4 to 16 digits'),
-      h('div.btn-row', { style: 'margin-top:12px' },
-        h('button.btn.btn-primary', {
-          type: 'button',
-          onclick: async (e) => {
-            const v = String(pin || '').trim();
-            /* Checked here so the message names the rule. The agent takes a
-               string, so a bad value would otherwise be accepted and fail
-               silently at pairing time -- the worst place to find out. */
-            if (!/^[0-9]{4,16}$/.test(v)) {
-              toast('A pairing PIN must be 4 to 16 digits.', 'bad');
-              return;
-            }
-            if (v === '1337') {
-              toast('That is the shipped default. Pick something else.', 'bad');
-              return;
-            }
-            e.target.disabled = true;
-            const res = await guard(() => Api.rpc('DeployBluetoothAgentSettings', { pin: v }),
-              'set the Bluetooth PIN');
-            e.target.disabled = false;
-            if (res) { toast('Bluetooth PIN changed.'); Views.radio(); }
-          },
-        }, 'Change PIN'))));
-  }
-
-  const eth = await guard(() => Api.rpc('GetAllDeployedEthernetInterfaceSettings'), 'read interfaces');
-  State.eth = eth;
-  const list = (eth && eth.list) || [];
-  const ETH_MODE = ['manual', 'dhcp client', 'dhcp server', 'unmanaged'];
-  main.append(h('div.card',
-    h('h2.card-title', 'Interfaces'),
-    list.length ? dataTable(
-      h('thead', h('tr',
-        h('th', 'Interface'), h('th', 'Mode'), h('th', 'Address'), h('th', 'In use'))),
-      h('tbody', ...list.map(i => h('tr',
-        h('td.mono', i.name || '--'),
-        h('td', ETH_MODE[i.mode] || String(i.mode)),
-        h('td.mono', i.ipAddress4 ? i.ipAddress4 + '/' + (i.netmask4 || '') : '--'),
-        h('td', i.settingsInUse ? 'yes' : 'no')))))
-      : h('div.empty', 'No managed interfaces reported.')));
-};
 
 /* --- Keystrokes: HIDScript -------------------------------------------- */
 
@@ -1775,17 +1647,17 @@ function handleEvent(ev) {
        one that admits it needs a reload. */
     const map = {
       0: 'cable',      // USB
-      1: 'radio',      // WiFi
+      1: 'wifi',       // WiFi
       2: 'network',    // NETWORK
       3: 'bluetooth',  // BLUETOOTH
       5: 'reflexes',   // TRIGGER_ACTIONS
       6: 'system',     // LED
       8: 'cable',      // stored USB settings list
       9: 'network',    // stored ethernet interface settings list
-      10: 'radio',     // stored WiFi settings list
+      10: 'wifi',      // stored WiFi settings list
       11: 'bluetooth', // stored Bluetooth settings list
       12: 'reflexes',  // stored trigger action sets list
-      14: 'loadouts',  // stored global settings list
+      14: 'templates', // stored global settings list
     };
     if (map[sub]) reloadViewOnStateChange(map[sub]);
   }
@@ -1884,12 +1756,13 @@ const NAV = [
   ['overview', 'Overview'],
   ['cable', 'Cable'],
   ['storage', 'Storage'],
-  ['radio', 'Radio'],
+  ['wifi', 'WiFi'],
   ['bluetooth', 'Bluetooth'],
   ['network', 'Network'],
   ['keystrokes', 'Keystrokes'],
   ['reflexes', 'Reflexes'],
   ['loadouts', 'Loadouts'],
+  ['templates', 'Templates'],
   ['system', 'System'],
   ['panel', 'Panel'],
   ['journal', 'Journal'],
@@ -1923,7 +1796,12 @@ function revealCurrentNavItem() {
   }
 }
 
+/* Pages that moved. A bookmark or a link in someone's notes should not land
+   on Overview with no explanation. */
+const VIEW_ALIASES = { radio: 'wifi' };
+
 function go(view) {
+  if (VIEW_ALIASES[view]) view = VIEW_ALIASES[view];
   if (!Views[view]) view = 'overview';
   runViewTeardown();
   clearToasts();
