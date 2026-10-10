@@ -3,7 +3,7 @@ PATH := /usr/local/go/bin:$(PATH)
 
 .PHONY: all help compile build-armv6 build-service-armv6 build-cli-armv6 build-hashpw-armv6 \
         build-arm64 build-service-arm64 build-cli-arm64 build-hashpw-arm64 \
-        image image-plain image-oled image-armhf image-arm64 contrast smoke feature-test access-control check-quoting oled-sim oled-shots verify check-js check-rpc check-render check-cli check-palette mock dep install installkali remove lint test
+        image image-plain image-oled image-armhf image-arm64 contrast smoke feature-test access-control check-quoting oled-sim oled-shots verify check-js check-rpc check-render check-cli check-palette cachebust mock dep install installkali remove lint test
 
 all: build-armv6
 
@@ -22,6 +22,7 @@ help:
 	@echo "  make check-api-auth Every JSON API handler authenticates"
 	@echo "  make check-cli     Every P4wnP1_cli command the scripts print is runnable"
 	@echo "  make check-palette Drive the Ctrl-K command palette in jsdom"
+	@echo "  make cachebust     Re-record the console stamp after bumping ?v="
 	@echo "  make smoke         Run the service in a container and verify it works"
 	@echo "  make feature-test  Exercise all 83 RPCs against the real binary and"
 	@echo "                     report PASS / expected-without-hardware / FAIL"
@@ -191,6 +192,10 @@ verify:
 	# rather than run them, nothing failed.
 	./tools/check-cli-commands.sh
 	./tools/check-js.sh
+	# Cheap, and it catches a mistake that looks like a code bug: a console
+	# file changed without index.html's ?v= moving, so a browser keeps
+	# serving the old bundle and your change is simply absent.
+	./tools/check-cachebust.sh
 	./tools/check-render.sh
 	# The render gate calls every Views entry. The palette is not a view -- it
 	# registers global key handlers and builds its own DOM -- so that gate
@@ -214,6 +219,10 @@ check-cli:
 
 check-palette:
 	./tools/check-palette.sh
+
+# Re-record the console cache-busting stamp after bumping ?v= in index.html.
+cachebust:
+	./tools/check-cachebust.sh --record
 
 build-armv6: build-service-armv6 build-cli-armv6 build-hashpw-armv6 build-oled-armv6
 	@echo

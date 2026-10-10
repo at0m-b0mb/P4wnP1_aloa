@@ -930,9 +930,20 @@ async function refreshJobs() {
  * {"bashScript":{"scriptName":"startup.sh"}}. The `fields` here drive the form
  * AND the payload, so the two cannot drift apart.
  *
- * GPIO and the multi-value group trigger are deliberately not offered: they
- * need hardware context the console cannot show, and putting them behind a
- * select with no explanation would be worse than leaving them to the CLI. */
+ * GPIO IS offered now. It was left out on the grounds that it "needs hardware
+ * context the console cannot show" -- but GetAvailableGpios returns exactly
+ * that context and was simply never called, so the reason had stopped being
+ * true. The pin list comes from the device, so a board with no usable pins
+ * offers none rather than inviting a guess.
+ *
+ * NOTE THE FIELD NAMES. protojson emits what the .proto declares, and
+ * TriggerGPIOIn mixes conventions: gpio_name and debounce_millis are
+ * snake_case while pullUpDown and gpioInEdge are camelCase. Getting one wrong
+ * is silent -- DiscardUnknown drops it and the reflex arms with a zero value,
+ * which for pullUpDown means UP and for gpioInEdge means RISING.
+ *
+ * The multi-value group trigger is still not offered: it has no equivalent
+ * source of context. */
 const TRIGGERS = [
   { key: 'serviceStarted', label: 'The device finishes booting',
     hint: 'Fires once, every boot, as soon as the service is up.', fields: [] },
@@ -944,6 +955,21 @@ const TRIGGERS = [
   { key: 'wifiConnectedAsSta', label: 'The device joins a WiFi network', fields: [] },
   { key: 'dhcpLeaseGranted', label: 'A client takes a DHCP lease',
     hint: 'Fires when something connects and is given an address -- a good proxy for "a machine just joined".', fields: [] },
+  { key: 'gpioIn', label: 'A GPIO pin changes',
+    hint: 'A wire into one of the Pi\u2019s pins. Use it for a button, a reed switch, or '
+        + 'another board signalling this one. The pin list comes from the device.',
+    fields: [
+      { name: 'gpio_name', label: 'Pin', required: true, options: 'gpio',
+        chooseLabel: 'Choose a pin\u2026',
+        emptyLabel: 'No GPIO pins available on this board' },
+      { name: 'pullUpDown', label: 'Idle state', choices: ['UP', 'DOWN', 'OFF'], value: 'UP',
+        hint: 'What holds the pin when nothing drives it. UP for a button wired to ground.' },
+      { name: 'gpioInEdge', label: 'Fires on', choices: ['RISING', 'FALLING', 'BOTH'], value: 'FALLING',
+        hint: 'FALLING is the press of a button wired to ground; RISING is the release.' },
+      { name: 'debounce_millis', label: 'Debounce (ms)', type: 'number', value: '100', numeric: true,
+        hint: 'A mechanical contact bounces for a few milliseconds and would otherwise '
+            + 'fire the reflex several times per press. 0 disables it.' },
+    ] },
   { key: 'sshLogin', label: 'Someone logs in over SSH',
     fields: [{ name: 'loginUser', label: 'Username', placeholder: 'any user if left blank' }] },
   { key: 'groupReceive', label: 'A group value arrives',
@@ -966,6 +992,15 @@ const ACTIONS = [
     fields: [
       { name: 'groupName', label: 'Group', placeholder: 'ack', required: true },
       { name: 'value', label: 'Value', type: 'number', value: '1', numeric: true },
+    ] },
+  { key: 'gpioOut', label: 'Set a GPIO pin',
+    hint: 'Drive one of the Pi\u2019s pins high or low -- an LED, a relay, or a signal to '
+        + 'another board. Check what is wired to it before you drive it.',
+    fields: [
+      { name: 'gpio_name', label: 'Pin', required: true, options: 'gpio',
+        chooseLabel: 'Choose a pin\u2026',
+        emptyLabel: 'No GPIO pins available on this board' },
+      { name: 'value', label: 'Drive it', choices: ['HIGH', 'LOW', 'TOGGLE'], value: 'HIGH' },
     ] },
   { key: 'log', label: 'Write a line to the Journal',
     hint: 'Useful for proving a trigger fires before you attach anything real to it.', fields: [] },
@@ -998,16 +1033,24 @@ Views.reflexes = async function () {
   main.append(pageHead('Reflexes',
     'Rules the device acts on by itself: when something happens, run something. This is what lets it work with nobody at the keyboard.'));
 
-  const [set, hidScripts, bashScripts] = await Promise.all([
+  const [set, hidScripts, bashScripts, gpios] = await Promise.all([
     guard(() => Api.rpc('GetDeployedTriggerActionSet'), 'read the reflexes'),
     Api.rpc('ListStoredHIDScripts').catch(() => null),
     Api.rpc('ListStoredBashScripts').catch(() => null),
+    /* The pin list is what makes GPIO offerable at all. It used to be left
+       out of this builder on the grounds that GPIO "needs hardware context
+       the console cannot show" -- but GetAvailableGpios IS that context, and
+       it was simply never called. A board with no usable pins answers with
+       an empty list and the fields say so, which is the honest version of
+       the same caution. */
+    Api.rpc('GetAvailableGpios').catch(() => null),
   ]);
   State.triggers = set;
   const items = (set && set.TriggerActions) || [];
   const scriptOptions = {
     hid: (hidScripts && hidScripts.msgArray) || [],
     bash: (bashScripts && bashScripts.msgArray) || [],
+    gpio: (gpios && gpios.msgArray) || [],
   };
 
   main.append(renderReflexBuilder(scriptOptions));
@@ -1115,8 +1158,9 @@ function renderReflexBuilder(scriptOptions) {
       let input;
       if (f.options) {
         const opts = scriptOptions[f.options] || [];
+        const empty = f.emptyLabel || 'No scripts stored';
         input = h('select', {},
-          h('option', { value: '' }, opts.length ? 'Choose a script...' : 'No scripts stored'),
+          h('option', { value: '' }, opts.length ? (f.chooseLabel || 'Choose a script...') : empty),
           ...opts.map(n => h('option', { value: n }, n)));
       } else if (f.choices) {
         // A fixed set of values the API will accept. Typing these by hand
@@ -1128,7 +1172,16 @@ function renderReflexBuilder(scriptOptions) {
         input = h('input', { type: f.type || 'text', value: f.value || '', placeholder: f.placeholder || '' });
       }
       store.inputs[f.name] = { el: input, spec: f };
-      host.append(h('label.field', h('span.field-label', f.label), input));
+      /* Per-field hint. The spec objects already carried `hint` on the GPIO
+         fields and the renderer dropped it on the floor -- the text existed
+         in the source and never reached a screen. These fields are the ones
+         that most need it: "pull up or down" and "rising or falling" are not
+         guessable, and guessing wrong arms a reflex that fires on the wrong
+         edge or never fires at all. */
+      host.append(h('label.field',
+        h('span.field-label', f.label),
+        input,
+        f.hint ? h('span.field-hint', f.hint) : null));
     }
   }
 

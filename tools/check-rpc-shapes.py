@@ -422,6 +422,112 @@ def check_endpoint_budget():
     return problems
 
 
+# ---------------------------------------------------------------------------
+# The reflex builder's trigger/action tables.
+#
+# WHY THIS NEEDED ITS OWN CHECK
+#
+# console_calls() finds Api.rpc('Method', { literal object }) and validates
+# those keys. The reflex builder does not write a literal: TRIGGERS and
+# ACTIONS in app.js are tables of {key, fields:[{name,...}]}, and collect()
+# assembles the payload as {[spec.key]: {[field.name]: value}} at submit
+# time. So not one trigger or action field name was ever checked -- the
+# single place in the console where the field names are MOST confusable,
+# because TriggerAction's members are a protobuf oneof and the messages
+# behind them mix conventions. TriggerGPIOIn alone has gpio_name and
+# debounce_millis in snake_case beside pullUpDown and gpioInEdge in camel.
+#
+# Getting one wrong is silent: DiscardUnknown drops it and the reflex arms
+# with a zero value. For pullUpDown zero is UP; for gpioInEdge it is RISING.
+# The operator gets a reflex that fires on the wrong edge, or never.
+# ---------------------------------------------------------------------------
+
+def check_reflex_tables(messages, problems):
+    src = (ROOT / "dist/www/app/js/app.js").read_text()
+
+    # The oneof members of TriggerAction: `TriggerServiceStarted serviceStarted = 7;`
+    proto = PROTO.read_text()
+    proto = re.sub(r"//[^\n]*", "", proto)
+    m = re.search(r"message\s+TriggerAction\s*\{", proto)
+    if not m:
+        problems.append("check_reflex_tables: TriggerAction not found in the proto")
+        return 0
+    depth, i = 0, m.end() - 1
+    while i < len(proto):
+        if proto[i] == "{":
+            depth += 1
+        elif proto[i] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    body = proto[m.end():i]
+    member_type = {}
+    for f in re.finditer(r"([\w.]+)\s+(\w+)\s*=\s*\d+", body):
+        mt, mn = f.group(1), f.group(2)
+        if mt in ("oneof", "message", "enum"):
+            continue
+        member_type[mn] = mt
+
+    checked = 0
+    for table in ("TRIGGERS", "ACTIONS"):
+        t = re.search(r"const\s+%s\s*=\s*\[" % table, src)
+        if not t:
+            problems.append("check_reflex_tables: %s not found in app.js" % table)
+            continue
+        start = t.end() - 1
+        depth, i = 0, start
+        while i < len(src):
+            if src[i] == "[":
+                depth += 1
+            elif src[i] == "]":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        tbody = src[start:i]
+        for entry in re.finditer(r"\{\s*key:\s*'(\w+)'", tbody):
+            key = entry.group(1)
+            if key not in member_type:
+                problems.append(
+                    "app.js %s: '%s' is not a member of the TriggerAction oneof, "
+                    "so the payload {%s:{...}} is dropped entirely and the reflex "
+                    "never arms" % (table, key, key))
+                continue
+            msg = member_type[key]
+            if msg not in messages:
+                problems.append("app.js %s '%s': message %s not in the proto" % (table, key, msg))
+                continue
+            # the fields: [...] belonging to THIS entry
+            seg = tbody[entry.start():]
+            fm = re.search(r"fields:\s*\[", seg)
+            if not fm:
+                continue
+            d, j = 0, fm.end() - 1
+            while j < len(seg):
+                if seg[j] == "[":
+                    d += 1
+                elif seg[j] == "]":
+                    d -= 1
+                    if d == 0:
+                        break
+                j += 1
+            for nm in re.finditer(r"name:\s*'(\w+)'", seg[fm.end():j]):
+                fname = nm.group(1)
+                checked += 1
+                if fname not in messages[msg]:
+                    problems.append(
+                        "app.js %s '%s': field '%s' does not exist on %s "
+                        "(it has: %s). protojson drops it silently, so the reflex "
+                        "arms with that value at zero."
+                        % (table, key, fname, msg, ", ".join(sorted(messages[msg])) or "no fields"))
+    if checked < 10:
+        problems.append(
+            "check_reflex_tables parsed only %d field names; the TRIGGERS/ACTIONS "
+            "patterns have stopped matching and this check would pass anything" % checked)
+    return checked
+
+
 def main():
     messages, rpcs = parse_proto()
     print(f"proto: {len(messages)} messages, {len(rpcs)} rpcs")
@@ -451,6 +557,8 @@ def main():
     go_problems, go_checked = check_go_client(messages, rpcs)
     problems.extend(go_problems)
     problems.extend(check_endpoint_budget())
+    reflex_fields = check_reflex_tables(messages, problems)
+    print(f"checked {reflex_fields} reflex trigger/action field names")
     print(f"checked {checked} console call sites with literal payloads, "
           f"{go_checked} OLED client call sites, "
           f"plus the keys the console reads off GadgetSettings")
