@@ -330,6 +330,22 @@ table.data td.mono { font-family: var(--font-mono); }
 /* --- narrow screens ----------------------------------------------------- */
 /* The console is frequently driven from a phone joined to the device's own
    access point, so this is a primary layout, not a courtesy. */
+
+/* The two ends of the nav strip's fade, as lengths something can animate.
+   Registered, because an UNregistered custom property is an uninterpolable
+   token stream: it would jump from one value to the other half way along
+   instead of following the thumb. The initial values are exactly the
+   right-only fade written below, so an engine with no scroll timeline keeps
+   that declaration and nothing else changes. */
+@property --nav-fade-start { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --nav-fade-end   { syntax: '<length>'; inherits: false; initial-value: 28px; }
+@keyframes nav-edge-fade {
+  0%   { --nav-fade-start: 0px;  --nav-fade-end: 28px; }
+  10%  { --nav-fade-start: 28px; --nav-fade-end: 28px; }
+  90%  { --nav-fade-start: 28px; --nav-fade-end: 28px; }
+  100% { --nav-fade-start: 28px; --nav-fade-end: 0px; }
+}
+
 @media (max-width: 820px) {
   .app { grid-template-columns: 1fr; }
   .rail {
@@ -355,12 +371,19 @@ table.data td.mono { font-family: var(--font-mono); }
     overflow-x: auto; overflow-y: hidden;
     scrollbar-width: none;            /* a bar would crowd a one-line strip */
     -webkit-overflow-scrolling: touch;
-    scroll-padding-inline: var(--s4);
+    /* 28px, not --s4, because it has to clear the fade below, not the padding.
+       revealCurrentNavItem() parks the current page against whichever edge it
+       scrolled from, and at 16px that landed it 12px inside a 28px fade: the
+       one item on the strip that must be legible had its leading character at
+       57% alpha. Measured at 393px, navigating back to Storage from Journal.
+       Both ends, because the same was already true at the right one. */
+    scroll-padding-inline: 28px;
   }
   /* THE ROW IS NO LONGER SHORT. It was eight items when the scrollbar was
-     hidden; it is twelve now, and on a phone four of them sit off the right
-     edge with nothing to say they exist -- a hidden scrollbar on a strip
-     that visibly ends at the viewport reads as "that is all there is".
+     hidden; it is thirteen now, and at 393px eight of them sit entirely off
+     the right edge with a ninth cut in half, and nothing to say they exist
+     -- a hidden scrollbar on a strip that visibly ends at the viewport reads
+     as "that is all there is".
      Fading the last few millimetres is the smallest honest signal: content
      continuing under a fade is legible as continuing, and it costs no
      layout and no script. The fade only applies while the row actually
@@ -375,6 +398,38 @@ table.data td.mono { font-family: var(--font-mono); }
   .nav:not(:focus-within) {
     -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
     mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+  }
+  /* AND THE SAME ARGUMENT AT THE LEFT END, WHICH IT WAS NOT APPLIED TO.
+     revealCurrentNavItem() scrolls the current page into view, so on any page
+     past the middle of the list the strip STARTS scrolled and the entries
+     before it are off the left edge. Measured at 393px: landing on Journal
+     puts eight of the thirteen entirely off-screen to the left and cuts a
+     ninth in half, so the strip starts at "Loadouts" with no fade, no arrow
+     and no scrollbar to say Overview or Cable exist.
+
+     A symmetric fade painted unconditionally is the one-line version of this
+     and it lies: at rest the strip sits at scrollLeft 0, there is genuinely
+     nothing to the left, and the first item would still sit under a mark
+     that means "more this way". The fade has to follow the scroll position,
+     and scroll(self inline) is the only way to read that position from CSS;
+     the alternative was a class toggled from app.js, which is not this file.
+
+     Layered as an addition, never a replacement: an engine without scroll
+     timelines never enters this block and keeps the right-only fade above
+     unchanged. When the row does not overflow there is no scroll range, the
+     animation is inactive, and the properties hold their initial values --
+     which are that same right-only fade. */
+  @supports (animation-timeline: scroll(self inline)) {
+    .nav:not(:focus-within) {
+      -webkit-mask-image: linear-gradient(to right,
+        transparent 0, #000 var(--nav-fade-start),
+        #000 calc(100% - var(--nav-fade-end)), transparent 100%);
+      mask-image: linear-gradient(to right,
+        transparent 0, #000 var(--nav-fade-start),
+        #000 calc(100% - var(--nav-fade-end)), transparent 100%);
+      animation: nav-edge-fade linear both;
+      animation-timeline: scroll(self inline);
+    }
   }
   .nav::-webkit-scrollbar { display: none; }
   .nav-item { white-space: nowrap; flex: none; }
@@ -519,10 +574,25 @@ pre.detail {
 .card-head select { width: auto; min-width: 190px; }
 
 /* --- the HIDScript reference -------------------------------------------- */
+/* 12px of padding, handed straight back as negative margin.
+ *
+ * This summary and the reflex builder's are the two disclosures in the
+ * console that set only type and colour, so each one's hit area was its text:
+ * 311x20 measured at 393px. They are the ONLY way into the HIDScript
+ * reference and into the reflex form, both are full width, so the miss is
+ * vertical -- a thumb a few pixels low lands on the card body and nothing
+ * happens, with nothing to say why. The padding takes both to 44px, the
+ * floor WCAG 2.5.5 asks for; the negative margin spends it in the card's own
+ * padding, which is empty, so the summary text, the card height and
+ * everything below are where they were. Measured against this stylesheet at
+ * 393px, with the declarations on and off: summary 20px -> 44px tall, card
+ * height identical, summary text 25px from the card's top either way.
+ * .concept > summary already had this, by having padding at all. */
 details.ref > summary {
   cursor: pointer; font-size: var(--t-small); font-weight: 600;
   letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint);
   list-style: none;
+  padding-block: var(--s3); margin-block: calc(-1 * var(--s3));
 }
 details.ref > summary::-webkit-details-marker { display: none; }
 details.ref > summary::before { content: '+ '; font-family: var(--font-mono); }
@@ -671,10 +741,13 @@ details.ref > summary:hover { color: var(--text); }
 }
 
 /* --- Reflex builder ----------------------------------------------------- */
+/* padding-block + negative margin-block: a 44px hit area that costs no
+   layout. The reasoning is at details.ref > summary above. */
 details.builder > summary {
   cursor: pointer; font-size: var(--t-small); font-weight: 600;
   letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint);
   list-style: none;
+  padding-block: var(--s3); margin-block: calc(-1 * var(--s3));
 }
 details.builder > summary::-webkit-details-marker { display: none; }
 details.builder > summary::before { content: '+ '; font-family: var(--font-mono); }

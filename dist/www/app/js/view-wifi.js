@@ -1422,13 +1422,27 @@
   function renderTemplates(templates, link, subsystemDown) {
     const card = h('div.card', h('h2.card-title', 'Stored WiFi templates'));
 
+    /* The empty state has to answer to subsystemDown too. "Fill in the form
+       above" is the one instruction on this card, and on the subsystem-down
+       page there is no form above it -- Views.wifi() returns before building
+       the editor, and the banner three cards up says so in as many words. The
+       Load button was disabled for exactly this reason; an empty list has no
+       Load button to disable and was left telling the operator to use an
+       editor that is not on the page. */
     if (!templates.length) {
-      card.append(h('div.empty',
-        'No WiFi templates stored. Fill in the form above and press "Store the form as a '
-        + 'template" to keep '
-        + 'a configuration: a template can be deployed again in one step, and naming one in a '
-        + 'Loadout under WiFi is the only way to make it come back after a reboot. Nothing '
-        + 'applied on this page survives a power cycle on its own.'));
+      card.append(h('div.empty', subsystemDown
+        ? 'No WiFi templates stored, and none can be stored from this page while the WiFi '
+          + 'subsystem does not answer: the editor is withheld because the device’s real '
+          + 'configuration is unknown, so there is no form to store. Get the subsystem '
+          + 'answering first -- "journalctl -u P4wnP1 -b" on the device says why it did not '
+          + '-- then come back. A template can then be deployed again in one step, and '
+          + 'naming one in a Loadout under WiFi is the only way to make a configuration come '
+          + 'back after a reboot.'
+        : 'No WiFi templates stored. Fill in the form above and press "Store the form as a '
+          + 'template" to keep '
+          + 'a configuration: a template can be deployed again in one step, and naming one in '
+          + 'a Loadout under WiFi is the only way to make it come back after a reboot. '
+          + 'Nothing applied on this page survives a power cycle on its own.'));
       return card;
     }
 

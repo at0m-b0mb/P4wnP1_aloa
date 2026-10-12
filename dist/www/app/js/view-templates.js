@@ -139,10 +139,16 @@
    *    THAT. So the deploy reports success, the SSID is the one on screen,
    *    and the key is not. The replacement IS readable: DeploySettings sets
    *    State.CurrentSettings to the message the guard mutated, so the reply
-   *    to the deploy carries it, and deployWifi below puts it on screen. It
-   *    is in that reply and nowhere else a browser can reach -- a deploy that
-   *    takes the link with it before the reply arrives loses it, and then the
-   *    WiFi page's "Deployed now" card is where to read it from.
+   *    to the deploy carries it, and deployWifi below puts it on screen. The
+   *    reply is not the only copy a browser can reach, and nothing in this
+   *    file may say that it is: GetWiFiState returns that same
+   *    State.CurrentSettings, so the WiFi page's "Deployed now" card renders
+   *    the generated key behind its "Show it" button for as long as the
+   *    service keeps running. That card is where to read the key when a
+   *    deploy takes the link with it before the reply arrives. A service
+   *    restart does lose it from the API -- the constructor resets
+   *    CurrentSettings to an empty Ap_BSS -- and then the only copy left is
+   *    the one on the device at GENERATED_PSK_PATH.
    *
    *    This is not hypothetical here. dist/db/init.db ships the first of
    *    these inside a stored WiFi template, so on a freshly flashed device
@@ -1420,8 +1426,14 @@
       const r = await guard(() => WIFI.deploy(n), 'deploy the WiFi configuration "' + n + '"');
       if (r === undefined) return;
 
-      /* THE REPLACEMENT KEY IS IN THIS REPLY AND NOWHERE ELSE A BROWSER CAN
-         REACH IT.
+      /* THE REPLACEMENT KEY COMES BACK IN THIS REPLY, AND THIS IS THE ONLY
+         MOMENT IT IS PUT IN FRONT OF THE OPERATOR WITHOUT THEM GOING AND
+         ASKING FOR IT. It is NOT the only copy a browser can reach -- see
+         the note at the showDetail below, and section 1 of the file header:
+         GetWiFiState hands the same mutated CurrentSettings to the WiFi
+         page's "Deployed now" card. Dropping the key here is still a defect,
+         because it makes the operator go and find that card over a link the
+         deploy may have just taken down.
          DeployStoredWifiSettings hands the stored message to
          DeployWiFiSettings, guardAccessPointPSK mutates Ap_BSS.PSK in place
          at the top of DeploySettings, and on success DeploySettings sets
@@ -1441,11 +1453,21 @@
           title: 'The device replaced the access point key',
           body: 'The key stored in "' + n + '" is published in this project’s source, so '
             + 'the device generated its own and brought the access point up on that instead. '
-            + 'Write it down now -- this is the only place a browser is shown it:\n\n'
+            /* NOT "the only place a browser is shown it". GetWiFiState returns
+               State.CurrentSettings, which wifi.go set to this same mutated
+               message, so the WiFi page's "Deployed now" card renders the
+               generated key behind its "Show it" button for as long as the
+               service keeps running. Saying otherwise here would contradict
+               wifiProblems and the header note above, both of which send the
+               operator to exactly that card. */
+            + 'Write it down now:\n\n'
             + back
-            + '\n\nIt is kept at ' + GENERATED_PSK_PATH + ' (mode 0600) and reused from then '
-            + 'on, so it will not change on the next boot. The template still holds the old '
-            + 'key, so every deploy of "' + n + '" lands on this same generated one.',
+            + '\n\nIf this dialog is closed before you have it, the WiFi page\'s "Deployed '
+            + 'now" card shows the key in force under "Access point key" -- over any link to '
+            + 'this device that is still up. It is kept at ' + GENERATED_PSK_PATH + ' (mode '
+            + '0600) and reused from then on, so it will not change on the next boot. The '
+            + 'template still holds the old key, so every deploy of "' + n + '" lands on '
+            + 'this same generated one.',
           mono: true,
         });
       }

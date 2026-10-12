@@ -190,13 +190,46 @@
 
   /* A checkbox row in the Cable page's style. `disabled` renders the same row
      with the checkbox greyed out -- still showing the flag's real state, but
-     not operable -- which is how an unsupported flag appears. */
+     not operable -- which is how an unsupported flag appears.
+
+     THE DESCRIPTION LIVES INSIDE THE LABEL, which is the whole point. It used
+     to be a sibling <p>, so the forty-odd words under each flag name were
+     inert: on a phone the only thing that toggled the flag was the 16px
+     checkbox itself, with the row measuring about 23px. Cable had exactly
+     this defect and it was fixed there; this is the same fix, and it was
+     missed because the two files have different owners.
+
+     Pulling the text in costs something that has to be paid back: a label's
+     whole subtree becomes the checkbox's ACCESSIBLE NAME, so a screen reader
+     would announce the entire explanation on every focus and after every
+     toggle, and voice control would stop matching the short name. aria-label
+     pins the name back to the flag, and aria-describedby re-attaches the
+     explanation as what it actually is. Both are needed -- describedby alone
+     does not remove text from the name. */
+  let toggleRowSeq = 0;
   function toggleRow({ label, checked, what, disabled, onchange }) {
-    return h('div.fn-choice',
-      h('label.check',
-        h('input', { type: 'checkbox', checked: !!checked, disabled: !!disabled, onchange }),
-        h('span.fn-choice-name', label)),
-      what ? h('p.fn-choice-what', what) : null);
+    if (!what) {
+      return h('div.fn-choice',
+        h('label.check',
+          h('input', { type: 'checkbox', checked: !!checked, disabled: !!disabled, onchange }),
+          h('span.fn-choice-name', label)));
+    }
+    /* A counter, not a slug of the label: one call site builds its label as
+       "<name> -- <title>", so two flags can differ only in punctuation and a
+       slug would collide. A duplicate id would point every describedby at the
+       first row's text. */
+    const id = 'bt-what-' + (++toggleRowSeq);
+    return h('label.check.fn-choice',
+      { style: 'align-items:flex-start;padding:4px 0' },
+      h('input', {
+        type: 'checkbox', checked: !!checked, disabled: !!disabled, onchange,
+        style: 'flex:none;margin-top:3px',
+        'aria-label': label,
+        'aria-describedby': id,
+      }),
+      h('span',
+        h('span.fn-choice-name', label),
+        h('span.fn-choice-what', { id: id, style: 'display:block;margin-left:0' }, what)));
   }
 
   /* Read a Bluetooth RPC without raising a toast for "there is no controller".

@@ -185,7 +185,7 @@ type FirstRunView struct {
 	// resolveAP for why the key has to come from here.
 	liveSSID string
 	livePSK  string
-	// apFirstAsk/apLastAsk bound the retrying in resolveAP.
+	// apFirstAsk/apLastAsk/apInterval bound the retrying in resolveAP.
 	//
 	// These replaced a single `ssidDone bool` that was set BEFORE the call
 	// and never cleared, so exactly one attempt was ever made. That is a
@@ -196,8 +196,14 @@ type FirstRunView struct {
 	// panel caches "no key" for the life of the process and shows three
 	// cards again. That is the very bug reading the key live was meant to
 	// end, reintroduced one layer up.
+	//
+	// apInterval is the CURRENT wait, and it doubles after every answer
+	// that carried no key. A flat interval is wrong here because the call
+	// is synchronous and runs on the loop that reads the buttons; see
+	// apRetryInterval.
 	apFirstAsk time.Time
 	apLastAsk  time.Time
+	apInterval time.Duration
 	apAsked    bool
 }
 
@@ -237,15 +243,20 @@ func (v *FirstRunView) resolveAP(app *App) {
 
 	now := nowFunc()
 	if v.apAsked {
-		// Bounded, in both directions. Render runs every frame, so without
+		// Bounded in THREE directions. Render runs every frame, so without
 		// a rate limit a device with no access point would issue an RPC per
 		// frame forever; without a deadline it would do so for as long as
-		// the operator stood there.
-		if now.Sub(v.apFirstAsk) > apRetryWindow || now.Sub(v.apLastAsk) < apRetryInterval {
+		// the operator stood there; and without the backoff below it would
+		// block the button loop once a second for the whole window.
+		if now.Sub(v.apFirstAsk) > apRetryWindow || now.Sub(v.apLastAsk) < v.apInterval {
 			return
 		}
+		v.apInterval *= 2
+		if v.apInterval > apRetryMax {
+			v.apInterval = apRetryMax
+		}
 	} else {
-		v.apAsked, v.apFirstAsk = true, now
+		v.apAsked, v.apFirstAsk, v.apInterval = true, now, apRetryInterval
 	}
 	v.apLastAsk = now
 
@@ -261,12 +272,38 @@ func (v *FirstRunView) resolveAP(app *App) {
 	}
 }
 
-// How hard resolveAP tries. One second apart is slow enough that a panel
-// redrawing many times a second does not flood the service, and two minutes
-// is longer than a Pi Zero W takes to get from "RPC listener up" to "startup
-// WiFi template deployed" even on a cold first boot.
+// How hard resolveAP tries, and why it eases off.
+//
+// Two minutes is longer than a Pi Zero W takes to get from "RPC listener up"
+// to "startup WiFi template deployed" even on a cold first boot, so that is
+// the window.
+//
+// THE CALL IS ON THE GOROUTINE THAT READS THE BUTTONS. resolveAP runs from
+// Render, and Render runs on the same select loop in cmd/p4wnp1-oled that
+// takes input events, so every LiveAP call blocks KEY1 -- the erase key, the
+// only control this screen offers -- for as long as the service takes to
+// answer. That is an `iw dev wlan0 info` exec on a 1GHz single-core board,
+// or the client's full 6-second timeout when the service is slow to reply.
+// The 150ms paint ticker cannot keep up through it either, so the panel
+// visibly stalls.
+//
+// A flat one-second interval therefore meant up to ~120 blocking calls over
+// the window, on exactly the device the window exists for: one whose access
+// point never comes up. So the wait DOUBLES after each answer that carried no
+// key -- 1s, 2s, 4s, 8s, 16s, then 30s -- which is 8 attempts across two
+// minutes instead of 120. The early attempts stay close together because that
+// is where the answer actually arrives, a few seconds in when the startup
+// template deploys, and the ceiling bounds how late a slow boot is noticed to
+// half a minute.
+//
+// Moving the call onto its own goroutine would remove the stalls rather than
+// thin them out. It is not done here because resolveAP's contract is that the
+// answer is in place when it returns -- Render reads psk() immediately after,
+// and the retry tests drive it against a fake clock -- so that change is a
+// rewrite of the callers and the tests, not of this function.
 const (
 	apRetryInterval = time.Second
+	apRetryMax      = 30 * time.Second
 	apRetryWindow   = 2 * time.Minute
 )
 

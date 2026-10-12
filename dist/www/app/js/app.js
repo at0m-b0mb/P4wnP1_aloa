@@ -647,14 +647,54 @@ Views.cable = async function () {
       h('div',
         h('p.field-hint', { style: 'margin:-4px 0 14px' },
           'Each of these is a separate device the host sets up. You can present several at once.'),
-        ...USB_FUNCTIONS.map(fn => h('div.fn-choice',
-          h('label.check',
-            h('input', {
-              type: 'checkbox', checked: !!draft[fn.key],
-              onchange: e => { draft[fn.key] = e.target.checked; markDirty(); },
-            }),
-            h('span.fn-choice-name', fn.name)),
-          h('p.fn-choice-what', fn.what))),
+        /* THE WHOLE BLOCK IS THE TARGET, description included.
+         *
+         * This used to be a div holding a label.check -- the 16px checkbox
+         * and the function name, 23px tall with no padding -- and the
+         * explanatory paragraph as a SIBLING, outside the label. So on the
+         * page this device is about, choosing what the cable presents meant
+         * hitting a 23px strip, while the 40-60px block of text directly
+         * beneath it -- visually the larger, more obvious thing to tap --
+         * did nothing at all. A thumb aiming at the text for "Keyboard"
+         * registered nothing and the operator tapped again somewhere else.
+         *
+         * The label now wraps both, so the target is the whole row.
+         * Measured in a browser at 375px: 23px before, 70-109px after, and
+         * the floor is about 50px where a description fits on one line.
+         * A <span> rather than a <p> for the description because a label
+         * takes phrasing content and <p> is not; as a child of a flex item
+         * it is blockified anyway, so it still reads as its own line.
+         * The two inline rules undo what the sibling layout needed:
+         * .fn-choice-what carries a 24px left margin to clear the checkbox,
+         * which inside the label the flex gap already does -- and that also
+         * fixes a 7px misalignment, since the paragraph used to hang 7px to
+         * the left of the name it belongs to. */
+        ...USB_FUNCTIONS.map(fn => h('label.check.fn-choice',
+          { style: 'align-items:flex-start;padding:4px 0' },
+          h('input', {
+            type: 'checkbox', checked: !!draft[fn.key],
+            style: 'flex:none;margin-top:3px',
+            /* Pulling the description inside the label is what makes the row
+               tappable -- and it also folds those sixty-odd words into the
+               checkbox's accessible NAME, because that is computed from the
+               whole label subtree. Measured in a browser: 8 characters
+               ("Keyboard") became 101. A screen reader would then re-read the
+               entire explanation on every focus AND after every toggle, and a
+               voice-control operator saying "tick Keyboard" would no longer
+               match. So the name is pinned back to the function name and the
+               explanation is attached as what it actually is, a description.
+               Both halves are needed: aria-describedby alone does not take
+               text out of the name. */
+            'aria-label': fn.name,
+            'aria-describedby': 'fn-what-' + fn.key,
+            onchange: e => { draft[fn.key] = e.target.checked; markDirty(); },
+          }),
+          h('span',
+            h('span.fn-choice-name', fn.name),
+            /* The id is the function's own enum key, which is unique per
+               page: renderCable()'s read-only strip carries no ids. */
+            h('span.fn-choice-what',
+              { id: 'fn-what-' + fn.key, style: 'display:block;margin-left:0' }, fn.what)))),
         h('label.check',
           h('input', {
             type: 'checkbox', checked: draft.enabled !== false,

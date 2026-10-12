@@ -362,6 +362,27 @@ func (s *Service) Start() (context.Context, context.CancelFunc) {
 			switch {
 			case !scriptFallback:
 				fmt.Println("... keeping what deployed; NOT running the hardcoded fallback script")
+				/* AND NAME THE HALF-REACHABLE STATE, because the operator
+				   holding the other end cannot see it. One link up and the
+				   other failed -- a USB template whose UMS backing image is
+				   gone, with the access point fine -- is a device that is
+				   reachable at 172.24.0.1:8000 and enumerates NOTHING to
+				   the attached host. The failing step is already named
+				   above; this says what it costs.
+
+				   The fallback is still the wrong answer for it: that
+				   script rewrites the access point's name and key, so
+				   running it to repair a gadget would drop the one link
+				   that works and rebroadcast the hardcoded SSID. Repairing
+				   a failed gadget WITHOUT touching the radio is a separate
+				   mechanism and does not exist yet, so this reports the
+				   state rather than guessing at it. */
+				if partial.LinksAttempted > 0 && partial.LinksUp < partial.LinksAttempted {
+					fmt.Println("...   NOTE: a link-bearing subsystem failed (named above), so this " +
+						"device is reachable only over the link that did come up. The fallback " +
+						"script is NOT run for this: it would rewrite the access point's name " +
+						"and key and drop that link. Fix the failing template from the console.")
+				}
 			case partial.NothingDeployed():
 				fmt.Println("... NOTHING deployed -- falling back to the startup script to make the device reachable")
 			default:

@@ -25,6 +25,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -74,17 +75,34 @@ type server struct {
 //
 // Logged rather than silent, so a genuinely broken install is still
 // discoverable in the journal instead of looking like an empty library.
+//
+// ONCE, THOUGH. The line was unconditional, and these two RPCs are called
+// every time the console's Storage page is opened -- so a device with no ums
+// folder, which is the ordinary state this function exists to accept, wrote
+// two journal lines per visit. Two SD-card writes for a non-error, and the
+// line meant to flag a broken install buried in navigation noise, which is
+// the opposite of discoverable. The latch below reports each folder once per
+// episode: it is cleared by a successful listing, so a folder that is removed
+// after having been read is reported again, and nothing else can un-latch it.
 func listImages(dir string, exts ...string) ([]string, error) {
 	names, err := ListFilesOfFolder(dir, exts...)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("UMS: image folder %s does not exist; reporting no images", dir)
+			if _, logged := umsMissingLogged.LoadOrStore(dir, struct{}{}); !logged {
+				log.Printf("UMS: image folder %s does not exist; reporting no images", dir)
+			}
 			return []string{}, nil
 		}
 		return nil, err
 	}
+	umsMissingLogged.Delete(dir)
 	return names, nil
 }
+
+// umsMissingLogged holds the folders whose absence has already been reported.
+// A sync.Map because the two listing RPCs are served on separate gRPC
+// goroutines and can both find the same folder gone at the same moment.
+var umsMissingLogged sync.Map
 
 func (s *server) ListUmsImageFlashdrive(ctx context.Context, e *pb.Empty) (sa *pb.StringMessageArray, err error) {
 	sa = &pb.StringMessageArray{}
