@@ -99,7 +99,18 @@ code, kbd, .mono { font-family: var(--font-mono); font-size: 0.92em; color: var(
 }
 .row { display: flex; gap: var(--s4); align-items: flex-start; }
 .row > * { min-width: 0; }
-.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--s4); }
+/* min(300px, 100%), not 300px.
+   minmax(300px, 1fr) keeps a 300px FLOOR: when the card's content box is
+   narrower than 300px the track still claims 300px and pushes the whole page
+   sideways. Measured on the device at a 320px viewport, Cable, Bluetooth and
+   Network each gave the page 21px of horizontal scroll. min(300px, 100%)
+   lets the track shrink below its preference instead, which is the only
+   difference -- at 360px and up the layout is unchanged. */
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+  gap: var(--s4);
+}
 
 /* --- the cable: this console's signature element ------------------------
    A live picture of what the device is presenting to whatever host its USB
@@ -112,11 +123,26 @@ code, kbd, .mono { font-family: var(--font-mono); font-size: 0.92em; color: var(
   border-radius: var(--radius-lg);
   padding: var(--s5);
 }
+/* The attach-state pill sits beside the heading, and on a phone it used to
+   lose that fight. space-between with no gap and no wrap let the flex line
+   squeeze .cable-state to about 96px, so "attach state unknown" wrapped onto
+   three lines hard against "WHAT THE CABLE PRESENTS". Reported from a
+   photograph of the console on a phone before any audit found it.
+   nowrap + flex:none stops the squeeze; below 560px the pill takes its own
+   row, which is the only place there is room for it. */
 .cable-head {
   display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--s3);
   margin-bottom: var(--s4);
 }
-.cable-state { font-family: var(--font-mono); font-size: var(--t-small); }
+.cable-state {
+  font-family: var(--font-mono); font-size: var(--t-small);
+  white-space: nowrap; flex: none;
+}
+@media (max-width: 560px) {
+  .cable-head { flex-wrap: wrap; gap: var(--s2); }
+  .cable-head > div { flex: 1 1 100%; }
+}
 .cable-strip { display: flex; gap: var(--s1); align-items: stretch; }
 .fn {
   flex: 1 1 0; min-width: 0;
