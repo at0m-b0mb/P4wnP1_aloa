@@ -707,7 +707,61 @@ func MountUMSFile(filename string, cdrom bool) error {
 		}
 	}
 	funcdir := USB_GADGET_DIR + "/functions/mass_storage.ms1"
-	if err := os.WriteFile(funcdir+"/lun.0/file", []byte(filename), os.ModePerm); err != nil {
+	return mountUMSInto(writeAttr, funcdir+"/lun.0", filename, cdrom)
+}
+
+// writeAttr is how mountUMSInto reaches configfs. A variable so the sequence
+// below can be tested: what matters is the ORDER of the writes, and a test
+// against a temp directory can only see the final contents.
+var writeAttr = func(path string, data []byte) error {
+	return os.WriteFile(path, data, os.ModePerm)
+}
+
+// mountUMSInto performs the eject-then-insert dance on one LUN.
+func mountUMSInto(write func(string, []byte) error, lun, filename string, cdrom bool) error {
+
+	// EJECT FIRST, ALWAYS -- and never with a zero-length write.
+	//
+	// Two separate kernel refusals were reachable here, and both were found by
+	// driving a real device rather than by reading the code:
+	//
+	//   swapping a live image  -> EBUSY, "device or resource busy"
+	//   ejecting (filename "") -> EFAULT, "bad address"
+	//
+	// EBUSY is the mass_storage gadget's contract: lun.0/file cannot be
+	// rewritten while a backing file is attached. The host is holding a disk;
+	// the kernel models that as "eject the medium, then insert the new one",
+	// and writing the new path straight over the old one is simply not a
+	// transition it offers. So this detaches first and then attaches.
+	//
+	// EFAULT is subtler and was the reason EJECT ITSELF never worked. Clearing
+	// the attribute means writing an EMPTY value, and os.WriteFile with an
+	// empty slice issues a ZERO-LENGTH write, which configfs rejects outright.
+	// Every other attribute write in this file passes at least one byte --
+	// "0", "1" -- which is why none of them ever hit this. A single newline is
+	// the shell's own `echo "" > file`, and it is what the kernel's
+	// store_file() parses back to the empty string.
+	if err := write(lun+"/file", []byte("\n")); err != nil {
+		return fmt.Errorf("ejecting the current USB Mass Storage image failed: %v", err)
+	}
+	if filename == "" {
+		return nil
+	}
+
+	// cdrom is a property of the LUN, not of the path, and MountUMSFile used
+	// the flag ONLY to pick a directory. So a hot swap from a flashdrive to an
+	// .iso left the LUN in disk mode presenting an ISO image: the host saw a
+	// raw read-write volume where the operator asked for a CD-ROM. It is set
+	// while the LUN is detached, which is the only time the kernel accepts it.
+	cd := []byte("0")
+	if cdrom {
+		cd = []byte("1")
+	}
+	if err := write(lun+"/cdrom", cd); err != nil {
+		return fmt.Errorf("setting USB Mass Storage cdrom emulation failed: %v", err)
+	}
+
+	if err := write(lun+"/file", []byte(filename)); err != nil {
 		return fmt.Errorf("setting backing file %q for USB Mass Storage failed: %v", filename, err)
 	}
 	return nil
