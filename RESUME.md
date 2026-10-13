@@ -1,119 +1,171 @@
 # Where we stopped — resume here
 
-Written at the end of the session on 2026-10-09. Delete this file when the
-work below is done.
+Written 2026-10-13. Replaces the 2026-10-09 version, which described v0.7.5 and
+is now stale. Delete this file when the work below is done.
 
-## The device is fine
-
-**v0.7.5 is tagged, flashed and verified on real hardware.** Leave it alone
-unless you want the pending fixes.
-
-- 19 RPCs exercised over USB, zero errors
-- the startup fallback correctly did NOT run
-- GPIO returns all 29 real pins (`GPIO0`–`GPIO27`, `GPIO46`)
-- the OLED panel mirror serves
-- four credential cards, and the WiFi join QR works on a phone
-
-Credentials from this boot (they change on every reflash):
+## Read these three first
 
 | | |
 |---|---|
-| Web | `admin` / `8iDuGecNKaw8tjUd5Wid` at `172.16.0.1:8000` (USB) or `172.24.0.1:8000` (its WiFi) |
-| SSH | `p4wnp1` / `PHE32NuhvGN3MnN73LX1` |
-| WiFi | `💥P4wnP1` / `BAmJ3BDMfsZiuCvowPo6` |
+| `docs/audit-v0.7.6-code.md` | The 8-surface code audit's results. 36 findings judged by two skeptics each: **13 confirmed (8 distinct defects), 10 split, 13 refuted.** Deduplicated and ranked, with the refuted ones listed so nobody re-reports them. **Start at C1 and S1.** |
+| `docs/audit-v0.7.6-live.md` | Four defects (L1–L4) I measured against the running device, plus six things I attacked and could **not** break. Where each fix goes, and the one trap in fixing L1. |
+| `dist/HIDScripts/README.md` | The new payload library, the three hard ceilings, and the two constraints that silently waste your time when adding a script. |
 
-## 1. Apply the two CSS fixes — do this first, it is 5 minutes
+**The two highest-priority items across both audits:**
 
-Both were found by testing the **running device** at six viewport widths, and
-both are verified live. They are written up in full, with the measurements,
-in the session scratchpad copy of `pending-css-fixes.md`; the short version:
+- **C1** — the generated SSH/sudo password is written in cleartext to the **vfat
+  boot partition**, which carries no Unix modes and is world-readable on the
+  running device, and that account has `NOPASSWD:ALL`. This defeats the
+  per-image credential generation that replaced the old shared default: the
+  credential is unique now, and left in the open.
+- **S1** — a DHCP client's own hostname may be interpolated **unescaped into
+  generated HIDScript source**. If it holds, anyone who associates to the AP and
+  takes a lease controls what the device types into the attached host. The two
+  skeptics disagreed, and the shipped `init.db` arms no DHCP-lease trigger, so
+  the hinge is whether an operator armed one. Settle that before anything else.
 
-In `dist/www/app/css/app.css`:
+## The device is fine, and it is on v0.7.6
 
-```css
-/* line ~102 — minmax(300px,1fr) keeps a 300px FLOOR, so below ~390px of
-   viewport the track still claims 300px and pushes the page sideways.
-   Measured at 320px: Cable, Bluetooth and Network each gave the page 21px
-   of horizontal scroll. Verified fix: 21px -> 0 on all three. */
-.grid-2 { grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); }
+Flashed, booted and reachable at `172.16.0.1:8000` over the USB link (`en9` =
+`172.16.0.2`, CDC ECM). Confirmed as v0.7.6 rather than assumed: `/app/` serves
+`?v=29`, matching tag v0.7.6 and HEAD. v0.7.5 served `?v=26`.
 
-/* line ~115 — flex + space-between with no gap and no wrap, and .cable-state
-   has no nowrap, so on a phone the status text squeezes to 96px and wraps to
-   three lines against "WHAT THE CABLE PRESENTS". Photographed on the owner's
-   own phone. Verified fix: three lines -> one. */
-.cable-head  { gap: var(--s3); }
-.cable-state { white-space: nowrap; flex: none; }
-@media (max-width: 560px) {
-  .cable-head { flex-wrap: wrap; gap: var(--s2); }
-  .cable-head > div { flex: 1 1 100%; }
-}
+**Credentials are unknown.** This was a fresh first boot, so they regenerated.
+The five passwords from earlier in the session all return 401 — verified, not
+guessed. They are on the OLED panel, on the card after "Write these down".
+Everything in the next section needs them.
+
+## 1. Nothing I wrote on 2026-10-13 has been run. Not once.
+
+Bash was blocked by a safety classifier partway through that session, so from
+that point I could only read and write files. **Fourteen new payload files went
+in without a single parse check**, let alone a gate or a hardware test.
+
+So before anything else:
+
+```bash
+colima start && make verify
 ```
 
-Then: `./tools/check-cachebust.sh` will fail — that is it working. Bump every
-`?v=` in `dist/www/app/index.html`, run `make cachebust`, re-run the gates.
+`make verify` was **green (EXIT=0) at HEAD `72d3709`**, before the payload files
+existed, so any failure is mine. Colima does not start by itself —
+`tools/check-js.sh` is the gate that errors with a docker socket message when it
+is down, and that is what a cold Mac looks like, not a real failure.
 
-## 2. Finish the audit fixes
+Then read the new scripts with an eye for the three things most likely wrong:
 
-48 findings were confirmed by an adversarial audit (9 others were refuted).
-**6 are fixed.** The remaining ~39 are listed in the session scratchpad as
-`findings-trim.json`, grouped by file under the keys `app-js`, `css`, `go`,
-`palette`, `templates`, `wifi-bt`.
+- **ES6 that otto will reject.** No `let`, `const`, `=>`, backtick strings,
+  `for...of`, destructuring, spread, `Object.assign`, `String.includes` /
+  `startsWith` / `endsWith`, `Array.includes`, `Promise`, `Map`, `Set`.
+- **A `press()` key name not in `dist/keymaps/common.json`.** 175 valid names.
+  This is the subtlest failure mode: the script parses and runs and does nothing.
+- **`waitLED`'s return shape**, which is genuinely unverified — see item 3.
 
-The workflow that was fixing them is at:
+## 2. Write `tools/check-hidscripts.sh` — this is the highest-value task here
 
-```
-.claude/.../workflows/scripts/console-audit-fixes-wf_9cc82ea0-d45.js
-```
+There is no gate for HIDScripts at all, and fourteen untested files just landed.
+The repo's own rule is that every fix gets a gate, and this is the gap that rule
+exists to catch.
 
-Re-run it with `Workflow({scriptPath: <that>})`. It reads the findings file
-itself. Agents own disjoint files so they cannot collide — keep that property
-if you change it.
+It should fail on: ES6 syntax; any call that is not in the real API (`type`,
+`press`, `delay`, `layout`, `typingSpeed`, `waitLED`, `waitLEDRepeat`, `move`,
+`moveTo`, `moveStepped`, `click`, `doubleClick`, `button`); any `press()` key
+name absent from `common.json`; and any `.js` file in a **subdirectory** of
+`dist/HIDScripts/`, because `ListFilesOfFolder` never recurses and such a file is
+invisible to the console.
 
-Highest value remaining:
+**Negative-test it by reintroducing each bug**, per the lesson in item 5. A gate
+that cannot fail is worse than no gate, and this repo has shipped four of those.
 
-- **`app-js` (19)** — reflexes cannot be saved from the Reflexes page; a
-  stored script is silently overwritten by the name the dialog pre-fills; a
-  deploy timeout gives a fact and no next step; 8 strings still send the
-  operator to the retired Radio page.
-- **`css` (5)** — tap targets are 30px (buttons) and 16px (checkboxes)
-  against a 44px guideline; account chrome eats ~44% of a phone viewport
-  before the page starts.
+## 3. The one knowingly-unverified thing in the new code
 
-## 3. Three things about my own work, so they are not lost
+`dist/HIDScripts/platform-detect.js` reads `waitLED`'s **return value**. The
+two-argument call `waitLED(mask, timeoutMs)` is confirmed from
+`wifi_covert_channel.js:69`, but that script throws the result away, so nothing
+in the repository demonstrates the field names, and I could not grep the Go
+source once Bash was gone.
 
-These are the ones worth remembering, because each was a mistake that looked
-like correctness:
+So `ledReportArrived()` probes several plausible shapes (`TIMEOUT`/`timeout`,
+boolean, `undefined`) and returns `"unknown-shape"` when it recognises none,
+which the script then reports honestly instead of guessing.
 
-1. **A test that cannot fail is worse than no test.** It happened four times
-   this session — `TestResolveAPAsksTheServiceOnlyOnce` pinned the bug as a
-   requirement; the long-PSK tests pass with the fix deleted; my first
-   skipped-subsystem test passed with the bug reinstated; my CLI gate passed
-   both bugs it was written for. Negative-test every gate by reintroducing
-   the exact bug.
+**Fix it properly:** read `waitLED`'s implementation in `hid/*.go`, replace the
+helper with a direct field read, and delete the comment block that says to do
+this. Its header marks it as the first thing to confirm on hardware.
 
-2. **`startupNeedsFallback` has now been wrong three times.** Any error →
-   fallback (destructive). Then "not a PartialDeployError" → fallback, which
-   was inert because a skipped Bluetooth counted as a success. Now "Succeeded
-   is zero" — and the audit argues that is *still* not reachability, which is
-   what `service/startup_fallback_links_test.go` addresses. Read all three
-   test files before touching it again.
+## 4. Still open from before
+
+- **The v0.7.6 release is a DRAFT with 5 of 8 assets.** `armhf`, `arm64` and
+  `oled-armhf` images were never uploaded. An earlier attempt was interrupted —
+  **ask before retrying**, it is a long upload.
+- **USB storage eject and hot-swap have never been tested on hardware.** The fix
+  in `mountUMSInto` (`service/SubSysUSB.go`) is unproven on a real device.
+  Attaching was proven working; eject and hot-swap were proven broken, then
+  fixed, then never retested.
+- **arm64 images have never been booted on hardware.**
+- **Two audit findings left deliberately unfixed:** the fallback rule's "USB
+  fails while WiFi succeeds" case, which needs reachability as a first-class
+  idea rather than a count; and `resolveAP`'s synchronous RPC on the panel draw
+  path.
+- **The 8-surface code audit finished** — results written up in
+  `docs/audit-v0.7.6-code.md`. **Nothing from it has been fixed yet.** Full
+  per-agent detail (every scenario, both verdicts) is in
+  `~/.claude/projects/-Users-b0mba-at0mica-Documents-at0m-b0mb-Project/`
+  `3b064d38-e52f-4822-9083-d06023148ce6/subagents/workflows/wf_1b69f670-380/`
+  `journal.jsonl` — one `{"type":"result",...}` line per agent. That path is
+  under `~/.claude/projects/`, not the session temp directory, so it survives.
+  **Read it before re-running the audit; it cost 2.4M tokens.**
+
+## 5. Three things about my own work, so they are not lost
+
+Carried forward because each was a mistake that looked like correctness, and each
+has now bitten more than once.
+
+1. **A test that cannot fail is worse than no test.** It happened four times in
+   one session: `TestResolveAPAsksTheServiceOnlyOnce` pinned the bug as a
+   requirement; the long-PSK tests pass with the fix deleted; the first
+   skipped-subsystem test passed with the bug reinstated; the CLI gate passed
+   both bugs it was written for. **Negative-test every gate by reintroducing the
+   exact bug.** This applies directly to item 2.
+
+2. **`startupNeedsFallback` has been wrong three times.** Any error → fallback
+   (destructive). Then "not a `PartialDeployError`" → fallback, inert because a
+   skipped Bluetooth counted as success. Now "`Succeeded` is zero" — and the
+   audit argues that is *still* not reachability, which is what
+   `service/startup_fallback_links_test.go` addresses. Read all three test files
+   before touching it again.
 
 3. **A grep that matches its own documentation.** The image checker reported
-   `Views.radio` and `WIFI_MODE` as surviving three times; they were the
-   comments explaining the removal. It reads code lines only now.
+   `Views.radio` and `WIFI_MODE` as surviving three times; both were the comments
+   explaining their removal. It reads code lines only now. `strings(1)` is also
+   absent from the builder image — use `grep -a`.
 
-## Gates (all green at this commit)
+And one from 2026-10-13 worth adding: **anything you will need next session does
+not belong in the scratchpad.** It is wiped between sessions. That ate
+`flash-sd.sh` mid-flash and `findings-trim.json` the day before, and this file
+and `docs/audit-v0.7.6-live.md` exist in the repo for that reason.
 
-```
+## Gates
+
+```bash
+colima start      # tools/check-js.sh needs docker; it is not automatic
 make verify
 ```
 
-covers: api-auth, cli-commands, cachebust, js, render (13 views), palette (82
-checks), shell-quoting, rpc-shapes (incl. reflex field names), contrast, vet
-on both arches, unit tests, smoke (29), feature (85 RPCs), access-control (63).
+Covers: api-auth, cli-commands, cachebust, js, render (13 views), palette (82
+checks), shell-quoting, rpc-shapes (incl. reflex field names), contrast, vet on
+both arches, unit tests, smoke (29), feature (85 RPCs), access-control (63).
+
+Does **not** cover HIDScripts — see item 2.
 
 To see the console with no device:
 
 ```bash
 PORT=8111 ./tools/live-console.sh arm64   # admin / live-console-password
+```
+
+With the device, once you have the panel password:
+
+```bash
+P4WNP1_PASSWORD=... ./tools/hardware-check.sh
 ```
