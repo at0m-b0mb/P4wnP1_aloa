@@ -179,6 +179,29 @@ if [ -n "$CMD_UUID" ] && [ -n "$DISK_ID" ]; then
         printf '\033[1;31m[verify:FAIL]\033[0m root=PARTUUID=%s does not match disk id %s; this image will not boot\n' "$CMD_UUID" "$DISK_ID" >&2; fail=1; fi
 fi
 
+# The boot partition's files must be root-only.
+#
+# The operator's generated SSH password is written to
+# /boot/firmware/p4wnp1-credentials.txt at first boot, which is deliberate -- a
+# headless appliance has no other way to show it to you. But vfat carries no
+# Unix ownership, so the MOUNT OPTIONS decide the mode of everything on it, and
+# stock Pi OS mounts it `defaults` = fmask=0022 = every file 0755. Measured on a
+# running device: that credentials file was -rwxr-xr-x, so any unprivileged
+# process could read the password of an account holding NOPASSWD:ALL sudo.
+#
+# This is checked here rather than trusted because the failure is SILENT: the
+# image boots perfectly, the file is in the right place with the right contents,
+# and the only thing wrong is a mode nobody looks at.
+if [ -f "$MNT/etc/fstab" ]; then
+    if grep -qE '^[^#].*[[:space:]]/boot(/firmware)?[[:space:]].*fmask=0177' "$MNT/etc/fstab"; then
+        ok "boot partition mounts with fmask=0177 (credentials file is root-only)"
+    else
+        printf '\033[1;31m[verify:FAIL]\033[0m /etc/fstab does not mount the boot partition with fmask=0177; the first-boot credentials file will be world-readable to every local process\n' >&2; fail=1
+    fi
+else
+    printf '\033[1;31m[verify:FAIL]\033[0m no /etc/fstab in the image; cannot confirm boot-partition permissions\n' >&2; fail=1
+fi
+
 # SSH host keys must NOT be baked in: shipping them would let anyone who
 # downloaded the image impersonate every device built from it.
 if ls "$MNT"/etc/ssh/ssh_host_* >/dev/null 2>&1; then

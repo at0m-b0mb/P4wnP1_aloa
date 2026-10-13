@@ -371,8 +371,15 @@ with any other device.
 
 It is written here because a headless appliance has no other way to show it to
 you: this is the FAT boot partition, readable from the machine you flashed the
-card with. ANYONE HOLDING THE CARD CAN READ IT. Log in, change the password,
-and delete this file:
+card with.
+
+ANYONE HOLDING THE CARD CAN READ IT, and nothing on the device can prevent
+that -- they can mount the partition however they like. On the device itself
+this file is mode 0600, root only, because the partition is mounted fmask=0177;
+it used to be 0755, which meant any unprivileged process here could read the
+password of an account that holds passwordless sudo.
+
+Log in, change the password, and delete this file:
 
   passwd
   sudo rm /boot/firmware/p4wnp1-credentials.txt

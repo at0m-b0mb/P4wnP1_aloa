@@ -250,6 +250,60 @@ if [ "${P4_OLED:-0}" = "1" ] && [ -f "$BOOTCFG" ] && ! grep -q '^dtparam=spi=on'
 fi
 
 # ---------------------------------------------------------------------------
+# 5b. make the boot partition's files root-only
+#
+# The operator's generated SSH password is written to
+# /boot/firmware/p4wnp1-credentials.txt, because a headless appliance has no
+# other way to hand it to you -- you read it from the card on the machine you
+# flashed it with. That part is deliberate and the file says so in its own text.
+#
+# What the file did NOT account for is that vfat carries no Unix ownership, so
+# the mount options decide the mode for everything on the partition. Stock Pi OS
+# mounts it `defaults`, which gives fmask=0022 -- every file 0755, world
+# readable. Confirmed on a running device:
+#
+#   /dev/mmcblk0p1 on /boot/firmware type vfat (rw,...,fmask=0022,dmask=0022,...)
+#   -rwxr-xr-x 1 root root 908 /boot/firmware/p4wnp1-credentials.txt
+#
+# So ANY unprivileged process on the device could read it -- a dnsmasq or
+# hostapd worker that drops privileges, anything reached through a future RCE --
+# and that password belongs to an account with NOPASSWD:ALL sudo. A local
+# read is a straight path to root, with no card and no physical access.
+#
+# fmask=0177 makes every file on the partition 0600, root only. Nothing
+# legitimate loses out: the bootloader reads config.txt and cmdline.txt before
+# Linux exists and never consults Unix permissions, and everything that touches
+# the partition afterwards -- raspi-config, rpi-eeprom-update, the firstboot
+# script -- already runs as root.
+#
+# dmask is left alone on purpose. The directory stays 0755, so an operator can
+# still `ls /boot/firmware` and see that the credentials file is there (and that
+# they have not deleted it yet) without being able to read it.
+#
+# This does NOT fix the other half, and nothing can: whoever holds the card can
+# read the file, because they can mount it however they like. That is why the
+# file still tells you to change the password and delete it.
+# ---------------------------------------------------------------------------
+log "restricting boot-partition file permissions"
+if [ -f /etc/fstab ]; then
+    # Only rebuild lines whose mount point is the boot partition, and only when
+    # a mask is not already set, so this is idempotent and leaves every other
+    # entry byte-identical.
+    awk 'BEGIN { OFS = "\t" }
+         ($2 == "/boot/firmware" || $2 == "/boot") && $4 !~ /fmask=/ {
+             $4 = $4 ",fmask=0177"
+         }
+         { print }' /etc/fstab > /etc/fstab.p4wnp1 && mv /etc/fstab.p4wnp1 /etc/fstab
+    if grep -qE '^[^#].*[[:space:]]/boot(/firmware)?[[:space:]].*fmask=0177' /etc/fstab; then
+        log "  boot partition files are now root-only (fmask=0177)"
+    else
+        # Loud, because a silent failure here means the next image ships the
+        # operator password world-readable again and nothing says so.
+        log "  WARNING: could not set fmask on the boot partition; credentials will be world-readable"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # 6. regulatory domain
 #
 # On current Pi OS wlan0 is rfkill-soft-blocked until a country code is set,

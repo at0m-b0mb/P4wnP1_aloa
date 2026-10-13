@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/mame82/P4wnP1_aloa/common"
@@ -408,6 +409,49 @@ func (tam *TriggerActionManager) executeActionGroupSend(evt *pb.Event, ta *pb.Tr
 	tam.rootSvc.SubSysEvent.Emit(ConstructEventTriggerGroupReceive(groupName, value))
 }
 
+// jsStringLiteral renders s as a JavaScript string literal, quotes included,
+// safe to concatenate into source.
+//
+// WHY THIS EXISTS
+//
+// executeActionStartHidScript builds a preamble of `var NAME='value';` lines and
+// glues it onto the front of the operator's HIDScript. Every one of those values
+// used to be interpolated with a bare fmt.Sprintf("'%s'"), and two of them come
+// from a party the operator has not authenticated:
+//
+//   DHCP_LEASE_HOST  the client's own DHCP option 12, chosen by the client
+//   SSH_LOGIN_USER   the username from an SSH login event -- an ATTEMPT is
+//                    enough, so this does not even require associating
+//
+// A hostname of
+//
+//	x';type('rm -rf ~');var y='
+//
+// closed the string and appended statements to the script. The result is not a
+// crash or a garbled variable: it is arbitrary HIDScript, run by the device,
+// typed into whatever host the cable is plugged into. The attacker picks the
+// keystrokes; the operator's own trigger delivers them.
+//
+// No shipped template arms a DHCP-lease or SSH-login trigger, so a stock device
+// is not exposed -- but "run a payload when a client takes a lease" is exactly
+// what the feature is for, and an operator who uses it as intended hands control
+// of their payload to anyone in radio range.
+//
+// encoding/json is the right tool and not a lazy one: a JSON string literal IS a
+// JavaScript string literal, and Go's encoder escapes quotes, backslashes and
+// control characters, and -- the part a hand-rolled escaper reliably forgets --
+// U+2028 and U+2029, which are LINE TERMINATORS in JavaScript and would end the
+// statement from inside the quotes.
+func jsStringLiteral(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		// Unreachable for a string, but never fall back to emitting the raw
+		// value: an empty literal loses data, raw input loses the device.
+		return `""`
+	}
+	return string(b)
+}
+
 func (tam *TriggerActionManager) executeActionStartHidScript(evt *pb.Event, ta *pb.TriggerAction, tt triggerType, at actionType, action *pb.ActionStartHIDScript) {
 	triggerName := triggerTypeString[tt]
 	actionName := actionTypeString[at]
@@ -415,12 +459,12 @@ func (tam *TriggerActionManager) executeActionStartHidScript(evt *pb.Event, ta *
 	fmt.Printf("Trigger '%s' fired -> executing action '%s' ('%s')\n", triggerName, actionName, action.ScriptName)
 
 	scriptPath := common.PATH_HID_SCRIPTS + "/" + action.ScriptName
-	preScript := fmt.Sprintf("var TRIGGER='%s';\n", triggerName)
+	preScript := fmt.Sprintf("var TRIGGER=%s;\n", jsStringLiteral(triggerName))
 
 	switch tt {
 	case triggerTypeGpioIn:
 		gpioPinName := ta.Trigger.(*pb.TriggerAction_GpioIn).GpioIn.GpioName
-		preScript += fmt.Sprintf("var GPIO_PIN='%s';\n", gpioPinName)
+		preScript += fmt.Sprintf("var GPIO_PIN=%s;\n", jsStringLiteral(gpioPinName))
 		_, level, _ := DeconstructEventTriggerGpioIn(evt)
 		if level {
 			preScript += fmt.Sprintf("var GPIO_LEVEL=true;\n")
@@ -441,26 +485,26 @@ func (tam *TriggerActionManager) executeActionStartHidScript(evt *pb.Event, ta *
 			}
 		}
 		jsArray += "]"
-		preScript += fmt.Sprintf("var GROUP='%s';\n", groupName)
+		preScript += fmt.Sprintf("var GROUP=%s;\n", jsStringLiteral(groupName))
 		preScript += fmt.Sprintf("var VALUES=%s;\n", jsArray)
-		preScript += fmt.Sprintf("var MULTI_TYPE='%s';\n", pb.GroupReceiveMultiType_name[int32(rtype)])
+		preScript += fmt.Sprintf("var MULTI_TYPE=%s;\n", jsStringLiteral(pb.GroupReceiveMultiType_name[int32(rtype)]))
 	case triggerTypeGroupReceive:
 		groupName := ta.Trigger.(*pb.TriggerAction_GroupReceive).GroupReceive.GroupName
 		value := ta.Trigger.(*pb.TriggerAction_GroupReceive).GroupReceive.Value
-		preScript += fmt.Sprintf("var GROUP='%s';\n", groupName)
+		preScript += fmt.Sprintf("var GROUP=%s;\n", jsStringLiteral(groupName))
 		preScript += fmt.Sprintf("var VALUE=%d;\n", value)
 	case triggerTypeDhcpLeaseGranted:
 		iface := evt.Values[1].GetTstring()
 		mac := evt.Values[2].GetTstring()
 		ip := evt.Values[3].GetTstring()
 		host := evt.Values[4].GetTstring()
-		preScript += fmt.Sprintf("var DHCP_LEASE_IFACE='%s';\n", iface)
-		preScript += fmt.Sprintf("var DHCP_LEASE_MAC='%s';\n", mac)
-		preScript += fmt.Sprintf("var DHCP_LEASE_IP='%s';\n", ip)
-		preScript += fmt.Sprintf("var DHCP_LEASE_HOST='%s';\n", host)
+		preScript += fmt.Sprintf("var DHCP_LEASE_IFACE=%s;\n", jsStringLiteral(iface))
+		preScript += fmt.Sprintf("var DHCP_LEASE_MAC=%s;\n", jsStringLiteral(mac))
+		preScript += fmt.Sprintf("var DHCP_LEASE_IP=%s;\n", jsStringLiteral(ip))
+		preScript += fmt.Sprintf("var DHCP_LEASE_HOST=%s;\n", jsStringLiteral(host))
 	case triggerTypeSshLogin:
 		loginUser := evt.Values[1].GetTstring()
-		preScript += fmt.Sprintf("var SSH_LOGIN_USER='%s';\n", loginUser)
+		preScript += fmt.Sprintf("var SSH_LOGIN_USER=%s;\n", jsStringLiteral(loginUser))
 
 	}
 
