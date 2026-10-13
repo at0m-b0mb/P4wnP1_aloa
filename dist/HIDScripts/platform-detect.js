@@ -8,8 +8,9 @@
  * TOUCHES:     it toggles NUMLOCK and toggles it back, so the host's lock state
  *              is left as it was found. Nothing else.
  * LIMITATION:  a heuristic, and a coarse one. See both comment blocks below.
- * VERIFIED:    not yet tested on hardware, and ONE SPECIFIC THING IS UNVERIFIED
- *              BY DESIGN -- see "THE RETURN SHAPE" below. Confirm that first.
+ * VERIFIED:    not yet run on hardware. waitLED's return shape, however, IS now
+ *              verified against hid/controller.go:527-543 -- see "THE RETURN
+ *              SHAPE" below for what that corrected.
  *
  * HOW IT WORKS, AND WHY IT IS ONLY A HINT
  *
@@ -41,42 +42,40 @@
  *
  * Use it to choose a default. Do not use it to decide something you cannot undo.
  *
- * THE RETURN SHAPE, AND WHY THIS CODE IS WRITTEN SO DEFENSIVELY
+ * THE RETURN SHAPE, AND THE BUG THAT FINDING IT OUT FIXED
  *
- * waitLED's two-argument call is confirmed from wifi_covert_channel.js:69.
- * What its return VALUE looks like is not: the only shipped script that calls
- * it throws the result away, so nothing in this repository demonstrates the
- * field names. Rather than guess a shape and ship a payload that silently
- * mis-detects every host, ledReportArrived() below accepts every plausible
- * shape and falls back to a stated assumption when it recognises none.
+ * waitLED returns an object, built at hid/controller.go:527-543:
  *
- * FIRST JOB ON HARDWARE: run this, read the returned string, and if it says the
- * shape was unrecognised, read hid/*.go for waitLED's real return value and
- * replace this helper with a direct field read. Then delete this block.
+ *   ERROR bool, ERRORTEXT string, TIMEOUT bool,
+ *   NUM bool, CAPS bool, SCROLL bool, COMPOSE bool, KANA bool
+ *
+ * This script was first written against a GUESS at those names, because the
+ * only shipped caller -- wifi_covert_channel.js:69 -- throws the result away,
+ * so nothing in the repository demonstrated them. The guess happened to get
+ * TIMEOUT right. It missed ERROR entirely, and that was a real bug: ERROR is
+ * set when there is no keyboard at all (controller.go:516,
+ * `if ctl.Keyboard == nil { err = ErrNoKeyboard }`), and in that case TIMEOUT
+ * is FALSE. So the old helper read "not a timeout" as "a report arrived" and
+ * would have announced WINDOWS_OR_LINUX with nothing plugged in -- confidently
+ * wrong, which is the worst way for a detector to fail.
+ *
+ * Hence ledReportArrived() now reads the three real fields directly and treats
+ * ERROR as its own outcome rather than folding it into either other case.
  */
 
 var ATTACH_SETTLE_MS = 1200;  // let enumeration finish before judging silence
 var LISTEN_MS = 1500;         // how long silence must last to count as silence
 
-// Returns one of "report", "timeout" or "unknown-shape". ES5 only -- no
-// String.includes, no Object.keys shortcuts, nothing otto will reject.
+// Returns "report", "timeout", "error" or "unknown-shape".
+//
+// ERROR is checked FIRST and deliberately. It is true when the keyboard is not
+// there at all, and TIMEOUT is false in that case -- so anything that tests
+// TIMEOUT before ERROR reads "no keyboard" as "the host answered". ES5 only.
 function ledReportArrived(r) {
-	if (r === undefined || r === null) {
-		// Some bindings return undefined on timeout and an object otherwise.
-		return "timeout";
-	}
-	if (typeof r === "boolean") {
-		// Others return true when a report arrived.
-		return r ? "report" : "timeout";
-	}
-	if (typeof r === "object") {
-		// Upstream style is uppercase field names; be ready for either.
-		if (r.TIMEOUT === true || r.timeout === true) return "timeout";
-		if (r.TIMEOUT === false || r.timeout === false) return "report";
-		// An object with LED state but no timeout flag: a report, presumably.
-		if (r.NUM !== undefined || r.num !== undefined ||
-		    r.CAPS !== undefined || r.caps !== undefined) return "report";
-	}
+	if (r === null || typeof r !== "object") return "unknown-shape";
+	if (r.ERROR === true) return "error";
+	if (r.TIMEOUT === true) return "timeout";
+	if (r.TIMEOUT === false) return "report";
 	return "unknown-shape";
 }
 
@@ -95,14 +94,23 @@ var echoed = ledReportArrived(waitLED(ANY_OR_NONE, LISTEN_MS));
 press("NUM");
 delay(120);
 
-var shapeKnown = (onAttach !== "unknown-shape" && echoed !== "unknown-shape");
 var guess;
 var why;
 
-if (!shapeKnown) {
+// "error" means the keyboard function is not there -- no USB host, or a gadget
+// deployed without hid.keyboard. That is a BROKEN SETUP, not a quiet host, and
+// it must never be reported as a platform guess. Checked before everything else
+// for the same reason ERROR is checked first inside the helper.
+if (onAttach === "error" || echoed === "error") {
+	guess = "NO_KEYBOARD";
+	why = "waitLED reported ERROR, which means there is no keyboard to wait on. " +
+	      "Either nothing is plugged into a host, or the deployed USB gadget has " +
+	      "no hid.keyboard function. Fix the link before reading anything into this";
+} else if (onAttach === "unknown-shape" || echoed === "unknown-shape") {
 	guess = "UNKNOWN";
 	why = "waitLED returned a shape this script does not recognise, so no " +
-	      "detection was possible. Read hid/*.go and fix ledReportArrived()";
+	      "detection was possible. Compare hid/controller.go:527-543 against " +
+	      "ledReportArrived() -- the struct has probably changed";
 } else if (echoed === "report") {
 	guess = "WINDOWS_OR_LINUX";
 	why = onAttach === "report"

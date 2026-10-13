@@ -27,7 +27,14 @@
  * directory depends on those characters.
  *
  * Set LAYOUT below to each candidate in turn and run it again until the screen
- * matches the comment. Available: US DE_ASCII CH RU be br ca cm es fi fr gb it sv
+ * matches the comment. The accepted values are:
+ *
+ *   US DE CH RU BE BR CA CM ES FI FR GB IT SV   (case-insensitive)
+ *
+ * Those are the "Name" fields INSIDE dist/keymaps/*.json, not the filenames,
+ * and the two differ: the German map is the file DE_ASCII.json but its Name is
+ * "DE", so layout('de') works and layout('de_ascii') fails. hid/keyboard.go:128
+ * keys the table on strings.ToUpper(kbdmap.Name), which is the whole reason.
  */
 
 var LAYOUT = 'us';

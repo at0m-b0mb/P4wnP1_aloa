@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -631,10 +632,7 @@ func (gm *UsbGadgetManager) ParseGadgetState(gadgetName string) (result *pb.Gadg
 			err1 := errors.New(fmt.Sprintf("gadget %s error reading USB Mass Storage image file setting", gadgetName))
 			return nil, err1
 		} else {
-			result.UmsSettings.File = strings.TrimSuffix(string(res), "\000\n")
-
-			// remove path
-			result.UmsSettings.File = filepath.Base(result.UmsSettings.File)
+			result.UmsSettings.File = umsReadBackName(string(res))
 		}
 	} else {
 		result.UmsSettings = &pb.GadgetSettingsUMS{}
@@ -670,9 +668,14 @@ func (gm *UsbGadgetManager) ParseGadgetState(gadgetName string) (result *pb.Gadg
 // with the kernel reporting ENOENT against the configfs attribute rather than
 // against the image. One function now, so they cannot drift again.
 //
-// An empty name is passed through: writing "" to lun.0/file DETACHES the LUN,
-// which is a legitimate thing to ask for. An absolute path is honoured, for an
-// image kept somewhere else.
+// An empty name is passed through, and means "no media". Note that it must
+// NOT then be written to lun.0/file as an empty string: this comment used to
+// claim that writing "" DETACHES the LUN, and that is wrong. The kernel
+// rejects a zero-length write to that attribute with EFAULT, which cost a
+// deploy on real hardware. Ejecting is done by writing "\n" (mountUMSInto),
+// and when building a fresh function there is nothing to eject at all
+// (DeployGadgetSettings). An absolute path is honoured, for an image kept
+// somewhere else.
 func umsBackingPath(name string, cdrom bool) string {
 	if name == "" || filepath.IsAbs(name) {
 		return name
@@ -717,6 +720,28 @@ var writeAttr = func(path string, data []byte) error {
 	return os.WriteFile(path, data, os.ModePerm)
 }
 
+// umsReadBackName turns the raw bytes of lun.N/file into the image name to
+// report to the console and the panel.
+//
+// Two separate traps, both confirmed against a running device:
+//
+// TrimRight with a CUTSET, not TrimSuffix with one exact string. The attribute
+// comes back with a trailing newline, and an empty LUN comes back as just that
+// newline -- which TrimSuffix("\000\n") does not match, because the NUL is not
+// there to be trimmed.
+//
+// An empty LUN must read back as EMPTY. filepath.Base("") is ".", so calling
+// Base() unconditionally reported a drive with no media as holding an image
+// named ".". That is exactly what the console showed after a successful eject,
+// and "." is not a value anyone would read as "nothing".
+func umsReadBackName(raw string) string {
+	name := strings.TrimRight(raw, "\x00\n")
+	if name == "" {
+		return ""
+	}
+	return filepath.Base(name)
+}
+
 // mountUMSInto performs the eject-then-insert dance on one LUN.
 func mountUMSInto(write func(string, []byte) error, lun, filename string, cdrom bool) error {
 
@@ -742,6 +767,23 @@ func mountUMSInto(write func(string, []byte) error, lun, filename string, cdrom 
 	// the shell's own `echo "" > file`, and it is what the kernel's
 	// store_file() parses back to the empty string.
 	if err := write(lun+"/file", []byte("\n")); err != nil {
+		// EBUSY here has exactly one cause and exactly one remedy, so say
+		// both. The kernel's fsg_store_file() returns it when
+		// prevent_medium_removal is set and the LUN is open -- that is, when
+		// the ATTACHED HOST has locked the medium, which every operating
+		// system does the moment it mounts the volume. Nothing on this device
+		// can clear it; the host has to let go.
+		//
+		// The bare errno is actively misleading: "device or resource busy"
+		// reads as a fault on the P4wnP1, and an operator will go looking for
+		// a stuck process here rather than ejecting the drive on the machine
+		// in front of them. Confirmed on hardware -- macOS held the lock
+		// through `diskutil unmount`, and only `diskutil eject` released it.
+		if errors.Is(err, syscall.EBUSY) {
+			return errors.New("the attached host is holding the current image open, so it cannot be ejected. " +
+				"Eject or safely-remove the drive ON THE HOST first, then try again -- " +
+				"unmounting the volume is not always enough, the host must release the device")
+		}
 		return fmt.Errorf("ejecting the current USB Mass Storage image failed: %v", err)
 	}
 	if filename == "" {
@@ -983,9 +1025,31 @@ func (gm *UsbGadgetManager) DeployGadgetSettings(settings *pb.GadgetSettings) (e
 			if _, serr := os.Stat(file); serr != nil {
 				return fmt.Errorf("USB Mass Storage image %q cannot be used: %v", file, serr)
 			}
-		}
-		if werr := os.WriteFile(funcdir+"/lun.0/file", []byte(file), os.ModePerm); werr != nil {
-			return fmt.Errorf("attaching USB Mass Storage image %q failed: %v", file, werr)
+			// Only write when there is something to write. An EMPTY string
+			// here is not "attach no media" -- it is EFAULT. The kernel's
+			// configfs store for lun.N/file rejects a zero-length write
+			// outright, which a real Pi Zero W reported as
+			//
+			//   attaching USB Mass Storage image "" failed: write
+			//   /sys/kernel/config/usb_gadget/mame82_gadget/functions/mass_storage.ms1/lun.0/file: bad address
+			//
+			// and the whole deploy reverted. Since defaults.go ships
+			// UmsSettings.File as "", that made the ordinary case -- a
+			// removable drive presented with no media in it -- impossible to
+			// deploy at all. Mass storage could only ever be enabled with an
+			// image already chosen.
+			//
+			// Nothing is lost by skipping it: this block runs while BUILDING
+			// the function, whose LUN is empty the moment it is created, so
+			// there is no media to detach.
+			//
+			// mountUMSInto already knew this and ejects by writing "\n" (see
+			// its comment). The two paths disagreed because only the live-swap
+			// one had ever been run on hardware against an empty image --
+			// container tests cannot catch it, having no configfs at all.
+			if werr := os.WriteFile(funcdir+"/lun.0/file", []byte(file), os.ModePerm); werr != nil {
+				return fmt.Errorf("attaching USB Mass Storage image %q failed: %v", file, werr)
+			}
 		}
 
 		err := os.Symlink(funcdir, USB_GADGET_DIR+"/configs/c.1/"+"mass_storage.ms1")

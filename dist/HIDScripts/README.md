@@ -109,9 +109,42 @@ Two constraints will silently waste your time if you miss them:
    file IO, no `setTimeout`. To report something to the operator, end the script
    with a plain string expression — that value is what the console shows.
 
-Valid `press()` key names come from `dist/keymaps/common.json` (175 of them).
-Anything not in there is invalid, and a wrong key name is the subtlest way to
-ship a dead payload.
+Valid `press()` key names come from the `Mapping` tables in `dist/keymaps/*.json`
+(316 across all of them, 175 in `common.json`). Anything not in there is
+invalid, and a wrong key name is the subtlest way to ship a dead payload — the
+script parses, loads, runs, and does nothing.
+
+Valid `layout()` values are **the `Name` fields inside those files, not the
+filenames**:
+
+```
+US DE CH RU BE BR CA CM ES FI FR GB IT SV      (case-insensitive)
+```
+
+The German map is the file `DE_ASCII.json` but declares `Name: "DE"`, so
+`layout('de')` works and `layout('de_ascii')` does not. `hid/keyboard.go:128`
+keys the table on `strings.ToUpper(kbdmap.Name)`. I got this wrong first time
+and the gate below caught it.
+
+## The gate
+
+```bash
+go run ./tools/hidscript-check              # check every script
+go run ./tools/hidscript-check -self-test   # prove the gate can fail
+```
+
+`make verify` runs both. It compiles each script with the real otto, so it
+catches **every** ES6 construct rather than the ones someone remembered to grep
+for, and it validates every `press()` token and `layout()` name against the
+keymaps, flags calls to functions that do not exist, and fails any script in a
+subdirectory.
+
+The `-self-test` run feeds it one deliberately broken script per rule and fails
+unless all of them are caught — plus positive cases, because the first version
+of this gate **rejected two correct upstream scripts** by validating layouts
+against filenames. A gate with false positives gets switched off, which is a
+slower way of having no gate. This repository has shipped four checks that could
+not fail; the self-test is why this one is not the fifth.
 
 Use the header block the other scripts use — `TARGET`, `NEEDS`, `TOUCHES`,
 `LIMITATION`, `VERIFIED` — and keep `VERIFIED` honest.

@@ -154,6 +154,23 @@ func ListFilesOfFolder(folderPath string, allowedExtensions ...string) (res []st
 
 	for _, fitem := range fcontent {
 		if !fitem.IsDir() {
+			// Skip dotfiles. The extension test alone is not enough, and the
+			// case that proves it is macOS: copying payloads from a Mac with
+			// tar or a file manager leaves an AppleDouble sidecar beside every
+			// file -- "._win-01-hello.js" -- which ends in .js and so passed
+			// straight into the payload list. Fifteen real scripts arrived on
+			// a device alongside fifteen pieces of junk the operator would
+			// have to tell apart by eye, in a list on a 21-column screen.
+			//
+			// Observed doing exactly that, on this device, while deploying.
+			// Operators copy payloads from laptops, and a good number of those
+			// laptops are Macs, so this is the normal path and not an edge
+			// case. Hiding dotfiles also keeps .DS_Store, .gitkeep and editor
+			// swap files out of a list that is meant to be things you can run.
+			if strings.HasPrefix(fitem.Name(), ".") {
+				continue
+			}
+
 			extensionValid := false
 			// seems to be a file
 			if len(allowedExtensions) > 0 {

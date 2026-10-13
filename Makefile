@@ -201,6 +201,17 @@ verify:
 	# registers global key handlers and builds its own DOM -- so that gate
 	# proves only that its file parsed. This one actually opens it.
 	./tools/check-palette.sh
+	# The payloads. Nothing checked these until 16 of them shipped unparsed in
+	# one go -- `verify` covered the service, console, CLI and palette and had
+	# nothing to say about the scripts this device exists to type.
+	#
+	# -self-test runs FIRST and every time, deliberately: it feeds the checker
+	# one broken script per rule and fails unless each is caught. This repo has
+	# shipped four gates that could not fail, and the first version of THIS one
+	# rejected two correct upstream scripts by validating layouts against
+	# filenames instead of the Name field inside them.
+	go run ./tools/hidscript-check -self-test
+	go run ./tools/hidscript-check
 	./tools/check-shell-quoting.sh
 	python3 tools/check-rpc-shapes.py
 	python3 tools/check_contrast.py
