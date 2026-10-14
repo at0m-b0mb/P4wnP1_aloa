@@ -16,6 +16,7 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 	"io"
 	"log"
@@ -1597,6 +1598,45 @@ func (srv *server) StartRpcServerAndWeb(host string, gRPCPort string, webPort st
 			recoveryStreamInterceptor,
 			auth.StreamInterceptor(authMgr),
 		),
+		// Bound what ONE connection can ask for, before it has proved anything.
+		//
+		// The listener is on 0.0.0.0:50051 (service.go), so it is reachable
+		// from the USB link and from the device's own access point, and
+		// grpc-go v1.38 leaves MaxConcurrentStreams at its default of
+		// math.MaxUint32 -- effectively unlimited. A single unauthenticated
+		// peer could therefore open streams until the board ran out of
+		// goroutines and memory, on hardware with 512MB and one core that is
+		// also running hostapd, dnsmasq and the USB gadget.
+		//
+		// 64 is far above anything the console or the CLI does (the console
+		// holds ONE event stream) and far below what it takes to hurt a Pi
+		// Zero.
+		grpc.MaxConcurrentStreams(64),
+
+		// And bound how long one connection may sit there.
+		//
+		// Without these a peer can hold a connection open forever, which also
+		// matters for revocation: a gRPC stream authenticates once at open, so
+		// an age limit is the backstop that forces a re-auth even if the
+		// per-stream check below were ever removed. Keepalive probes also
+		// reclaim connections from a client that vanished without a FIN, which
+		// on a radio link is the normal way clients leave.
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			MaxConnectionIdle: 15 * time.Minute,
+			MaxConnectionAge:  2 * time.Hour,
+			// Grace, so an in-flight call is not cut off mid-answer when the
+			// age limit lands.
+			MaxConnectionAgeGrace: 30 * time.Second,
+			Time:                  2 * time.Minute,
+			Timeout:               20 * time.Second,
+		}),
+		// Refuse clients that ping more often than they are allowed to; an
+		// unauthenticated peer should not be able to make the server work by
+		// pinging it in a loop.
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             1 * time.Minute,
+			PermitWithoutStream: false,
+		}),
 	)
 	pb.RegisterP4WNP1Server(s, srv)
 

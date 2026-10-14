@@ -320,8 +320,23 @@ func (wSvc *WiFiService) runStaMode(newWifiSettings *pb.WiFiSettings) (err error
 
 // ToDo: Output monitor for AP-ENABLED (same approach as for wpa_supplicant)
 func (wSvc *WiFiService) runAPMode(newWifiSettings *pb.WiFiSettings) (err error) {
-	//generate hostapd.conf (overwrite old one)
-	hostapdCreateConfigFile2(newWifiSettings, wSvc.PathHostapdConf)
+	// Generate hostapd.conf, and STOP if it could not be written.
+	//
+	// This error used to be discarded, and the consequence was not a failed
+	// deploy but a WRONG one: StartHostapd runs either way, and hostapd reads
+	// whatever is already at PathHostapdConf. That path is fixed
+	// (/tmp/hostapd_wlan0.conf), so the stale contents are the PREVIOUS
+	// deployment's -- a different SSID, a different PSK, or an open network
+	// where the operator had just asked for WPA2. The console reports the new
+	// settings, the panel shows the new settings, and the radio broadcasts the
+	// old ones, with nothing anywhere saying so.
+	//
+	// A full or read-only /tmp, or the EACCES that fs.protected_regular raises
+	// if someone else owns a file at that path, all reach this line.
+	if err = hostapdCreateConfigFile2(newWifiSettings, wSvc.PathHostapdConf); err != nil {
+		return fmt.Errorf("could not write the hostapd configuration, refusing to start the "+
+			"access point on a stale one: %v", err)
+	}
 
 	//start hostapd
 	err = wSvc.StartHostapd(HOSTAPD_WAIT_AP_UP_TIMEOUT)
@@ -735,7 +750,21 @@ func wifiCreateWpaSupplicantConfStringList(bsslist []*pb.WiFiBSSCfg) (config str
 		psk := bss.PSK
 		if len(psk) > 0 {
 			fmt.Println("Connecting WiFi with PSK")
-			proc := exec.Command("/usr/bin/wpa_passphrase", ssid, psk)
+			// The passphrase goes on STDIN, never in argv.
+			//
+			// wpa_passphrase takes `<ssid> [passphrase]`, and reads the
+			// passphrase from stdin when the argument is omitted. Passing it as
+			// an argument put the operator's WiFi key in
+			// /proc/<pid>/cmdline, which is world-readable on Linux -- so for
+			// as long as the process lived, every local account on the device
+			// could read it with a plain `cat`. It is a short-lived process,
+			// but a poll loop does not need long, and the same key is usually
+			// the operator's real home or office network.
+			//
+			// stdin is not world-readable, so this closes it entirely rather
+			// than narrowing the window.
+			proc := exec.Command("/usr/bin/wpa_passphrase", ssid)
+			proc.Stdin = strings.NewReader(psk + "\n")
 			cres, err := proc.CombinedOutput()
 
 			if err != nil {
