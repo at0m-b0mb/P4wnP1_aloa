@@ -140,11 +140,23 @@ func (s *Store) Restore(filePath string, replace bool) (err error) {
 		// - the backup is loaded into a temporary DB which hasn't got any (versioned) entries
 		// - all keys of the current DB are deleted (deletion has results in a newer version of the key as the one in the backup)
 		// - copy over all key-value-pairs of the temporary DB to the current DB via set (updates the version of the key)
-		fmt.Println("...Clear current DB")
-		err = s.Clear()
-		if err != nil {
-			return
-		}
+		// NOTHING IS DESTROYED UNTIL THE BACKUP IS KNOWN GOOD.
+		//
+		// This used to Clear() the live database HERE, before anything had so
+		// much as opened the backup -- and then discarded the error from
+		// tmpDB.Load() and ended in `return nil`. A truncated or corrupt
+		// backup therefore wiped every stored template, loadout and reflex and
+		// reported success.
+		//
+		// That is not an exotic input on this device. It is powered off by
+		// being pulled out of a USB port, which is exactly how a half-written
+		// backup comes to exist -- the same reason badgerOpts.Truncate exists
+		// a few lines up in Open().
+		//
+		// So the order is inverted: load the backup into the temp database,
+		// confirm it parsed and actually contains keys, and only then clear.
+		// The window where the operator has neither their data nor a usable
+		// backup is now empty.
 
 		//create temp db
 		fmt.Println("... create temp DB")
@@ -170,7 +182,29 @@ func (s *Store) Restore(filePath string, replace bool) (err error) {
 		defer tmpDB.Close()
 
 		fmt.Println("... loading backup to temp DB")
-		tmpDB.Load(f)
+		// CHECKED -- AND RECOVERED, because checking is not enough.
+		//
+		// badger's Load() does not return an error on a malformed file: it
+		// PANICS. backup.go:129 sizes its read buffer from a length field taken
+		// straight out of the file, so a corrupt or truncated backup produces a
+		// nonsense length and the runtime stops the goroutine. Discovered by
+		// feeding it 43 bytes of plain text, which is how a half-written backup
+		// from an unplugged device looks.
+		//
+		// The HTTP layer has a RecoverHandler, so this would not have ended the
+		// process -- but it would have been a 500 with a stack trace instead of
+		// "your backup is unreadable", and the recover has to live here anyway
+		// for any caller that is not behind that handler.
+		if lErr := func() (e error) {
+			defer func() {
+				if r := recover(); r != nil {
+					e = fmt.Errorf("the backup is malformed (badger panicked reading it: %v)", r)
+				}
+			}()
+			return tmpDB.Load(f)
+		}(); lErr != nil {
+			return fmt.Errorf("the backup could not be read, so nothing was changed: %v", lErr)
+		}
 
 		fmt.Println("... retrieving keys of temp DB")
 		restoreKeys := make([][]byte, 0)
@@ -193,19 +227,38 @@ func (s *Store) Restore(filePath string, replace bool) (err error) {
 		}
 
 		keycount := len(restoreKeys)
-		fmt.Printf("... found %d keys", keycount)
+		fmt.Printf("... found %d keys\n", keycount)
+
+		// A backup with no keys is not a restore, it is a wipe wearing a
+		// restore's clothes. badger will happily open a file that parsed into
+		// nothing, so this is the last place to catch it before the live data
+		// goes.
+		if keycount == 0 {
+			return errors.New("the backup contains no keys, so nothing was changed -- " +
+				"restoring it would simply erase the current database")
+		}
+
+		// ONLY NOW is it safe to destroy anything.
+		fmt.Println("... backup is readable and non-empty; clearing the current DB")
+		if cErr := s.Clear(); cErr != nil {
+			return fmt.Errorf("could not clear the current database: %v", cErr)
+		}
 
 		txnReadSrc := tmpDB.NewTransaction(false)
 		defer txnReadSrc.Discard()
+
+		failed := 0
 
 		fmt.Printf("... restoring %d key-value-pairs\n", keycount)
 		for idx, restoreKey := range restoreKeys {
 			fmt.Printf("... copy over key %d of %d '%s' ...", idx+1, keycount, string(restoreKey))
 			item, err := txnReadSrc.Get(restoreKey)
 			if err != nil {
+				failed++
+				fmt.Println("unreadable in the backup, skipped")
 				continue
 			}
-			s.Db.Update(func(txn *badger.Txn) error {
+			if uErr := s.Db.Update(func(txn *badger.Txn) error {
 				return item.Value(func(val []byte) error {
 
 					// Ignore keys with empty vals, see https://github.com/dgraph-io/badger/issues/521
@@ -217,9 +270,19 @@ func (s *Store) Restore(filePath string, replace bool) (err error) {
 					}
 					return nil
 				})
-			})
+			}); uErr != nil {
+				failed++
+				fmt.Println("write failed:", uErr)
+			}
 		}
 
+		// Say what actually happened. `return nil` regardless is how a restore
+		// that silently dropped half the keys still looked like a success.
+		if failed > 0 {
+			return fmt.Errorf("restored %d of %d keys; %d could not be written",
+				keycount-failed, keycount, failed)
+		}
+		fmt.Printf("... restored %d of %d keys\n", keycount, keycount)
 		return nil
 
 	} else {

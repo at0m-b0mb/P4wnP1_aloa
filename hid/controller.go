@@ -360,19 +360,35 @@ func (ctl *HIDController) jsType(call otto.FunctionCall) (res otto.Value) {
 
 	outStr,err := arg0.ToString()
 	if err != nil {
-		log.Printf("HIDScript type: couldn't convert '%s' to UTF-8 string\n", arg0)
+		// NOT the value. See the note below -- a string that failed to convert
+		// is still whatever the payload was about to type.
+		log.Printf("HIDScript type: argument could not be converted to a UTF-8 string\n")
 		return
 	}
-	var partial string
-	if len(outStr) > 15 {
-		partial = outStr[:15]
-	} else {
-		partial = outStr
-	}
-	log.Printf("HIDScript type: Typing '%s ...' on HID keyboard device '%s'\n", partial, ctl.Keyboard.DevicePath)
+
+	// NEVER LOG WHAT IS BEING TYPED.
+	//
+	// This used to log the first 15 characters on every call, and the WHOLE
+	// string if the write failed. On most devices that would be a debugging
+	// convenience. On this one it is a credential leak: the entire purpose of
+	// type() is to send keystrokes into an attached host, and the keystrokes a
+	// red-team payload sends are routinely passwords, tokens and recovery
+	// phrases. All of it went to the journal, which is readable by more things
+	// than the payload is, and which operators paste into bug reports.
+	//
+	// Fifteen characters is not a safe prefix either -- plenty of secrets are
+	// shorter than that, and a prefix of a long one is still a prefix.
+	//
+	// The length is kept because it is the one thing that is genuinely useful
+	// for diagnosis ("did it type anything at all?") and reveals nothing about
+	// the content. The same reasoning retired `%+v` on a proto carrying a PSK
+	// elsewhere in this tree.
+	log.Printf("HIDScript type: typing %d characters on HID keyboard device '%s'\n", len(outStr), ctl.Keyboard.DevicePath)
 	err = ctl.Keyboard.StringToPressKeySequence(outStr)
 	if err != nil {
-		log.Printf("HIDScript type: Couldn't type out `%s` on %v\n", outStr, ctl.Keyboard.DevicePath)
+		// The ERROR is what a reader needs here, and it used to be dropped
+		// while the secret was printed -- exactly the wrong way round.
+		log.Printf("HIDScript type: failed after writing to %v: %v\n", ctl.Keyboard.DevicePath, err)
 		return
 	}
 	return
