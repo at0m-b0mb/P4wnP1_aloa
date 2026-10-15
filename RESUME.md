@@ -17,10 +17,10 @@ what each one actually allowed. Nothing in them is outstanding.
 Stated first because they are the honest gaps in a release that otherwise looks
 finished.
 
-1. **The updater's automatic rollback has never fired.** `p4wnp1-update` has now
-   run on a real device and replaced a running install in place, but its health
-   check passed — so the rollback path, and `--rollback` by hand, are still code
-   nobody has executed.
+1. **The updater's AUTOMATIC rollback has never fired.** Update, update again,
+   and `--rollback` by hand are all verified on hardware. The path taken when the
+   post-update health check FAILS is not — triggering it means deliberately
+   installing a binary that will not start.
 2. **The arm64 images have never been booted.** Both arm64 variants ship
    untested on a real Pi Zero 2 W.
 3. **Twelve of the fifteen payloads have never run against a host.** Verified:

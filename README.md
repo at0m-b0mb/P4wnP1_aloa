@@ -609,11 +609,13 @@ directly, not one you expose.
 
 Being specific about this matters more than the feature list.
 
-**The updater's automatic rollback has never fired.** `p4wnp1-update` itself has
-now run on a real device — it replaced a running install in place and the
-service came back — but the health check passed, so the rollback path it would
-have taken on failure is still code nobody has executed. `--rollback` by hand is
-untested for the same reason.
+**The updater's AUTOMATIC rollback has never fired.** Everything around it is now
+exercised on a real device: an in-place update (twice), and `--rollback` by hand,
+which restored the previous unit and binaries and brought the service back in
+about a second. What has never run is the path taken when the post-update health
+check FAILS. Triggering it honestly means installing a binary that will not
+start, so until someone does that, treat it as code that has been read and not
+executed.
 
 **Twelve of the fifteen payloads have never typed into a host.** Verified
 against a real Mac: `mac-01-hello`, `mac-03-lock`, `platform-detect`. One,
