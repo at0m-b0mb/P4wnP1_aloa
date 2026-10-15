@@ -71,6 +71,18 @@ rpc() { # rpc <Method> <json>
          -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d "$2"
 }
 
+# rpc_file <Method> <file-containing-the-json-body>
+#
+# A chunk of base64 is megabytes long, and passing it as an ARGUMENT dies with
+# "Argument list too long" -- ARG_MAX is about 1 MiB on macOS and the shell
+# counts the whole command line. The body goes through a file instead, which
+# has no such limit.
+rpc_file() {
+    curl -s -m 300 -X POST "$API/api/v1/rpc/$1" \
+         -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' \
+         --data-binary "@$2"
+}
+
 # --- upload in chunks -------------------------------------------------------
 
 TMPD=$(mktemp -d); trap 'rm -rf "$TMPD"' EXIT
@@ -83,8 +95,17 @@ i=0
 for part in $PARTS; do
     i=$((i+1))
     APPEND=true; [ "$i" = 1 ] && APPEND=false      # first chunk truncates
-    B64=$(base64 < "$part" | tr -d '\n')
-    R=$(rpc FSWriteFile "{\"folder\":\"TMP\",\"filename\":\"$NAME\",\"append\":$APPEND,\"data\":\"$B64\"}")
+    # Build the body in a file. python does the base64 and the JSON quoting in
+    # one pass, so neither the chunk nor the filename can break the encoding.
+    python3 - "$part" "$NAME" "$APPEND" > "$TMPD/body.json" <<'ENC'
+import base64, json, sys
+part, name, append = sys.argv[1], sys.argv[2], sys.argv[3] == "true"
+with open(part, "rb") as f:
+    json.dump({"folder": "TMP", "filename": name,
+               "append": append,
+               "data": base64.b64encode(f.read()).decode()}, sys.stdout)
+ENC
+    R=$(rpc_file FSWriteFile "$TMPD/body.json")
     [ "$R" = "{}" ] || die "chunk $i/$N rejected: $(echo "$R" | head -c 200)"
     printf '\r    %d/%d' "$i" "$N"
 done

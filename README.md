@@ -609,18 +609,11 @@ directly, not one you expose.
 
 Being specific about this matters more than the feature list.
 
-**The in-place updater has never been run on a device.** `p4wnp1-update` is
-written, its bundle builds, and no one has yet watched it replace a running
-install and come back. Until someone has, treat reflashing as the path you know
-works and the updater as the one you try when you can afford to use
-`--rollback`. The automatic rollback on a failed health check is, by the same
-token, also untested.
-
-**`PrivateTmp` on the main service unit has not been confirmed on booted
-hardware.** It is the one change in v0.8.0 that could take the access point and
-DHCP down if it misbehaved, because hostapd, wpa_supplicant and dnsmasq read
-their configs from `/tmp`. The reasoning is sound and the image's own verify
-pass is green; nobody has watched a flashed v0.8.0 hand out a lease.
+**The updater's automatic rollback has never fired.** `p4wnp1-update` itself has
+now run on a real device — it replaced a running install in place and the
+service came back — but the health check passed, so the rollback path it would
+have taken on failure is still code nobody has executed. `--rollback` by hand is
+untested for the same reason.
 
 **Twelve of the fifteen payloads have never typed into a host.** Verified
 against a real Mac: `mac-01-hello`, `mac-03-lock`, `platform-detect`. One,

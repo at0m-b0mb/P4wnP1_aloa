@@ -104,6 +104,12 @@ for ARCH in $ARCHES; do
 
     echo "$VERSION" > "$STAGE/VERSION"
     echo "$ARCH"    > "$STAGE/ARCH"
+    # And inside the web root, because that is the only part of the install the
+    # console can actually fetch. Without this the device knows its version and
+    # cannot tell anyone: the first real update left www/VERSION ABSENT while
+    # $P4ROOT/VERSION was correct, and the updater REPLACES www/ wholesale, so
+    # an install-time copy would have been deleted rather than preserved.
+    echo "$VERSION" > "$STAGE/www/VERSION"
 
     OUT="image/out/P4wnP1-ALOA-${VERSION}-update-${ARCH}.tar.xz"
     say "packing $OUT"

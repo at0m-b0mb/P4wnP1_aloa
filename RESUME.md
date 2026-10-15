@@ -17,17 +17,23 @@ what each one actually allowed. Nothing in them is outstanding.
 Stated first because they are the honest gaps in a release that otherwise looks
 finished.
 
-1. **`PrivateTmp` (C6) has never been confirmed on booted hardware.** It is the
-   one change that could break the AP and DHCP if it misbehaves, because
-   hostapd, wpa_supplicant and dnsmasq read their configs from `/tmp`. The
-   reasoning is sound — all three are direct children of the unit, so they share
-   the namespace — and the image's own verify pass is green, but nobody has
-   watched a flashed v0.8.0 boot and hand out a DHCP lease. **Do that first.**
+1. **The updater's automatic rollback has never fired.** `p4wnp1-update` has now
+   run on a real device and replaced a running install in place, but its health
+   check passed — so the rollback path, and `--rollback` by hand, are still code
+   nobody has executed.
 2. **The arm64 images have never been booted.** Both arm64 variants ship
    untested on a real Pi Zero 2 W.
 3. **Twelve of the fifteen payloads have never run against a host.** Verified:
-   `mac-01-hello`, `mac-03-lock`, `platform-detect` — all against a Mac. Each
-   file's own `VERIFIED:` line is the authority.
+   `mac-01-hello`, `mac-03-lock`, `platform-detect` — all against a Mac.
+   `mac-02-recon` is a recorded FAILURE. Each file's own `VERIFIED:` line is the
+   authority; `docs/payload-test-log.md` is the running record.
+
+**C6 (`PrivateTmp`) is now verified on hardware.** The in-place update installed
+the new unit file; the device reports `PrivateTmp: yes` and the access point
+stayed up (`AP_UP`, channel 6) through it. That also explains a confusing
+symptom worth remembering: after the update the service's `/tmp` is PRIVATE, so
+files written there through the API before the update are no longer visible to
+it. That looks exactly like a failed upload and is actually proof of success.
 
 ## The device
 
