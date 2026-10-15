@@ -225,6 +225,12 @@ verify:
 	@echo
 	@echo "All gates passed."
 
+# Build the tarball p4wnp1-update installs: the same content as an image minus
+# the operating system, so an existing device can take a new version without
+# being reflashed and losing its templates, payloads and credentials.
+update-bundle:
+	./tools/build-update-bundle.sh --arch all
+
 check-cli:
 	./tools/check-cli-commands.sh
 
@@ -309,6 +315,10 @@ installkali:
 	# a long time, so make stopped here with exit 1.
 	-cp build/p4wnp1-oled /usr/local/bin/ 2>/dev/null
 	-cp dist/p4wnp1-oled.service /etc/systemd/system/ 2>/dev/null
+	# The in-place updater goes on PATH, not just into scripts/. Without this
+	# an operator has to know it lives under /usr/local/P4wnP1 to run it, which
+	# is the same as it not existing.
+	install -m 0755 dist/scripts/p4wnp1-update /usr/local/bin/p4wnp1-update
 	chmod 0755 /usr/local/P4wnP1/scripts/firstboot-secure-defaults.sh
 	-chmod 0755 /usr/local/P4wnP1/scripts/p4wnp1-healthcheck.sh
 

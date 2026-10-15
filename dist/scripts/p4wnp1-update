@@ -1,0 +1,286 @@
+#!/usr/bin/env bash
+#
+# p4wnp1-update -- update a running P4wnP1 in place, without reflashing.
+#
+#   sudo p4wnp1-update                      # latest published release
+#   sudo p4wnp1-update --version v0.8.1     # a specific one
+#   sudo p4wnp1-update --file bundle.tar.xz # offline, already on the device
+#   sudo p4wnp1-update --rollback           # undo the last update
+#   sudo p4wnp1-update --check              # what is available, change nothing
+#
+# WHY THIS EXISTS
+#
+# Before it, the only way to get a new version was to flash a 650MB image, and
+# that costs the operator everything they had set up: stored templates and
+# loadouts, their own payloads, mass-storage images, and the per-device
+# credentials -- which a fresh first boot regenerates, so the card they wrote
+# down is wrong afterwards. An appliance nobody can update is one that stays on
+# the version it shipped with, which for a security tool is the whole problem.
+#
+# WHAT IT REPLACES, AND WHAT IT WILL NOT TOUCH
+#
+# Replaced:  the binaries, the systemd units, keymaps, and the web console.
+# Merged:    scripts/ and HIDScripts/ -- shipped files are overwritten, anything
+#            you added is left alone. An update does not delete your payloads.
+# NEVER touched:
+#   /usr/local/P4wnP1/store     the live datastore: templates, loadouts, reflexes
+#   /usr/local/P4wnP1/ums       your mass-storage images
+#   /usr/local/P4wnP1/db/*.db   your datastore backups (init.db IS refreshed)
+#   /etc/p4wnp1/                auth.json, generated-ap.psk, generated-bt.pin
+#   /boot/firmware/             including the first-boot credentials file
+#
+# That list is the whole design. An update that loses an operator's work is
+# worse than no update, because they will not run the second one.
+#
+# WHAT THE CHECKSUM DOES AND DOES NOT PROVE  -- read this before trusting it
+#
+# The bundle is fetched over HTTPS and checked against a SHA-256 published
+# beside it. That proves the bytes arrived intact. It does NOT prove who made
+# them: the file and its checksum come from the same place, so anything able to
+# serve you a bad bundle can serve the matching checksum too.
+#
+# What it genuinely defends against: a corrupted download, a truncated transfer,
+# a hostile network without a GitHub-trusted certificate.
+# What it does NOT defend against: a compromised GitHub account or release.
+#
+# Real authenticity needs a signature made with a key that does not travel with
+# the file. There isn't one yet, and pretending otherwise would be worse than
+# saying so. If that matters to you, verify the bundle out of band and install
+# it with --file.
+set -euo pipefail
+
+REPO="${P4WNP1_REPO:-at0m-b0mb/P4wnP1_aloa}"
+ROOT=/usr/local/P4wnP1
+BINDIR=/usr/local/bin
+UNITDIR=/etc/systemd/system
+BACKUPS=/var/backups/p4wnp1
+SERVICE=P4wnP1.service
+HEALTH_URL="http://127.0.0.1:8000/api/auth/health"
+HEALTH_WAIT=60
+
+MODE=install
+VERSION=""
+BUNDLE=""
+
+say()  { printf '\033[1;32m[update]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[update]\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31m[update:FAILED]\033[0m %s\n' "$*" >&2; exit 1; }
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --version)  VERSION="$2"; shift 2 ;;
+        --file)     BUNDLE="$2";  shift 2 ;;
+        --rollback) MODE=rollback; shift ;;
+        --check)    MODE=check;    shift ;;
+        -h|--help)  sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) die "unknown argument: $1" ;;
+    esac
+done
+
+[ "$(id -u)" -eq 0 ] || die "run with sudo"
+
+# Which architecture is this board? The bundle must match or the binaries will
+# not execute, and "Exec format error" is a confusing way to find that out.
+case "$(uname -m)" in
+    armv6l|armv7l) ARCH=armhf ;;
+    aarch64|arm64) ARCH=arm64 ;;
+    *) die "unsupported architecture $(uname -m); this builds for armhf and arm64" ;;
+esac
+
+current_version() {
+    [ -r "$ROOT/VERSION" ] && cat "$ROOT/VERSION" || echo "unknown"
+}
+
+# --- rollback ---------------------------------------------------------------
+
+if [ "$MODE" = rollback ]; then
+    LAST=$(ls -1d "$BACKUPS"/*/ 2>/dev/null | sort | tail -1 || true)
+    [ -n "$LAST" ] || die "no snapshot to roll back to (looked in $BACKUPS)"
+    say "rolling back to $(basename "$LAST")"
+    systemctl stop "$SERVICE" 2>/dev/null || true
+    cp -a "$LAST"/bin/.        "$BINDIR"/   2>/dev/null || true
+    cp -a "$LAST"/units/.      "$UNITDIR"/  2>/dev/null || true
+    [ -d "$LAST/www" ]     && rm -rf "$ROOT/www"     && cp -a "$LAST/www"     "$ROOT/"
+    [ -d "$LAST/keymaps" ] && rm -rf "$ROOT/keymaps" && cp -a "$LAST/keymaps" "$ROOT/"
+    [ -r "$LAST/VERSION" ] && cp -a "$LAST/VERSION" "$ROOT/VERSION"
+    systemctl daemon-reload
+    systemctl start "$SERVICE"
+    say "rolled back; now at $(current_version)"
+    exit 0
+fi
+
+# --- what is available ------------------------------------------------------
+
+latest_tag() {
+    curl -fsSL --max-time 20 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+      | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1
+}
+
+if [ "$MODE" = check ]; then
+    say "installed: $(current_version)   ($ARCH)"
+    T=$(latest_tag || true)
+    if [ -n "$T" ]; then
+        say "available: $T"
+        [ "$T" = "$(current_version)" ] && say "up to date" || say "run: sudo p4wnp1-update"
+    else
+        warn "could not reach GitHub. This device often has no internet -- that is normal."
+        warn "Fetch the bundle on another machine and install it with --file."
+    fi
+    exit 0
+fi
+
+# --- obtain the bundle ------------------------------------------------------
+
+WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
+
+if [ -n "$BUNDLE" ]; then
+    [ -r "$BUNDLE" ] || die "cannot read $BUNDLE"
+    say "using local bundle $BUNDLE"
+    cp "$BUNDLE" "$WORK/bundle.tar.xz"
+    if [ -r "$BUNDLE.sha256" ]; then
+        cp "$BUNDLE.sha256" "$WORK/bundle.tar.xz.sha256"
+    else
+        warn "no $BUNDLE.sha256 beside it -- installing WITHOUT an integrity check."
+        warn "That is your call with a file you placed here yourself; it would not be"
+        warn "acceptable for a download."
+    fi
+else
+    [ -n "$VERSION" ] || VERSION=$(latest_tag || true)
+    [ -n "$VERSION" ] || die "could not determine the latest version, and no --version given.
+This device may have no internet. Fetch the bundle elsewhere and use --file."
+    NAME="P4wnP1-ALOA-${VERSION}-update-${ARCH}.tar.xz"
+    URL="https://github.com/$REPO/releases/download/$VERSION/$NAME"
+    say "fetching $NAME"
+    curl -fsSL --max-time 900 -o "$WORK/bundle.tar.xz" "$URL" \
+        || die "download failed: $URL"
+    curl -fsSL --max-time 60  -o "$WORK/bundle.tar.xz.sha256" "$URL.sha256" \
+        || die "could not fetch the checksum; refusing to install an unverified bundle"
+fi
+
+if [ -r "$WORK/bundle.tar.xz.sha256" ]; then
+    say "verifying"
+    EXPECT=$(awk '{print $1}' "$WORK/bundle.tar.xz.sha256")
+    ACTUAL=$(sha256sum "$WORK/bundle.tar.xz" | awk '{print $1}')
+    [ "$EXPECT" = "$ACTUAL" ] || die "CHECKSUM MISMATCH -- not installing.
+  expected $EXPECT
+  got      $ACTUAL"
+    say "  ${ACTUAL:0:16} matches"
+fi
+
+# Unpack before stopping anything, so a corrupt archive costs no downtime.
+mkdir -p "$WORK/x"
+tar xJf "$WORK/bundle.tar.xz" -C "$WORK/x" || die "the bundle will not unpack"
+SRC="$WORK/x"
+[ -d "$SRC/bin" ] || die "bundle has no bin/ -- is this a P4wnP1 update bundle?"
+
+NEWVER=$(cat "$SRC/VERSION" 2>/dev/null || echo "unknown")
+say "installed $(current_version)  ->  $NEWVER"
+
+# Refuse to install a bundle built for the other architecture.
+if [ -r "$SRC/ARCH" ] && [ "$(cat "$SRC/ARCH")" != "$ARCH" ]; then
+    die "this bundle is for $(cat "$SRC/ARCH") and this board is $ARCH"
+fi
+
+# --- snapshot ---------------------------------------------------------------
+
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+SNAP="$BACKUPS/$STAMP"
+say "snapshotting the current install to $SNAP"
+mkdir -p "$SNAP/bin" "$SNAP/units"
+for b in P4wnP1_service P4wnP1_cli p4wnp1-hashpw p4wnp1-oled p4wnp1-update; do
+    [ -f "$BINDIR/$b" ] && cp -a "$BINDIR/$b" "$SNAP/bin/" || true
+done
+for u in P4wnP1.service p4wnp1-firstboot.service p4wnp1-oled.service; do
+    [ -f "$UNITDIR/$u" ] && cp -a "$UNITDIR/$u" "$SNAP/units/" || true
+done
+[ -d "$ROOT/www" ]     && cp -a "$ROOT/www"     "$SNAP/" || true
+[ -d "$ROOT/keymaps" ] && cp -a "$ROOT/keymaps" "$SNAP/" || true
+[ -r "$ROOT/VERSION" ] && cp -a "$ROOT/VERSION" "$SNAP/" || true
+
+# Keep the five most recent snapshots. This device has a small card.
+ls -1d "$BACKUPS"/*/ 2>/dev/null | sort | head -n -5 | xargs -r rm -rf
+
+# --- install ----------------------------------------------------------------
+
+say "stopping $SERVICE"
+systemctl stop "$SERVICE" 2>/dev/null || true
+
+say "installing"
+# Everything EXCEPT this script itself. Bash reads a script incrementally as it
+# runs, so writing over p4wnp1-update while p4wnp1-update is executing can make
+# the shell resume at a byte offset in different content -- a self-update that
+# corrupts itself halfway. It is installed last, by rename, which is atomic and
+# leaves this running process on its original inode.
+for f in "$SRC"/bin/*; do
+    [ "$(basename "$f")" = "p4wnp1-update" ] && continue
+    install -m 0755 -o root -g root "$f" "$BINDIR"/
+done
+[ -d "$SRC/units" ] && cp -a "$SRC"/units/. "$UNITDIR"/
+
+# Wholesale replacements: nothing of the operator's lives in these.
+for d in www keymaps; do
+    if [ -d "$SRC/$d" ]; then
+        rm -rf "$ROOT/$d"
+        cp -a "$SRC/$d" "$ROOT/"
+    fi
+done
+
+# Merges: shipped files win, the operator's own files are left alone. cp -a
+# without --delete is exactly that, and is why it is used rather than rsync
+# --delete, which would silently remove every payload they had written.
+for d in scripts HIDScripts; do
+    [ -d "$SRC/$d" ] && mkdir -p "$ROOT/$d" && cp -a "$SRC/$d"/. "$ROOT/$d"/
+done
+
+# init.db is the shipped factory template and IS refreshed. The operator's own
+# backups live in the same directory and are left untouched, because only that
+# one filename is copied.
+[ -f "$SRC/db/init.db" ] && mkdir -p "$ROOT/db" && cp -a "$SRC/db/init.db" "$ROOT/db/init.db"
+
+chmod 0755 "$ROOT/scripts"/*.sh 2>/dev/null || true
+echo "$NEWVER" > "$ROOT/VERSION"
+
+say "reloading systemd"
+systemctl daemon-reload
+systemctl start "$SERVICE"
+
+# --- prove it came back -----------------------------------------------------
+
+say "waiting for the service to answer (up to ${HEALTH_WAIT}s)"
+OK=0
+for _ in $(seq 1 "$HEALTH_WAIT"); do
+    if curl -fsS --max-time 2 "$HEALTH_URL" >/dev/null 2>&1; then OK=1; break; fi
+    sleep 1
+done
+
+if [ "$OK" != 1 ]; then
+    warn "the service did not answer after the update. Rolling back automatically."
+    warn "journalctl -u $SERVICE -n 50   will say why."
+    systemctl stop "$SERVICE" 2>/dev/null || true
+    cp -a "$SNAP"/bin/.   "$BINDIR"/  2>/dev/null || true
+    cp -a "$SNAP"/units/. "$UNITDIR"/ 2>/dev/null || true
+    [ -d "$SNAP/www" ]     && rm -rf "$ROOT/www"     && cp -a "$SNAP/www"     "$ROOT/"
+    [ -d "$SNAP/keymaps" ] && rm -rf "$ROOT/keymaps" && cp -a "$SNAP/keymaps" "$ROOT/"
+    [ -r "$SNAP/VERSION" ] && cp -a "$SNAP/VERSION" "$ROOT/VERSION"
+    systemctl daemon-reload
+    systemctl start "$SERVICE"
+    die "update rolled back; the device is on $(current_version) again"
+fi
+
+# Now that the new version is proven to run, replace this script. By rename,
+# for the reason in the install step above.
+if [ -f "$SRC/bin/p4wnp1-update" ]; then
+    install -m 0755 -o root -g root "$SRC/bin/p4wnp1-update" "$BINDIR/.p4wnp1-update.new"
+    mv -f "$BINDIR/.p4wnp1-update.new" "$BINDIR/p4wnp1-update"
+    say "updater replaced itself (atomically, after the service proved healthy)"
+fi
+
+say "$NEWVER is live and answering"
+cat <<EOF
+
+  Your templates, payloads, mass-storage images and credentials were not
+  touched. The web console may need a hard reload (Cmd/Ctrl-Shift-R) because
+  the browser caches it by version.
+
+  To undo:  sudo p4wnp1-update --rollback
+EOF
