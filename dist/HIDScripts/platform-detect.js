@@ -68,14 +68,26 @@ var LISTEN_MS = 1500;         // how long silence must last to count as silence
 
 // Returns "report", "timeout", "error" or "unknown-shape".
 //
-// ERROR is checked FIRST and deliberately. It is true when the keyboard is not
-// there at all, and TIMEOUT is false in that case -- so anything that tests
-// TIMEOUT before ERROR reads "no keyboard" as "the host answered". ES5 only.
+// TIMEOUT IS CHECKED BEFORE ERROR, and the order is the whole of this function.
+//
+// hid/controller.go builds the result as:
+//     ERROR:   err != nil
+//     TIMEOUT: err == ErrTimeout
+// so a plain timeout sets BOTH flags. An earlier version of this helper tested
+// ERROR first -- with a confident comment explaining why -- and therefore read
+// every timeout as "there is no keyboard".
+//
+// That is not a theoretical ordering nit. macOS does not send keyboard LED
+// reports, so waitLED ALWAYS times out there, so this script reported
+// NO_KEYBOARD on exactly the platform it exists to recognise as a Mac. Caught
+// by running it against a real Mac; nothing in the unit tests could have.
+//
+// ES5 only.
 function ledReportArrived(r) {
 	if (r === null || typeof r !== "object") return "unknown-shape";
-	if (r.ERROR === true) return "error";
 	if (r.TIMEOUT === true) return "timeout";
-	if (r.TIMEOUT === false) return "report";
+	if (r.ERROR === true) return "error";   // a REAL error: no keyboard, etc.
+	if (r.ERROR === false) return "report";
 	return "unknown-shape";
 }
 
@@ -125,4 +137,4 @@ if (onAttach === "error" || echoed === "error") {
 	      "host still enumerating all look identical here";
 }
 
-"platform-detect: " + guess + " -- " + why + ". Treat as a hint, not a fact.";
+return "platform-detect: " + guess + " -- " + why + ". Treat as a hint, not a fact.";

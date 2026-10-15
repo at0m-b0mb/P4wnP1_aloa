@@ -39,5 +39,5 @@ delay(800);
 
 press("CTRL GUI q");   // GUI is CMD. Lock Screen.
 
-"mac-03-lock: sent CTRL+CMD+Q. The target should be at its lock screen. If not, " +
+return "mac-03-lock: sent CTRL+CMD+Q. The target should be at its lock screen. If not, " +
 "see this script's LIMITATION line and mac-01-hello.js on the Setup Assistant.";

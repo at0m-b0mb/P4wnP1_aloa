@@ -56,5 +56,5 @@ type("system_profiler SPHardwareDataType | head -20\n");
 delay(2500);           // the one slow command here. Do not shorten.
 type("echo '=== end ==='\n");
 
-"mac-02-recon: commands typed into Terminal. Read the target's screen -- this " +
+return "mac-02-recon: commands typed into Terminal. Read the target's screen -- this " +
 "device cannot see the output.";

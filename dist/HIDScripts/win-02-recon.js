@@ -55,5 +55,5 @@ type("systeminfo | findstr /i \"OS Name OS Version Domain Boot Time\"\n");
 delay(1500);           // systeminfo is genuinely slow; do not shorten this.
 type("echo === end === \n");
 
-"win-02-recon: commands typed into cmd.exe. Read the target's screen -- this " +
+return "win-02-recon: commands typed into cmd.exe. Read the target's screen -- this " +
 "device cannot see the output.";

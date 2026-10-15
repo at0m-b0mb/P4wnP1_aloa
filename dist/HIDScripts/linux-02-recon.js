@@ -58,5 +58,5 @@ type("ip -brief address | grep -v ' lo '\n");   // addressing, loopback removed
 delay(500);
 type("echo '=== end ==='\n");
 
-"linux-02-recon: commands typed into a terminal. Read the target's screen -- " +
+return "linux-02-recon: commands typed into a terminal. Read the target's screen -- " +
 "this device cannot see the output.";

@@ -66,5 +66,5 @@ type("It was plugged into this Mac's USB port and macOS believed it was a keyboa
 type("\n");
 type("Nothing was installed and nothing was saved. Close without saving.\n");
 
-"mac-01-hello: typed into TextEdit. If nothing appeared, check for the Keyboard " +
+return "mac-01-hello: typed into TextEdit. If nothing appeared, check for the Keyboard " +
 "Setup Assistant window -- see this script's header.";

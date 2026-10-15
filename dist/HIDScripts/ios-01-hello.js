@@ -70,5 +70,5 @@ type("This text was typed by a USB device, not by a person.\n");
 type("An iPhone will accept a USB keyboard and trust what it types.\n");
 type("Nothing was installed - on iOS, nothing could be. Delete this note.\n");
 
-"ios-01-hello: typed into the focused field. If nothing appeared, check the " +
+return "ios-01-hello: typed into the focused field. If nothing appeared, check the " +
 "physical connection first -- see this script's header, it is almost always that.";

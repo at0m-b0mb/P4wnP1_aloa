@@ -106,8 +106,17 @@ Two constraints will silently waste your time if you miss them:
    `typingSpeed`, `waitLED`, `waitLEDRepeat`, `move`, `moveTo`, `moveStepped`,
    `click`, `doubleClick`, `button`, plus the constants `NUM CAPS SCROLL ANY
    ANY_OR_NONE BT1 BT2 BT3 BTNONE`. There is no `console.log`, no `require`, no
-   file IO, no `setTimeout`. To report something to the operator, end the script
-   with a plain string expression — that value is what the console shows.
+   file IO, no `setTimeout`. To report something to the operator, **`return` a
+   value** — do not just leave a trailing expression.
+
+   That distinction is not cosmetic and it cost me every script in this
+   directory. `hid/AsyncOtto.go:196` wraps your source in
+   `(function() { ... })()` before running it, so a bare trailing expression is
+   inside a function body and its value is discarded: the job succeeds, the
+   console shows `null`, and nothing says why. Verified on hardware —
+   `var a = 2+3; "x:" + a;` returns `null`, and `return "x:" + a;` returns
+   `"x:5"`. `tools/hidscript-check` now fails a script that ends without a
+   `return`.
 
 Valid `press()` key names come from the `Mapping` tables in `dist/keymaps/*.json`
 (316 across all of them, 175 in `common.json`). Anything not in there is

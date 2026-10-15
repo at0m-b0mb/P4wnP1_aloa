@@ -57,6 +57,6 @@ delay(1500);           // let the result list populate so there is something to 
 
 // No ENTER. See the header -- this is the point of the script, not an omission.
 
-"ios-02-spotlight: sent CMD+SPACE and typed '" + SEARCH_FOR + "'. Look at the " +
+return "ios-02-spotlight: sent CMD+SPACE and typed '" + SEARCH_FOR + "'. Look at the " +
 "iPad: a populated result list is the result. Nothing was launched. On an " +
 "iPhone, expect nothing -- this is iPadOS only.";

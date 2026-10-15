@@ -89,6 +89,6 @@ delay(1200);
 press("ESC");
 delay(500);
 
-"android-02-focus-walk: sent 5 TAB, 5 SHIFT+TAB, 5 arrows, ENTER, then ESC. " +
+return "android-02-focus-walk: sent 5 TAB, 5 SHIFT+TAB, 5 arrows, ENTER, then ESC. " +
 "Watch the phone -- whether the focus ring moved is the result, and only you " +
 "can see it.";

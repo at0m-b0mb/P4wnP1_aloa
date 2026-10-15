@@ -245,13 +245,29 @@ func stripNonCode(src string) string {
 	return src
 }
 
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+
 func checkScript(path, src string, api, keys, layouts map[string]bool) []problem {
 	var out []problem
 	name := filepath.Base(path)
 	add := func(rule, msg string) { out = append(out, problem{name, rule, msg}) }
 
-	// 1. PARSE with the real interpreter.
-	if _, err := otto.New().Compile(path, src); err != nil {
+	// 1. PARSE with the real interpreter, WRAPPED THE WAY THE SERVICE WRAPS IT.
+	//
+	// hid/AsyncOtto.go:196 runs `(function() { <source> })();`, not the bare
+	// source. Compiling the bare source is a different language in one
+	// important respect: a top-level `return` is an "Illegal return statement"
+	// standalone and perfectly legal inside the wrapper. Since `return` is how
+	// a script reports its result (see rule 3b), checking the unwrapped form
+	// would reject every correct script in the directory.
+	//
+	// Test what actually runs.
+	if _, err := otto.New().Compile(path, "(function() {\n"+src+"\n})();"); err != nil {
 		add("parse", strings.TrimSpace(err.Error()))
 		// A file that will not parse makes every other check noise.
 		return out
@@ -287,6 +303,49 @@ func checkScript(path, src string, api, keys, layouts map[string]bool) []problem
 			sort.Strings(have)
 			add("layout", fmt.Sprintf("layout(%q) is not a loaded keymap Name; have: %s",
 				m[1], strings.Join(have, " ")))
+		}
+	}
+
+	// 3b. A dangling result.
+	//
+	// hid/AsyncOtto.go:196 wraps the script in (function(){ ... })() before
+	// running it, so a bare trailing expression sits inside a function body and
+	// its value is THROWN AWAY. The job succeeds, the console prints null, and
+	// nothing anywhere says why.
+	//
+	// Every script in dist/HIDScripts shipped with this bug, because the house
+	// style said "end with a string expression" and that was simply wrong.
+	// Verified on a real device: `var a=2+3; "x:"+a;` -> null, and
+	// `return "x:"+a;` -> "x:5".
+	//
+	// Only a trailing STRING literal is flagged. A script that ends in a call,
+	// a closing brace or an infinite loop has not promised a result -- several
+	// upstream scripts legitimately return nothing.
+	{
+		lines := strings.Split(noComments, "\n")
+		for i := len(lines) - 1; i >= 0; i-- {
+			t := strings.TrimSpace(lines[i])
+			if t == "" {
+				continue
+			}
+			// Walk back over continuation lines of a concatenated string.
+			start := i
+			for start > 0 {
+				prev := strings.TrimSpace(lines[start-1])
+				if strings.HasSuffix(prev, "+") {
+					start--
+					continue
+				}
+				break
+			}
+			first := strings.TrimSpace(lines[start])
+			if strings.HasPrefix(first, "\"") || strings.HasPrefix(first, "'") {
+				add("noresult", fmt.Sprintf(
+					"line %d: the script ends with a bare string expression, which otto "+
+						"DISCARDS -- the job succeeds and the console shows null. Use "+
+						"`return %s`", start+1, truncate(first, 40)))
+			}
+			break
 		}
 	}
 
@@ -442,6 +501,11 @@ func selfTest(repoRoot string) int {
 		{"bad key in a comment", "// press(\"VOLUME_UP\") cannot be sent\npress(\"GUI r\");", false},
 		{"unknown call in a comment", "// sleep(100) does not exist; use delay\ndelay(100);", false},
 		{"bad layout in REAL code still caught", "layout('klingon');", true},
+		{"dangling string result is caught", "delay(1);\n\"done\";", true},
+		{"dangling concatenated result is caught", "delay(1);\n\"a\" +\n\"b\";", true},
+		{"an explicit return is fine", "delay(1);\nreturn \"done\";", false},
+		{"ending in a call is fine", "delay(1);\npress(\"ENTER\");", false},
+		{"ending in a brace is fine", "while (true) {\n delay(1);\n}", false},
 		{"bad key in REAL code still caught", "press(\"VOLUME_UP\");", true},
 	} {
 		probs := checkScript("doc.js", c.src, api, keys, layouts)
@@ -468,7 +532,7 @@ type("notepad\n");
 waitLED(ANY_OR_NONE, 5000);
 move(1, 1);
 click(BT1);
-"done";`
+return "done";`
 	if probs := checkScript("clean.js", clean, api, keys, layouts); len(probs) != 0 {
 		fmt.Printf("  \033[31mMISS\033[0m  a VALID script was rejected: %v\n", probs)
 		bad++

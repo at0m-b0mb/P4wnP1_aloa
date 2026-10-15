@@ -65,5 +65,5 @@ type("This text was typed by a USB device, not by a person.\n");
 type("An Android phone will accept a USB keyboard over OTG and trust it.\n");
 type("Nothing was installed. Nothing was sent. Clear this field.\n");
 
-"android-01-hello: typed into the focused field. If nothing appeared, no text " +
+return "android-01-hello: typed into the focused field. If nothing appeared, no text " +
 "field had focus -- this device cannot create one. See the header.";

@@ -34,3 +34,6 @@ _cardcheck.html
 # Python bytecode from the tools/ checkers
 __pycache__/
 *.pyc
+
+# stray `go build ./tools/hidscript-check` output at the repo root
+hidscript-check

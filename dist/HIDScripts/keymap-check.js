@@ -66,4 +66,4 @@ type("\n");
 type("Compare line 1 against the script's comment. If it differs, change\n");
 type("LAYOUT at the top and run this again before running anything else.\n");
 
-"keymap-check: typed 6 lines with layout '" + LAYOUT + "'. Read the target's screen and compare.";
+return "keymap-check: typed 6 lines with layout '" + LAYOUT + "'. Read the target's screen and compare.";

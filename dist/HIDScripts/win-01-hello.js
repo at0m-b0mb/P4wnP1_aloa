@@ -36,4 +36,4 @@ type("this computer's keyboard port and the computer believed it.\n");
 type("\n");
 type("Nothing was installed and nothing was changed. Close this window.\n");
 
-"win-01-hello: typed into Notepad. Check the target's screen.";
+return "win-01-hello: typed into Notepad. Check the target's screen.";

@@ -39,5 +39,5 @@ delay(300);
 
 press("GUI l");
 
-"linux-03-lock: sent GUI+L. If the target did not lock, check its desktop " +
+return "linux-03-lock: sent GUI+L. If the target did not lock, check its desktop " +
 "environment against this script's LIMITATION line before blaming the link.";

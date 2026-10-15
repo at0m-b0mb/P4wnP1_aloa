@@ -63,5 +63,5 @@ type("echo 'It was plugged into this machine and the kernel bound it as a keyboa
 delay(200);
 type("echo 'Nothing was installed and nothing was written. Close this window.'\n");
 
-"linux-01-hello: tried CTRL+ALT+T then ALT+F2. Read the target's screen -- if " +
+return "linux-01-hello: tried CTRL+ALT+T then ALT+F2. Read the target's screen -- if " +
 "the text went somewhere unexpected, see this script's header on launchers.";

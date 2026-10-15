@@ -41,4 +41,4 @@ delay(200);
 
 press("GUI l");
 
-"win-03-lock: sent GUI+L. The target should be at its lock screen.";
+return "win-03-lock: sent GUI+L. The target should be at its lock screen.";
