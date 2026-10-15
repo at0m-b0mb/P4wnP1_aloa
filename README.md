@@ -263,6 +263,89 @@ exactly that.
 
 ---
 
+## Updating an existing install
+
+Flashing a new image gives you a new device. It does **not** give you your old
+one on a new version: it wipes the datastore, so your templates, loadouts and
+reflexes are gone, your own payloads and mass-storage images with them, and
+first boot regenerates the per-device credentials — the ones you wrote down off
+the panel become wrong.
+
+So there is an in-place updater. It downloads about 25 MB instead of 650 MB,
+and it is built around what it refuses to touch.
+
+```bash
+sudo p4wnp1-update              # the latest published release
+sudo p4wnp1-update --check      # what is available; changes nothing
+sudo p4wnp1-update --version v0.8.0
+sudo p4wnp1-update --file bundle.tar.xz
+sudo p4wnp1-update --rollback   # undo the last one
+```
+
+| | |
+|---|---|
+| **Replaced** | the binaries, the systemd units, the web console, the keymaps |
+| **Merged** | `scripts/` and `HIDScripts/` — shipped files are refreshed, anything you wrote is left alone |
+| **Never touched** | `store/` (templates, loadouts, reflexes), `ums/` (your images), your `.db` backups, `/etc/p4wnp1/` (credentials), `/boot/firmware/` |
+
+It snapshots the current install first, health-checks the API afterwards, and
+**rolls back automatically** if the service does not come back. An update that
+loses your work is worse than no update, because you would not run the second
+one.
+
+### How does the device get on the internet?
+
+It is a USB gadget. On its own it usually has no route anywhere, so this is a
+fair question and there are three honest answers.
+
+**1. Join a WiFi network (the real answer).** Set the radio to
+`STA_FAILOVER_AP` on the console's WiFi page. The device joins your network,
+gets an address, gateway and DNS from DHCP like any other client, and falls back
+to broadcasting its own access point if that network is not there. The cost is
+that there is one radio: while it is joined to yours, it is not running its own.
+
+**2. Do not give it one — let your browser do the fetching.** This is the
+easiest path and the one most people should use. The console runs in a browser
+on *your* laptop, which already has internet. Download the bundle yourself,
+then install it on the device with `--file`. The device never needs a route.
+
+Getting the file across, once it is on your laptop:
+
+```bash
+scp P4wnP1-ALOA-v0.8.0-update-armhf.tar.xz* p4wnp1@172.16.0.1:/tmp/
+ssh p4wnp1@172.16.0.1 'sudo p4wnp1-update --file /tmp/P4wnP1-ALOA-v0.8.0-update-armhf.tar.xz'
+```
+
+**3. Share your computer's connection over the USB link.** Possible, and fiddly
+enough that it is listed last: the device is the DHCP *server* on that link and
+hands your computer an address, so the device itself has no default route. You
+would be adding one by hand on top of your host's internet sharing.
+
+### What the checksum proves, and what it does not
+
+The bundle is fetched over HTTPS and checked against a SHA-256 published beside
+it. That proves **the bytes arrived intact**. It proves nothing about who made
+them: the file and its checksum come from the same place, so anything able to
+serve you a bad bundle can serve the matching checksum too.
+
+It defends against a corrupted download, a truncated transfer, and a hostile
+network without a trusted certificate. It does **not** defend against a
+compromised release.
+
+Real authenticity needs a signature made with a key that does not travel with
+the file. There is not one yet. If that matters to you, verify the bundle out of
+band and install it with `--file`.
+
+### Building a bundle yourself
+
+```bash
+./tools/build-update-bundle.sh --arch armhf   # or arm64, or all
+```
+
+It refuses to build from a dirty working tree. The image build only stamps
+`-dirty` into the filename, but a bundle is applied to somebody else's running
+device, so it has to be reproducible from a tag.
+
 ## The OLED screen
 
 <p align="center">
@@ -525,6 +608,24 @@ directly, not one you expose.
 ## What is not verified
 
 Being specific about this matters more than the feature list.
+
+**The in-place updater has never been run on a device.** `p4wnp1-update` is
+written, its bundle builds, and no one has yet watched it replace a running
+install and come back. Until someone has, treat reflashing as the path you know
+works and the updater as the one you try when you can afford to use
+`--rollback`. The automatic rollback on a failed health check is, by the same
+token, also untested.
+
+**`PrivateTmp` on the main service unit has not been confirmed on booted
+hardware.** It is the one change in v0.8.0 that could take the access point and
+DHCP down if it misbehaved, because hostapd, wpa_supplicant and dnsmasq read
+their configs from `/tmp`. The reasoning is sound and the image's own verify
+pass is green; nobody has watched a flashed v0.8.0 hand out a lease.
+
+**Twelve of the fifteen payloads have never typed into a host.** Verified
+against a real Mac: `mac-01-hello`, `mac-03-lock`, `platform-detect`. One,
+`mac-02-recon`, is a recorded FAILURE — see `docs/payload-test-log.md`. Every
+script states its own status in its header.
 
 **Tested on hardware: a Raspberry Pi Zero W with a Waveshare 1.3inch OLED HAT.**
 Everything below that says "verified" without qualification was verified in a container; the
