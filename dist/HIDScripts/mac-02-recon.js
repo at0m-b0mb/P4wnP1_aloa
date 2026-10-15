@@ -11,7 +11,12 @@
  * LIMITATION:  the output stays on the TARGET's screen. This device is a
  *              keyboard with no return channel, so it cannot collect what it
  *              produced. You read the screen; your engagement note is a photo.
- * VERIFIED:    not yet tested on hardware.
+ * VERIFIED:    FAILED on first hardware run, 2026-10-14. Terminal never
+ *              launched. The cause was not macOS -- RAYCAST owned CMD+SPACE on
+ *              that machine, not Spotlight. Raycast matched "TextEdit" for
+ *              mac-01-hello and launched it, but its top hit for "Terminal" was
+ *              something else, and this script pressed ENTER on it blind.
+ *              Nothing was executed. See the launcher note below.
  *
  * WHY NOT system_profiler ON ITS OWN
  *
@@ -28,17 +33,36 @@
  * keymap-check.js and fix layout() above.
  */
 
+// WHICH LAUNCHER ANSWERS CMD+SPACE IS A PROPERTY OF THE HOST, NOT OF macOS.
+//
+// Raycast, Alfred and LaunchBar all intercept it, and all rank results
+// differently from Spotlight and from each other. On the machine this script
+// first ran against, Raycast held the shortcut: it found TextEdit for
+// mac-01-hello.js and launched it, and then sent this script somewhere else
+// entirely for "Terminal".
+//
+// So the query below is a variable, and the delay after it is long on purpose.
+// ios-02-spotlight.js refuses to press ENTER at all for this reason -- the
+// reasoning was written there before a Mac proved it, and had not been applied
+// to its siblings.
+//
+// If this opens the wrong thing on your target, set QUERY to something that
+// ranks unambiguously in THAT host's launcher. There is no value that is
+// correct everywhere.
+var QUERY = "Terminal";
+
 layout('us');
 typingSpeed(20, 25);
 
 delay(600);
 
-press("GUI SPACE");    // Spotlight
-delay(900);
-type("Terminal");
-delay(1200);           // let the result settle before ENTER -- see mac-01-hello.js
+press("GUI SPACE");
+delay(1200);           // let the launcher appear before typing into it
+type(QUERY);
+delay(2000);           // LONG: the result list reorders as it searches, and
+                       // whatever is highlighted when ENTER lands is what opens
 press("ENTER");
-delay(2500);           // Terminal cold-starts and may restore old windows
+delay(3000);           // a cold terminal is slow, and may restore old windows
 
 type("echo '=== P4wnP1 read-only host inventory ==='\n");
 delay(150);

@@ -35,6 +35,19 @@
  *
  * Treat "nothing happened on a Mac" as this, until you have ruled it out.
  *
+ * WHICH LAUNCHER ANSWERS CMD+SPACE IS A PROPERTY OF THE HOST
+ *
+ * This script passed, and partly by luck. The machine it ran against had
+ * RAYCAST on CMD+SPACE, not Spotlight -- Raycast happened to rank TextEdit
+ * first, so ENTER opened the right thing. Its sibling mac-02-recon.js asked the
+ * same launcher for "Terminal", got something else, and failed.
+ *
+ * Alfred, LaunchBar and Raycast all intercept this shortcut and all rank
+ * differently. Note that macOS is the only platform here with this problem:
+ * Windows GUI+R and Linux ALT+F2 are RUN dialogs, which execute exactly the
+ * text you give them, while CMD+SPACE opens a ranked SEARCH whose top hit
+ * depends on the host's own content and history.
+ *
  * WHY THE DELAYS ARE LONGER THAN THEY LOOK LIKE THEY NEED TO BE
  *
  * Spotlight animates in, and it drops characters typed during that animation --

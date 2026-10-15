@@ -51,6 +51,25 @@ and fails visibly in one second, where a *hello* that misses its launcher types
 into whatever had focus — on someone else's machine, the one outcome you cannot
 take back.
 
+## The launcher trap, on macOS only
+
+`mac-01-hello` worked and `mac-02-recon` failed on the same Mac minutes apart.
+Not a macOS problem — **Raycast owned CMD+SPACE**, and its top hit for
+"TextEdit" was the app while its top hit for "Terminal" was not. Both scripts
+pressed ENTER on a result they could not see.
+
+Alfred, LaunchBar and Raycast all intercept that shortcut and all rank
+differently. **Check what the launcher actually selected** when running a macOS
+`hello` or `recon` script, and set the `QUERY` variable to something that ranks
+unambiguously on that host.
+
+This is specific to macOS. Windows `GUI+R` and Linux `ALT+F2` are *run dialogs*
+— they execute the text you type. CMD+SPACE is a ranked *search*, and what is
+highlighted when ENTER lands depends on the host's own content.
+
+`ios-02-spotlight.js` refuses to press ENTER for exactly this reason, written
+before a Mac demonstrated it.
+
 ## Three ceilings that are not negotiable
 
 These are read out of the source, not assumed, and no script can work around them.
