@@ -12,7 +12,11 @@
  *              On macOS older than 10.13 this combination does nothing; the old
  *              equivalent was CTRL+SHIFT+EJECT, and there is no EJECT key in
  *              this device's keymap, so there is no fallback to offer.
- * VERIFIED:    not yet tested on hardware.
+ * VERIFIED:    YES -- run against a real Mac on 2026-10-14 through the device;
+ *              the screen locked. Confirmed by eye, not by a probe: the
+ *              CGSSessionScreenIsLocked key is ABSENT from the session
+ *              dictionary while unlocked, so a naive check reports 'unlocked'
+ *              either way and would call this script broken when it works.
  *
  * WHY THIS IS THE RIGHT FIRST TEST ON A MAC
  *

@@ -9,7 +9,12 @@
  * LIMITATION:  keystrokes go wherever focus is, and this device cannot see the
  *              screen to check. Spotlight is also the most focus-sensitive
  *              launcher of the three desktop platforms -- see the delays.
- * VERIFIED:    not yet tested on hardware.
+ * VERIFIED:    YES -- run against a real Mac on 2026-10-14 through the device.
+ *              Spotlight opened, TextEdit launched, all four lines typed with
+ *              no dropped or garbled characters on the 'us' keymap. The
+ *              Keyboard Setup Assistant did NOT appear, but that Mac had seen
+ *              this gadget many times already -- the warning below is about
+ *              FIRST attach and remains unverified.
  *
  * THE KEYBOARD SETUP ASSISTANT -- READ THIS BEFORE BLAMING THE PAYLOAD
  *

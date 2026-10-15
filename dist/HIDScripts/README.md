@@ -3,9 +3,19 @@
 Scripts here are typed by the device into whatever host it is plugged into. They
 run in **otto**, an ES5 JavaScript interpreter (`go.mod:9`), inside the service.
 
-**None of the `platform-detect`, `keymap-check`, `win-`, `mac-`, `linux-`,
-`android-` or `ios-` scripts has been tested on hardware yet.** Every one says so
-in its own `VERIFIED:` line. That line is load-bearing: this project's rule is
+## What has actually been run
+
+| Script | Status |
+|---|---|
+| `mac-01-hello.js` | **Verified** on a real Mac — Spotlight, TextEdit, four lines typed clean |
+| `mac-03-lock.js` | **Verified** on a real Mac — the screen locked |
+| `platform-detect.js` | **Verified** on a real Mac — correctly answers `NOT_OBVIOUSLY_WINDOWS_OR_LINUX` |
+| everything else | **Never run against a host.** Parses, and nothing more |
+
+Each script's own `VERIFIED:` line is the authority; this table is a summary.
+"Parses" means it compiles under the real otto with every `press()` token and
+`layout()` name checked — it says nothing about whether the target behaves as
+the script assumes. That line is load-bearing: this project's rule is
 that you never claim a capability you have not demonstrated, and an honest
 "untested" is worth more than a confident guess.
 
