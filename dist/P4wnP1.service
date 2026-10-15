@@ -34,6 +34,38 @@ ExecStart=/usr/local/bin/P4wnP1_service
 Restart=on-failure
 RestartSec=5
 
+# A /tmp of its own.
+#
+# The service writes four things into /tmp and hands them to root daemons:
+#   /tmp/hostapd_<iface>.conf          carries the AP PSK in cleartext
+#   /tmp/wpa_supplicant_<iface>.conf   carries the client passphrase
+#   /tmp/dnsmasq_<iface>.conf          the DHCP server's configuration
+#   /tmp/dnsmasq_<iface>.leases        every client's MAC, IP and hostname
+#
+# The paths are fixed and predictable and the real /tmp is world-writable, so
+# any local account could watch for them, pre-create them, or point them
+# somewhere else. The kernel blocks most of that on a current system --
+# fs.protected_regular, protected_symlinks and protected_fifos all apply, and
+# root is not exempt -- but relying on three sysctls staying at their defaults
+# is not the same as not being reachable.
+#
+# PrivateTmp gives this unit a /tmp nothing else on the system can see. The
+# paths above are unchanged from the service's point of view, and hostapd,
+# wpa_supplicant and dnsmasq are all CHILDREN of this unit, so they share the
+# namespace and read exactly what was written for them. Stored settings that
+# name these paths keep working, because the paths did not change.
+#
+# p4wnp1-oled.service and p4wnp1-firstboot.service have had this since they
+# were written. This unit -- the one that actually handles the secrets -- did
+# not, which is the whole of audit finding C6.
+#
+# DIAGNOSTICS: from a shell these files are no longer at /tmp/. systemd puts
+# them under /tmp/systemd-private-*-P4wnP1.service-*/tmp/. To look at them the
+# easy way:
+#   sudo systemctl show -p MainPID --value P4wnP1.service   # then
+#   sudo nsenter -t <pid> -m ls /tmp
+PrivateTmp=yes
+
 StandardOutput=journal
 StandardError=journal
 

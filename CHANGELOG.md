@@ -1,5 +1,131 @@
 # changelog
 
+## v0.8.0 -- 2026-10-14 -- security release
+
+The first release since v0.7.1. Everything tagged between them (v0.7.2 to
+v0.7.6) was never published, so if you are coming from v0.7.1 this also brings
+the OLED panel work, the rebuilt web console and the USB mass-storage fixes.
+
+Ten defects, from two audits and from driving a real device. Each is listed with
+what an attacker could actually do, because "hardening" is not a description.
+
+### Credentials were readable by anything on the device
+
+The generated SSH password is written to `/boot/firmware/p4wnp1-credentials.txt`
+-- deliberate, because a headless appliance has no other way to show it to you.
+But vfat carries no Unix ownership, so the mount options set the mode for the
+whole partition, and Raspberry Pi OS mounts it `defaults`, which is 0755.
+Measured on a running device: `-rwxr-xr-x 1 root root`. Any unprivileged
+process could read the password of an account holding `NOPASSWD:ALL` sudo --
+no card, no physical access.
+
+The boot partition now mounts `fmask=0177`, so every file on it is 0600. The
+image build fails if that is missing, because the failure is silent: the image
+boots, the file is correct, and only a mode nobody looks at is wrong.
+
+Whoever holds the card can still read it. Nothing on the device can prevent
+that, and the file still says so.
+
+### A WiFi client could choose what the device typed into the attached host
+
+`DHCP_LEASE_HOST` is the client's own DHCP option 12, and it was interpolated
+raw into the HIDScript preamble: `var DHCP_LEASE_HOST='...'`. A hostname of
+`x';type('...');var y='` closed the string and appended statements. An
+unauthenticated party in radio range chose the keystrokes and the operator's own
+trigger delivered them.
+
+All nine interpolated values now go through a proper JavaScript string literal,
+including `U+2028` and `U+2029`, which are line terminators in JavaScript and
+end a statement from inside the quotes.
+
+A stock device was not exposed, because no shipped template arms a DHCP-lease
+trigger. But running a payload when a client takes a lease is what the feature
+is for.
+
+### Bluetooth paired on a PIN printed in this project's source
+
+`1337`, in three places, with Discoverable, Bondable and the NAP network service
+all on at every start -- and no equivalent of the guard WiFi already had. The
+PIN was also written to the log on every pairing attempt, and `RequestPasskey`
+returned the same constant.
+
+A per-device PIN is now generated and substituted in the deploy path, which is
+the one chokepoint the startup defaults, a restored template and the operator's
+RPC all pass through.
+
+This does not make legacy pairing strong: with Secure Simple Pairing off, the
+link key derives from the PIN and a captured pairing exchange can be attacked
+offline. It removes the part that needed no capture at all.
+
+### Revoking a session did not stop a live event feed
+
+A gRPC stream authenticated once, at open, and never again, so a revoked token
+-- or a changed admin password -- kept receiving DHCP leases, HID job results
+and trigger fires. Expiry did not stop it either. The control failed silently in
+the operator's favour: the revoke returned 204 and the session list then omitted
+it, so the console said the intruder was gone while the feed ran.
+
+The JSON API's event stream had been fixed for exactly this. The gRPC sibling
+now re-checks on the same 20-second interval.
+
+### The rest
+
+- **The WiFi passphrase was a command-line argument** to `wpa_passphrase`, so it
+  sat in world-readable `/proc/<pid>/cmdline`. It goes on stdin now.
+- **A failed hostapd config write was ignored** and the access point started on
+  whatever was already at the fixed `/tmp` path -- the previous deployment's
+  SSID or PSK, or an open network where WPA2 had just been asked for, while the
+  console and panel reported the new settings.
+- **One unauthenticated peer could open unlimited gRPC streams.** grpc-go leaves
+  `MaxConcurrentStreams` effectively unlimited; it is 64 now, with keepalive
+  bounds on connection age and idle time.
+- **A login flood could lock the operator out.** `Login` ignored the request
+  context, so a client that hung up still paid a full bcrypt and the failure
+  delay, and nothing bounded the queue they were filling. The queue is capped
+  and returns 503 rather than growing; abandoned logins stop costing.
+- **Config files holding PSKs lived in the real `/tmp`.** The main unit now has
+  `PrivateTmp=yes`, which the OLED and first-boot units already had.
+
+### USB mass storage, found by using it
+
+Four defects that no container could have caught, because a container has no
+configfs:
+
+- Mass storage could not be enabled **without an image at all** -- the empty
+  backing path was a zero-length write, which configfs answers with EFAULT, and
+  the whole deploy reverted. The shipped default is an empty path, so "a
+  removable drive with no media" never worked.
+- An empty LUN read back as `"."`, so the console reported a drive with no media
+  as holding an image named dot.
+- `EBUSY` on eject now says the attached **host** is holding the medium and must
+  release it, instead of an errno that reads like a fault on the Pi.
+- Copying payloads from a Mac left AppleDouble sidecars (`._name.js`) in the
+  payload list, because the filter only looked at the extension.
+
+Attaching, reading, hot-swapping and ejecting are all verified on hardware now.
+
+### Payloads
+
+Fifteen HIDScripts for Windows, macOS, Linux, Android and iOS, plus a keymap
+verifier and an LED-based OS guess. **None has been run against a real host
+yet**; every file says so in its own header.
+
+Android and iOS are deliberately short. The shipped USB HID descriptor declares
+only the Keyboard/Keypad usage page, so the Android HOME and BACK buttons, the
+iOS system keys and every media key are not sendable by this device -- which is
+what most published Android BadUSB material depends on.
+
+### Tooling
+
+- `tools/hidscript-check` -- the first gate that looks at the payloads. It
+  compiles each with the real otto and validates every `press()` token and
+  `layout()` name. It self-tests on every run, which is how it caught itself
+  reading its own documentation as code.
+- `tools/deploy-service.sh` -- install a rebuilt service over SSH without
+  reflashing, so a fix can be verified on hardware in the sitting it was
+  written.
+
+
 ## unreleased -- console usability and stability
 
 A second audit pass over v0.2.0, and the verification that would have caught

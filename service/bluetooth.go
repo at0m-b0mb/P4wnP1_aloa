@@ -69,7 +69,17 @@ type BtService struct {
 func NewBtService(rootService *Service, retryTimeout time.Duration) (res *BtService) {
 	res = &BtService{
 		RootSvc:              rootService,
-		Agent:                bluetooth.NewDefaultAgent("1337"),
+		// NO PIN until one is deployed. This used to be the literal "1337",
+		// which meant the agent could answer a pairing request with a published
+		// constant during the window between service start and the first
+		// deploy -- and for the whole uptime of a device whose startup deploy
+		// failed, which is exactly when nobody is watching.
+		//
+		// Empty fails CLOSED: RequestPinCode returns "" and pairing does not
+		// complete. The startup path a few lines below deploys the defaults
+		// through DeployBluetoothAgentSettings, where the guard substitutes a
+		// per-device PIN, so the normal case is unaffected.
+		Agent:                bluetooth.NewDefaultAgent(""),
 		BrName:               BT_ETHERNET_BRIDGE_NAME,
 		serviceAvailableLock: &sync.Mutex{},
 		defaultSettings:      GetDefaultBluetoothSettings(),
@@ -213,7 +223,16 @@ func (bt *BtService) DeployBluetoothAgentSettings(src *pb.BluetoothAgentSettings
 		return &pb.BluetoothAgentSettings{}, bluetooth.ErrBtSvcNotAvailable
 	}
 	res = &pb.BluetoothAgentSettings{}
-	err = bt.SetPIN(src.Pin)
+
+	// The chokepoint. Every route to a deployed PIN passes here -- the startup
+	// defaults, a stored template restored from an old backup, and the
+	// operator's own RPC -- so this is the one place a published PIN can be
+	// caught for all of them. See bluetooth_pin_guard.go for why it is not in
+	// defaults.go: a deployed template beats a compile-time constant, which is
+	// the lesson WiFi already learned.
+	pin, _ := guardBluetoothPIN(src.Pin)
+
+	err = bt.SetPIN(pin)
 	if err != nil {
 		return
 	}

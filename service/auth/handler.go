@@ -138,6 +138,20 @@ func handleLogin(m *Manager, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+
+	// Refuse rather than enqueue once the queue is full. See maxQueuedLogins:
+	// an unbounded queue is what let an attacker push the operator's own
+	// correct password to the back of a line minutes long. A 503 costs the
+	// attacker a round trip and costs the operator nothing, because reaching
+	// it takes sixteen simultaneous logins and there is one operator.
+	release, admitted := m.AdmitLogin()
+	if !admitted {
+		w.Header().Set("Retry-After", "2")
+		writeError(w, http.StatusServiceUnavailable, "too many logins in progress, try again shortly")
+		return
+	}
+	defer release()
+
 	sess, err := m.Login(r.Context(), req.Username, req.Password)
 	if err != nil {
 		if errors.Is(err, ErrInvalidCredentials) {

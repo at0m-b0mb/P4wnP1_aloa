@@ -34,6 +34,21 @@ func GetDefaultBluetoothSettings() *pb.BluetoothSettings {
 			},
 		},
 		As: &pb.BluetoothAgentSettings{
+			// Still the published constant, ON PURPOSE, and it never reaches
+			// the radio.
+			//
+			// It is in compromisedBTPins (bluetooth_pin_guard.go), so
+			// DeployBluetoothAgentSettings substitutes this device's generated
+			// PIN before the agent ever sees it. That is the same arrangement
+			// WiFi uses, and the reason for it is the same: a deployed template
+			// beats a compile-time constant, so a guard in the deploy path is
+			// the only thing that catches an old backup or an upgraded device.
+			//
+			// Setting this to "" instead would fail CLOSED rather than
+			// generate, and a fresh device would have Bluetooth pairing simply
+			// not work until an operator noticed and set a PIN by hand. Leaving
+			// a trigger value here means a fresh device pairs out of the box,
+			// with a PIN unique to it.
 			Pin: "1337",
 		},
 	}

@@ -1,7 +1,10 @@
 package bluetooth
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
+
 	"github.com/godbus/dbus"
 	"github.com/mame82/mblue-toolz/bt_uuid"
 	"github.com/mame82/mblue-toolz/dbusHelper"
@@ -24,7 +27,19 @@ func (a *DefaultAgent) Release() *dbus.Error {
 }
 
 func (a *DefaultAgent) RequestPinCode(device dbus.ObjectPath) (pincode string, err *dbus.Error) {
-	fmt.Printf("DefaultAgent request pincode called, returning string '%s'\n", a.pincode)
+	// NEVER print the PIN. It used to be logged in full on every pairing
+	// attempt, which was merely pointless while the PIN was the published
+	// constant "1337" and is a credential leak now that it is per-device --
+	// the journal is readable by more things than the pairing dialog is, and
+	// an operator pasting logs into a bug report would paste their PIN.
+	//
+	// Whether one is configured at all is worth saying, because an empty PIN
+	// fails pairing silently and that is otherwise very hard to diagnose.
+	if a.pincode == "" {
+		fmt.Println("DefaultAgent: pairing requested but NO PIN is configured; refusing")
+	} else {
+		fmt.Println("DefaultAgent: pairing requested, returning the configured PIN")
+	}
 	// Called when SSP is off and currentCap != CAP_NO_INPUT_NO_OUTPUT, we could use a pre-generated PIN
 	// and the remote device has to enter the same one
 	return a.pincode, nil
@@ -36,12 +51,31 @@ func (a *DefaultAgent) DisplayPinCode(device dbus.ObjectPath, pincode string) *d
 }
 
 func (a *DefaultAgent) RequestPasskey(device dbus.ObjectPath) (passkey uint32, err *dbus.Error) {
-	fmt.Println("DefaultAgent request passkey called, returning integer 1337")
-	// Called with SSP on and Cap == AGENT_CAP_KEYBOARD_ONLY
-	// The needed passkey is random, we can't know the correct return value upfront (in contrast to a PIN
-	// which has to be entered on both devices and match)
-
-	return 1337, nil
+	// Called with SSP on and Cap == AGENT_CAP_KEYBOARD_ONLY. The upstream
+	// comment below is right that we cannot know the correct value -- the
+	// remote device displays it and a human is supposed to type it here, and
+	// this appliance has no keyboard to type it with. So whatever we return is
+	// a guess and pairing is meant to fail.
+	//
+	// It returned the literal 1337 regardless. That is a one-in-a-million
+	// guess rather than a secure failure, and it was the third hardcoded 1337
+	// in the tree. A random value fails just as surely and does not advertise
+	// a constant worth trying.
+	//
+	// This device registers AGENT_CAP_NO_INPUT_NO_OUTPUT (see Start and
+	// NewDefaultAgent), so BlueZ should never call this at all. It is fixed
+	// because "unreachable today" is a property of the current capability, not
+	// of this function.
+	var b [4]byte
+	if _, rerr := rand.Read(b[:]); rerr != nil {
+		// Refusing beats returning a predictable number.
+		fmt.Println("DefaultAgent: passkey requested but no randomness available; rejecting")
+		return 0, toolz.ErrRejected
+	}
+	// Bluetooth passkeys are 6 decimal digits, i.e. 0..999999.
+	pk := binary.BigEndian.Uint32(b[:]) % 1000000
+	fmt.Println("DefaultAgent: passkey requested; this device cannot know it, returning a random value (pairing will fail)")
+	return pk, nil
 }
 
 func (a *DefaultAgent) DisplayPasskey(device dbus.ObjectPath, passkey uint32, entered uint16) *dbus.Error {
