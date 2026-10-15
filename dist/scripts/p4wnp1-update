@@ -102,7 +102,23 @@ if [ "$MODE" = rollback ]; then
     cp -a "$LAST"/units/.      "$UNITDIR"/  2>/dev/null || true
     [ -d "$LAST/www" ]     && rm -rf "$ROOT/www"     && cp -a "$LAST/www"     "$ROOT/"
     [ -d "$LAST/keymaps" ] && rm -rf "$ROOT/keymaps" && cp -a "$LAST/keymaps" "$ROOT/"
-    [ -r "$LAST/VERSION" ] && cp -a "$LAST/VERSION" "$ROOT/VERSION"
+    # NEVER leave a version the device is not running.
+    #
+    # This used to be `[ -r "$LAST/VERSION" ] && cp ...`, which quietly did
+    # nothing when the snapshot had no VERSION -- as every snapshot taken
+    # before version stamping existed does. The rollback then restored old
+    # binaries and left the NEW version number in place, and printed it back:
+    # "rolled back; now at v0.8.0-5-gc40ae1f" while running something else.
+    # Observed on a real device.
+    #
+    # A version that is wrong is worse than one that is missing, so an absent
+    # snapshot version becomes "unknown" rather than whatever was there.
+    if [ -r "$LAST/VERSION" ]; then
+        cp -a "$LAST/VERSION" "$ROOT/VERSION"
+    else
+        echo "unknown" > "$ROOT/VERSION"
+    fi
+    mkdir -p "$ROOT/www" && cp -a "$ROOT/VERSION" "$ROOT/www/VERSION"
     systemctl daemon-reload
     systemctl start "$SERVICE"
     say "rolled back; now at $(current_version)"
@@ -195,7 +211,9 @@ for u in P4wnP1.service p4wnp1-firstboot.service p4wnp1-oled.service; do
 done
 [ -d "$ROOT/www" ]     && cp -a "$ROOT/www"     "$SNAP/" || true
 [ -d "$ROOT/keymaps" ] && cp -a "$ROOT/keymaps" "$SNAP/" || true
-[ -r "$ROOT/VERSION" ] && cp -a "$ROOT/VERSION" "$SNAP/" || true
+# Always record one, even if the install has none -- an empty slot in the
+# snapshot is what made the rollback above restore a wrong version.
+if [ -r "$ROOT/VERSION" ]; then cp -a "$ROOT/VERSION" "$SNAP/"; else echo "unknown" > "$SNAP/VERSION"; fi
 
 # Keep the five most recent snapshots. This device has a small card.
 ls -1d "$BACKUPS"/*/ 2>/dev/null | sort | head -n -5 | xargs -r rm -rf
@@ -261,7 +279,9 @@ if [ "$OK" != 1 ]; then
     cp -a "$SNAP"/units/. "$UNITDIR"/ 2>/dev/null || true
     [ -d "$SNAP/www" ]     && rm -rf "$ROOT/www"     && cp -a "$SNAP/www"     "$ROOT/"
     [ -d "$SNAP/keymaps" ] && rm -rf "$ROOT/keymaps" && cp -a "$SNAP/keymaps" "$ROOT/"
-    [ -r "$SNAP/VERSION" ] && cp -a "$SNAP/VERSION" "$ROOT/VERSION"
+    # Same rule as the manual rollback: never leave a version we are not running.
+    if [ -r "$SNAP/VERSION" ]; then cp -a "$SNAP/VERSION" "$ROOT/VERSION"; else echo "unknown" > "$ROOT/VERSION"; fi
+    mkdir -p "$ROOT/www" && cp -a "$ROOT/VERSION" "$ROOT/www/VERSION"
     systemctl daemon-reload
     systemctl start "$SERVICE"
     die "update rolled back; the device is on $(current_version) again"
