@@ -49,7 +49,14 @@ help:
 # Cross-compile each binary individually. `-trimpath -ldflags='-s -w'`
 # strips debug info to keep the Pi Zero W's modest storage happy.
 GO_ENV_ARMV6 := GOOS=linux GOARCH=arm GOARM=6
-GO_BUILD_FLAGS := -trimpath -ldflags="-s -w"
+# Stamp the real version into the binary.
+#
+# common_web.VERSION used to be a hardcoded const reading "v0.1.1", so a device
+# running v0.8.0 announced itself as v0.1.1 in its own startup log -- and
+# image/build.sh passed `-X main.version=...`, naming a symbol that does not
+# exist, which Go silently ignores. The version reached nothing.
+P4_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+GO_BUILD_FLAGS := -trimpath -ldflags="-s -w -X github.com/mame82/P4wnP1_aloa/common_web.VERSION=$(P4_VERSION)"
 
 build-service-armv6:
 	$(GO_ENV_ARMV6) go build $(GO_BUILD_FLAGS) -o build/P4wnP1_service ./cmd/P4wnP1_service
@@ -319,6 +326,11 @@ installkali:
 	# an operator has to know it lives under /usr/local/P4wnP1 to run it, which
 	# is the same as it not existing.
 	install -m 0755 dist/scripts/p4wnp1-update /usr/local/bin/p4wnp1-update
+	# What the device believes it is. p4wnp1-update --check compares against
+	# this, and without it a flashed device reports "unknown" and can never
+	# tell you an update is available.
+	echo "$(P4_VERSION)" > /usr/local/P4wnP1/VERSION
+	mkdir -p /usr/local/P4wnP1/www && echo "$(P4_VERSION)" > /usr/local/P4wnP1/www/VERSION
 	chmod 0755 /usr/local/P4wnP1/scripts/firstboot-secure-defaults.sh
 	-chmod 0755 /usr/local/P4wnP1/scripts/p4wnp1-healthcheck.sh
 

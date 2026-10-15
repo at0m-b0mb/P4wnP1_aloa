@@ -95,6 +95,17 @@ for d in keymaps scripts HIDScripts www db helper ums legacy; do
         cp -R "$PAYLOAD/dist/$d" "$P4ROOT/$d"
     fi
 done
+# Record what this image is, where both the updater and the console can read it.
+#
+# p4wnp1-update --check compares against $P4ROOT/VERSION; without it a flashed
+# device reports "unknown" and can never tell an operator an update exists. The
+# copy under www/ is what the console fetches, because the web root is the only
+# part of $P4ROOT that is served.
+P4VER="${P4_VERSION:-dev}"
+echo "$P4VER" > "$P4ROOT/VERSION"
+mkdir -p "$P4ROOT/www" && echo "$P4VER" > "$P4ROOT/www/VERSION"
+log "version stamp on device: $P4VER"
+
 chmod -R a+rX "$P4ROOT"
 find "$P4ROOT/scripts" -name '*.sh' -exec chmod 0755 {} + 2>/dev/null || true
 

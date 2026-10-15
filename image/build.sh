@@ -155,7 +155,7 @@ for ARCH in $ARCHES; do
     for pkg in P4wnP1_service P4wnP1_cli p4wnp1-hashpw p4wnp1-oled; do
         info "building $pkg"
         env CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" ${GOARM:+GOARM=$GOARM} \
-            go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
+            go build -trimpath -ldflags "-s -w -X github.com/mame82/P4wnP1_aloa/common_web.VERSION=$VERSION" \
             -o "$BINDIR/$pkg" "./cmd/$pkg" \
             || die "failed to build $pkg for $ARCH"
     done
