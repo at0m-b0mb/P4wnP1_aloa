@@ -277,7 +277,7 @@ and it is built around what it refuses to touch.
 ```bash
 sudo p4wnp1-update              # the latest published release
 sudo p4wnp1-update --check      # what is available; changes nothing
-sudo p4wnp1-update --version v0.8.0
+sudo p4wnp1-update --version v0.9.0
 sudo p4wnp1-update --file bundle.tar.xz
 sudo p4wnp1-update --rollback   # undo the last one
 ```
@@ -288,10 +288,24 @@ sudo p4wnp1-update --rollback   # undo the last one
 | **Merged** | `scripts/` and `HIDScripts/` — shipped files are refreshed, anything you wrote is left alone |
 | **Never touched** | `store/` (templates, loadouts, reflexes), `ums/` (your images), your `.db` backups, `/etc/p4wnp1/` (credentials), `/boot/firmware/` |
 
-It snapshots the current install first, health-checks the API afterwards, and
-**rolls back automatically** if the service does not come back. An update that
-loses your work is worse than no update, because you would not run the second
-one.
+It snapshots the current install first and health-checks the API afterwards. An
+update that loses your work is worse than no update, because you would not run
+the second one.
+
+If the service does not come back, it rolls back automatically — and that
+specific path has **never fired on a real device**. Update, update again, and
+`--rollback` by hand are all verified on hardware; the failure branch is
+implemented and reviewed, not exercised, because triggering it means
+deliberately installing a service binary that will not start. If an update ever
+does leave you without a console, the manual recovery is the one that has been
+tested:
+
+```bash
+sudo p4wnp1-update --rollback
+```
+
+The bundle for the version you came from is also still on the device, under
+`/var/backups/p4wnp1/`.
 
 ### How does the device get on the internet?
 
@@ -312,8 +326,8 @@ then install it on the device with `--file`. The device never needs a route.
 Getting the file across, once it is on your laptop:
 
 ```bash
-scp P4wnP1-ALOA-v0.8.0-update-armhf.tar.xz* p4wnp1@172.16.0.1:/tmp/
-ssh p4wnp1@172.16.0.1 'sudo p4wnp1-update --file /tmp/P4wnP1-ALOA-v0.8.0-update-armhf.tar.xz'
+scp P4wnP1-ALOA-v0.9.0-update-armhf.tar.xz* p4wnp1@172.16.0.1:/tmp/
+ssh p4wnp1@172.16.0.1 'sudo p4wnp1-update --file /tmp/P4wnP1-ALOA-v0.9.0-update-armhf.tar.xz'
 ```
 
 **3. Share your computer's connection over the USB link.** Possible, and fiddly

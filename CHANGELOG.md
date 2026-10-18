@@ -1,5 +1,100 @@
 # changelog
 
+## v0.9.0 -- 2026-10-18 -- you can update without losing your work
+
+v0.8.0 could only be installed by flashing a card, which costs the operator
+everything they had on the device. This release adds an in-place updater, and
+fixes two defects found by continuing the audit that produced v0.8.0 -- one of
+which could erase the datastore that updater exists to protect.
+
+### A restore could erase everything and report success (audit S2)
+
+`Restore(replace=true)` cleared the live database **first**, then loaded the
+backup file, then discarded the error that load returned and ended in
+`return nil`. Hand it a truncated or corrupt backup and every template, loadout
+and reflex was gone, with "Restored" on screen.
+
+That is not an exotic input for this device. It is powered off by being pulled
+out of a USB port, which is exactly how a half-written backup comes to exist --
+the same reason badger is opened with `Truncate` in the first place.
+
+The order is now: load the backup into a temporary database, count its keys,
+refuse it if there are none, and only then touch the live data. Failures are
+counted and reported rather than swallowed.
+
+Writing the test for this found a second thing: badger's `Load()` does not
+return an error on a malformed file, it **panics**. Checking the error was not
+enough, so the load runs inside a `recover()`. Four tests cover a corrupt
+backup, a truncated one, an empty one, and -- as the control, because every
+other test here would pass for an implementation that refused all restores -- a
+good one.
+
+### The service log printed what the payloads typed (audit S3)
+
+`jsType` logged the first fifteen characters of every `type()` call, and the
+**entire string** when a write failed. On a tool whose payloads type passwords
+into a host, the journal was collecting them. It now logs the length and the
+error.
+
+### The device could not say what version it was running
+
+`common_web.VERSION` was a `const` pinned at `v0.1.1`, and `image/build.sh`
+stamped `-X main.version`, a symbol that does not exist -- so the linker flag
+was accepted and did nothing. A device running v0.8.0 introduced itself as
+v0.1.1 in its own startup log. `VERSION` is now a `var` and the build stamps the
+real tag into it.
+
+### Updating in place
+
+`p4wnp1-update` installs a ~25 MB bundle instead of a 650 MB image:
+
+```bash
+sudo p4wnp1-update              # the latest published release
+sudo p4wnp1-update --check      # what is available; changes nothing
+sudo p4wnp1-update --version v0.9.0
+sudo p4wnp1-update --file bundle.tar.xz
+sudo p4wnp1-update --rollback   # undo the last one
+```
+
+It replaces the binaries, units, console and keymaps; **merges** `scripts/` and
+`HIDScripts/` so your own files survive; and never touches `store/`, `ums/`,
+your `.db` backups, `/etc/p4wnp1/` or `/boot/firmware/`. It snapshots the
+install to `/var/backups/p4wnp1/<stamp>` first, health-checks the API
+afterwards, and replaces itself last, by atomic rename, only once the new
+service has answered.
+
+**This release is the first one the updater can actually use.** v0.8.0 shipped
+images only, and the default mode resolves `latest` and then fetches
+`P4wnP1-ALOA-<tag>-update-<arch>.tar.xz` -- which 404s against v0.8.0. Both
+architectures' bundles are attached here.
+
+Verified on hardware, in this order: update, rollback, update again. The
+rollback exposed its own bug -- `[ -r "$SNAP/VERSION" ] && cp` silently does
+nothing when the file is absent, so the device reported a version it was not
+running. It now writes `unknown` rather than leaving a stale answer.
+
+`PrivateTmp=yes` (v0.8.0's C6) is also now verified on hardware, by the update
+that installed it. That produced a symptom worth writing down: afterwards the
+service's `/tmp` is private, so a file put there through the API *before* the
+update is no longer visible to it. That looks exactly like a failed upload and
+is in fact proof the unit file took effect.
+
+### Honest limits
+
+- **The AUTOMATIC rollback has never fired.** Update, update again, and
+  `--rollback` by hand are all verified on a real device. The path taken when
+  the post-update health check *fails* is implemented and reviewed, not
+  exercised -- triggering it means deliberately installing a service binary that
+  will not start.
+- **The arm64 images have never been booted.** Both arm64 variants ship
+  untested on a real Pi Zero 2 W.
+- **Twelve of the fifteen payloads have never typed into a host.** Passing:
+  `mac-01-hello`, `mac-03-lock`, `platform-detect`, all against a Mac.
+  `mac-02-recon` is a recorded **failure** -- Raycast owns CMD+SPACE on that
+  host, so the script pressed ENTER on whatever the launcher had selected.
+  `docs/payload-test-log.md` is the running record and each file's own
+  `VERIFIED:` line is the authority.
+
 ## v0.8.0 -- 2026-10-14 -- security release
 
 The first release since v0.7.1. Everything tagged between them (v0.7.2 to
