@@ -37,3 +37,6 @@ __pycache__/
 
 # stray `go build ./tools/hidscript-check` output at the repo root
 hidscript-check
+
+# Operator notebook: live device state and credentials. Never tracked.
+RESUME.md
