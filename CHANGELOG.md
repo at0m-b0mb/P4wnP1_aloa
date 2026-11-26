@@ -1,6 +1,6 @@
 # changelog
 
-## v0.9.0 -- 2026-10-18 -- you can update without losing your work
+## v0.9.0 -- 2026-11-26 -- you can update without losing your work, and the journal stops collecting your payloads
 
 v0.8.0 could only be installed by flashing a card, which costs the operator
 everything they had on the device. This release adds an in-place updater, and
