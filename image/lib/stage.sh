@@ -150,7 +150,17 @@ install -m 0755 "$REPO/image/lib/customize.sh" "$PAYLOAD/customize.sh"
 # 4. run the in-chroot customisation
 # --------------------------------------------------------------------------
 log "entering chroot to customise ($ARCH)"
-chroot "$MNT" /bin/bash -c "P4_ARCH='$ARCH' P4_VERSION='${VERSION:-dev}' P4_OLED='${P4_OLED:-0}' P4_BRAND='${P4_BRAND:-}' P4_BRAND_TAGLINE='${P4_BRAND_TAGLINE:-}' /tmp/p4wnp1-payload/customize.sh" \
+# P4_VERSION first, because that is the name build.sh exports.
+#
+# This line used to read ${VERSION:-dev}, and build.sh passes the value in as
+# P4_VERSION -- so inside the container VERSION was never set and every image
+# ever built took the "dev" fallback, through three layers that each looked
+# correct on their own: build.sh computed the right version, this line
+# faithfully forwarded a variable, and customize.sh faithfully defaulted an
+# unset one. The name changed between two of the layers and nothing compared
+# them. VERSION is kept as a second fallback for anyone running stage.sh
+# directly.
+chroot "$MNT" /bin/bash -c "P4_ARCH='$ARCH' P4_VERSION='${P4_VERSION:-${VERSION:-dev}}' P4_OLED='${P4_OLED:-0}' P4_BRAND='${P4_BRAND:-}' P4_BRAND_TAGLINE='${P4_BRAND_TAGLINE:-}' /tmp/p4wnp1-payload/customize.sh" \
     || die "in-chroot customisation failed"
 
 # --------------------------------------------------------------------------
