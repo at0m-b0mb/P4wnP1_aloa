@@ -254,9 +254,16 @@ func (ctl *HIDController) StartScriptAsBackgroundJob(ctx context.Context,script 
 		Job:job,
 		Vm:avm,
 		Type:EventType_JOB_STARTED,
-		Message:script, //pack script source into message
-
-		//ScriptSource:script,
+		// NOT the script source. It used to be -- "pack script source into
+		// message" -- and that one assignment put every payload's full text
+		// into the journal and onto the event stream on every run, because the
+		// handlers printed the event with %+v. On a tool whose payloads type
+		// passwords into a host, that archived them.
+		//
+		// Nothing consumed it: every other event here carries a fixed English
+		// string, no console view reads it, and the commented-out ScriptSource
+		// field below says it was never finished. Audit finding S3.
+		Message:"Script started",
 	})
 
 	//add job to global list

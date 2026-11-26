@@ -36,6 +36,57 @@ good one.
 into a host, the journal was collecting them. It now logs the length and the
 error.
 
+**That fix was not enough, and an earlier draft of this entry wrongly said the
+leak was closed.** An adversarial review of this release found the real one
+sitting next to it: `controller.go` packed the **complete HIDScript source**
+into the `JOB_STARTED` event, and both event handlers printed the whole struct
+with `%+v`. The unit sends stdout to the journal, so every payload's full text
+— every `type()` literal in it — was archived on **every single run**, not only
+on error, and in full rather than truncated. The narrow fix had shrunk a
+fifteen-character leak while a complete one stayed open beside it.
+
+Three things changed:
+
+- The script source is no longer put in the event at all. Nothing read it:
+  every other event carries a fixed English string, no console view consumes
+  it, and the commented-out `ScriptSource` field beside it says it was never
+  finished.
+- `hid.Event` now has a `String()` method that reports `Message` as a byte
+  count. `fmt` consults it for `%v`, `%+v` and `%s`, so this covers the two
+  handlers that exist and any added later — which matters more than patching
+  the call sites, because the next `%+v` on an event is the kind of line nobody
+  reads twice.
+- The payload's **result** no longer goes to the journal either. A recon script
+  returns hostnames, usernames and network configuration; that still reaches
+  the operator over the authenticated event stream, which is the channel they
+  asked for, rather than being written to the card forever. Errors are still
+  logged in full, deliberately: they describe the operator's own script, which
+  is the thing to debug with, whereas the result describes the target.
+
+`hid/keyboard.go` also logged each character it could not map, quoted and as
+hex. That line is reached from the call `jsType` makes immediately after it
+stops logging what it types, and the characters it fires on are the unusual,
+high-entropy part of a passphrase. It now reports the position and the layout
+name, which is enough to fix a layout problem with the script in front of you
+and says nothing on its own.
+
+### Two latent bugs in `hid/`, found by giving the package a test target
+
+`hid/` is linux-only, so it never compiled on the development machine and **no
+test from it had ever run** — in `verify` or anywhere else. That is how the
+leak above survived the first pass. Adding `./hid/...` to `test-linux` made
+`go vet` run against it for the first time and it immediately reported two
+real defects:
+
+- `KeyboardOutReport.String()` fell back to `fmt.Sprintf("%+v", kr)` **on
+  itself**, which calls `String()` again until the stack runs out and takes the
+  service with it. The author had left a `//ToDo: check if this works or calls
+  a loop`. It called a loop. Only reachable when `MarshalJSON` fails, which is
+  why it sat there unexercised.
+- `RunAsync`'s busy error was `fmt.Sprintf("VM %d ...")` with no argument, so
+  the operator saw `VM %!d(MISSING) couldn't start new job` — losing the only
+  fact in the message that says which VM is busy.
+
 ### The device could not say what version it was running
 
 `common_web.VERSION` was a `const` pinned at `v0.1.1`, and `image/build.sh`

@@ -127,7 +127,11 @@ func (avm *AsyncOttoVM) SetWorking(working bool) {
 
 func (avm *AsyncOttoVM) RunAsync(ctx context.Context, src interface{}, anonymousSelfInvoked bool) (job *AsyncOttoJob, err error) {
 	if avm.IsWorking() {
-		return job, errors.New(fmt.Sprintf("VM %d couldn't start new job, because it is still running one"))
+		// The %d had no argument, so this error reached the operator as
+		// "VM %!d(MISSING) couldn't start new job" -- losing the one fact in
+		// it that identifies which VM is busy. Same cause as the recursion in
+		// keyboard.go: vet has never run against this package.
+		return job, fmt.Errorf("VM %d couldn't start new job, because it is still running one", avm.Id)
 	}
 
 	avm.SetWorking(true)
@@ -210,7 +214,20 @@ func (avm *AsyncOttoVM) RunAsync(ctx context.Context, src interface{}, anonymous
 			if jErr == nil {
 				evRes.Type = EventType_JOB_SUCCEEDED
 				evRes.Message = fmt.Sprintf("JOB %d on VM %d SUCCEEDED WITH RESULT: %s", job.Id, avm.Id, jRes)
-				fmt.Println(evRes.Message)
+				// The RESULT stays out of the journal. It goes to the client in
+				// the event above, which is the channel the operator asked for
+				// and is authenticated; stdout here is the journal, which keeps
+				// it on the card forever.
+				//
+				// This is the payload's output, not its source -- a recon
+				// script returns hostnames, usernames and network config, and
+				// any script can return something it read. Audit finding S3:
+				// same class as the source leak, a different copy of it.
+				//
+				// Errors below are deliberately still printed in full: they
+				// describe the operator's own script and are the main thing to
+				// debug with, whereas the result describes the target.
+				fmt.Printf("JOB %d on VM %d SUCCEEDED WITH RESULT: %d bytes\n", job.Id, avm.Id, len(jRes))
 			} else {
 				evRes.Type = EventType_JOB_SUCCEEDED
 				evRes.Message = fmt.Sprintf("JOB %d on VM %d SUCCEEDED BUT RESULT COULDN'T BE MARSHALED TO JSON: %v", job.Id, avm.Id, jErr)

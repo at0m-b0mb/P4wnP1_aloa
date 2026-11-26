@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sync"
 	"context"
+	"unicode/utf8"
 )
 
 var (
@@ -253,7 +254,9 @@ func (kbd *HIDKeyboard) StringToPressKeySequence(str string) (err error) {
 	if kbd.ActiveLanguageLayout == nil {
 		return errors.New("No language mapping active, couldn't send key sequence!")
 	}
+	pos := 0
 	for _,runeVal := range str {
+		pos++
 		strRune := string(runeVal)
 		if reports,found := kbd.ActiveLanguageLayout.Mapping[strRune]; found {
 			//log.Printf("Sending reports (%T): %v\n", reports, reports)
@@ -263,7 +266,16 @@ func (kbd *HIDKeyboard) StringToPressKeySequence(str string) (err error) {
 				return err
 			}
 		} else {
-			log.Printf("HID keyboard warning: Couldn't send charcter '%q' (0x%x) because it is not defined in language map '%s', skipping ...", strRune, strRune, kbd.ActiveLanguageLayout.Name)
+			// The character itself is NOT logged, and neither is its code
+			// point, which is the same thing written differently.
+			//
+			// This line used to print both, and it is reached from the call
+			// jsType makes immediately after it stops logging what it types --
+			// so the one part of a passphrase this warning fires on is its
+			// unusual, high-entropy part. Position and layout name are enough
+			// to fix a layout problem when you have the script in front of
+			// you, and they say nothing on their own. Audit finding S3.
+			log.Printf("HID keyboard warning: character %d of %d is not defined in language map '%s', skipping it", pos, utf8.RuneCountInString(str), kbd.ActiveLanguageLayout.Name)
 		}
 
 
@@ -528,7 +540,20 @@ func (kr KeyboardOutReport) String() string {
 	if err == nil {
 		return string(bytes)
 	} else {
-		return fmt.Sprintf("%+v", kr) //ToDo: check if this works or calls a loop
+		// It called a loop.
+		//
+		// The ToDo that used to sit here asked exactly the right question and
+		// never got answered: `%+v` on a value whose type has a String method
+		// calls that String method, so this line was String() calling itself
+		// until the stack ran out -- taking the service with it. Only reachable
+		// when MarshalJSON fails, which is why it sat here unexercised.
+		//
+		// `go vet` says so plainly ("causes recursive String method call"), and
+		// vet had never been run against this package because it is linux-only
+		// and had no test target. Found by giving it one.
+		//
+		// The fields are printed explicitly instead, which cannot recurse.
+		return fmt.Sprintf("KeyboardOutReport{Modifiers:%#02x Keys:%v}", kr.Modifiers, kr.Keys)
 	}
 }
 

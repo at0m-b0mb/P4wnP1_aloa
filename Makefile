@@ -258,11 +258,20 @@ build-armv6: build-service-armv6 build-cli-armv6 build-hashpw-armv6 build-oled-a
 test:
 	go test -count=1 ./service/auth/... ./service/jsonbridge/... ./oled/...
 
+# ./hid/... is in this list deliberately, and was not before.
+#
+# hid/ is linux-only -- controller.go and AsyncOtto.go carry build tags -- so it
+# never compiled on the Mac and NO test from it had ever run, here or in
+# `verify`. That is how the second half of audit finding S3 survived the first:
+# the complete HIDScript source went to the journal on every single run, from
+# the one package in this repository with no test target at all.
+#
+# A gate that does not run is not a gate.
 test-linux:
 	docker run --rm --platform linux/arm64 \
 	  -v "$(CURDIR):/src" -v "$$(go env GOMODCACHE):/gomodcache" \
 	  -e GOMODCACHE=/gomodcache -e GOFLAGS=-mod=mod -e CGO_ENABLED=0 \
-	  -w /src golang:1.26-bookworm go test -count=1 ./service/...
+	  -w /src golang:1.26-bookworm go test -count=1 ./service/... ./hid/...
 
 lint:
 	@command -v shellcheck >/dev/null || { echo "shellcheck not installed"; exit 1; }
