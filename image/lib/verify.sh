@@ -202,6 +202,44 @@ else
     printf '\033[1;31m[verify:FAIL]\033[0m no /etc/fstab in the image; cannot confirm boot-partition permissions\n' >&2; fail=1
 fi
 
+# The version the device will REPORT, which is not the same thing as the
+# version it was built from.
+#
+# This gate exists because its absence shipped a defect in v0.9.0 -- the release
+# whose headline fix was "the device could not say what version it was running".
+# image/build.sh passes a dozen -e P4_VERSION-shaped variables into the
+# container and P4_VERSION was simply not among them, so customize.sh's
+# `P4VER="${P4_VERSION:-dev}"` always took the fallback. EVERY image this
+# project ever built wrote "dev" into these two files, v0.8.0 included, and a
+# flashed device answered `p4wnp1-update --check` with "dev" forever.
+#
+# Nothing caught it because the binaries ARE stamped correctly -- build.sh uses
+# $VERSION in its -ldflags -- so the service's own startup line was right while
+# the files the updater and the console read were wrong. Found only by flashing
+# a card and asking the device what it was.
+#
+# Checked against P4_VERSION when the caller supplies it; when it does not, the
+# files must at least exist and not say "dev", because "dev" in a built image
+# is the fallback firing.
+for vf in /usr/local/P4wnP1/VERSION /usr/local/P4wnP1/www/VERSION; do
+    if [ ! -s "$MNT$vf" ]; then
+        printf '\033[1;31m[verify:FAIL]\033[0m %s is missing or empty; the device cannot report its version and --check can never offer an update\n' "$vf" >&2; fail=1
+        continue
+    fi
+    got=$(tr -d '\r\n' < "$MNT$vf")
+    if [ -n "${P4_VERSION:-}" ]; then
+        if [ "$got" = "$P4_VERSION" ]; then
+            ok "$vf says $got"
+        else
+            printf '\033[1;31m[verify:FAIL]\033[0m %s says %s but this image was built as %s\n' "$vf" "$got" "$P4_VERSION" >&2; fail=1
+        fi
+    elif [ "$got" = "dev" ]; then
+        printf '\033[1;31m[verify:FAIL]\033[0m %s says "dev" -- the version was not passed into the image build\n' "$vf" >&2; fail=1
+    else
+        ok "$vf says $got"
+    fi
+done
+
 # SSH host keys must NOT be baked in: shipping them would let anyone who
 # downloaded the image impersonate every device built from it.
 if ls "$MNT"/etc/ssh/ssh_host_* >/dev/null 2>&1; then

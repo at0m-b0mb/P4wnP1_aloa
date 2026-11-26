@@ -206,6 +206,7 @@ for ARCH in $ARCHES; do
         -e P4_OLED="$P4_OLED" \
         -e P4_BRAND="$BRAND" \
         -e P4_BRAND_TAGLINE="$BRAND_TAGLINE" \
+        -e P4_VERSION="$VERSION" \
         "$BUILDER_TAG" /repo/image/lib/stage.sh \
         || die "image build failed for $ARCH/$VARIANT"
 
@@ -230,6 +231,7 @@ for ARCH in $ARCHES; do
         -e P4_OLED="$P4_OLED" \
         -e P4_BRAND="$BRAND" \
         -e P4_BRAND_TAGLINE="$BRAND_TAGLINE" \
+        -e P4_VERSION="$VERSION" \
         "$BUILDER_TAG" /repo/image/lib/verify.sh "/repo/image/out/$(basename "$OUT_IMG")" \
         || die "the built image failed verification; not publishing it"
 
